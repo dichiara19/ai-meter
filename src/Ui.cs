@@ -153,9 +153,17 @@ namespace AIMeter
 
         public static string ResetText(UsageWindow w, Usage u)
         {
+            if (w.ResetsAt.HasValue && w.StartedAt.HasValue && (w.ResetsAt.Value - w.StartedAt.Value).TotalHours <= 24)
+            {
+                // finestre brevi (sessione): inizio e fine, più il tempo che manca
+                var r = w.ResetsAt.Value;
+                string span = w.StartedAt.Value.ToString("HH:mm", It) + " → " + r.ToString("HH:mm", It);
+                return r > DateTime.Now ? span + ", tra " + Until(r) : span;
+            }
             if (w.ResetsAt.HasValue)
             {
                 var r = w.ResetsAt.Value;
+                if (w.Spent != null) return "si rinnova " + r.ToString("d MMM", It);
                 if ((r - DateTime.Now).TotalHours < 24 && r.Date == DateTime.Today) return "si azzera tra " + Until(r);
                 if ((r - DateTime.Now).TotalHours < 24) return "si azzera domani " + r.ToString("HH:mm", It);
                 return "si azzera " + r.ToString("ddd HH:mm", It);
@@ -319,7 +327,9 @@ namespace AIMeter
         {
             var root = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
             var top = new DockPanel { LastChildFill = true };
-            var pct = Text(Math.Round(w.Remaining).ToString(It) + "%", 13, "Text", FontWeights.SemiBold);
+            // per i crediti in denaro si mostra quanto resta, non la percentuale
+            string right = w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(w.Remaining).ToString(It) + "%";
+            var pct = Text(right, 13, "Text", FontWeights.SemiBold);
             pct.Margin = new Thickness(8, 0, 0, 0);
             DockPanel.SetDock(pct, Dock.Right);
             top.Children.Add(pct);
@@ -339,8 +349,11 @@ namespace AIMeter
             var bar = Bar(w.Remaining, LevelBrush(w.Remaining, brand), 4);
             bar.Margin = new Thickness(0, 5, 0, 0);
             root.Children.Add(bar);
-            root.ToolTip = string.Format(It, "{0}: usato {1:0}%, rimasto {2:0}%{3}", w.Label, w.Used, w.Remaining,
-                w.ResetsAt.HasValue ? "\nSi azzera " + w.ResetsAt.Value.ToString("dddd d MMMM, HH:mm", It) : "");
+            root.ToolTip = (w.Spent != null
+                    ? string.Format(It, "{0}: usati {1} di {2}", w.Label, w.Spent.Format(w.Spent.Used), w.Spent.Format(w.Spent.Limit))
+                    : string.Format(It, "{0}: usato {1:0}%, rimasto {2:0}%", w.Label, w.Used, w.Remaining))
+                + (w.StartedAt.HasValue ? "\nIniziata " + w.StartedAt.Value.ToString("dddd d MMMM, HH:mm", It) : "")
+                + (w.ResetsAt.HasValue ? "\n" + (w.Spent != null ? "Si rinnova " : "Si azzera ") + w.ResetsAt.Value.ToString("dddd d MMMM, HH:mm", It) : "");
             return root;
         }
 
@@ -455,10 +468,26 @@ namespace AIMeter
             // limiti
             var limits = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
             if (p.Usage != null && p.Usage.Windows.Count > 0)
-                foreach (var w in p.Usage.Windows.Take(4)) limits.Children.Add(UsageRow(w, p.Usage, brand));
+                foreach (var w in p.Usage.Windows.Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
             else
                 limits.Children.Add(new TextBlock { Text = "Nessun dato sui limiti per ora", FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
             stack.Children.Add(limits);
+
+            // ripartizione della settimana e crediti extra, in piccolo
+            if (p.Usage != null && p.Usage.Breakdown.Count > 0)
+            {
+                var b = Text("Questa settimana: " + string.Join(" · ", p.Usage.Breakdown.Select(kv => kv.Key + " " + Math.Round(kv.Value) + "%")), 11.5, "Text3");
+                b.Margin = new Thickness(0, 8, 0, 0);
+                b.TextWrapping = TextWrapping.Wrap;
+                stack.Children.Add(b);
+            }
+            if (p.Usage != null && !string.IsNullOrEmpty(p.Usage.CreditsNote))
+            {
+                var c = Text(p.Usage.CreditsNote, 11.5, "Text3");
+                c.Margin = new Thickness(0, p.Usage.Breakdown.Count > 0 ? 2 : 8, 0, 0);
+                c.TextWrapping = TextWrapping.Wrap;
+                stack.Children.Add(c);
+            }
 
             if (!string.IsNullOrEmpty(p.Notice))
             {
