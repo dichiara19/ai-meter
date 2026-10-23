@@ -18,7 +18,7 @@ namespace AIMeter
     /// <summary>Mattoni dell'interfaccia condivisi da widget, pannello e pillola.</summary>
     internal static class Ui
     {
-        private static readonly CultureInfo It = new CultureInfo("it-IT");
+        private static CultureInfo It { get { return L.Culture; } }
         private static readonly Dictionary<string, BitmapImage> Logos = new Dictionary<string, BitmapImage>();
 
         // ------------------------------------------------------------ testo e icone
@@ -164,19 +164,25 @@ namespace AIMeter
         {
             if (t == DateTime.MinValue) return "";
             var s = (DateTime.Now - t).TotalSeconds;
-            if (s < 60) return "ora";
-            if (s < 3600) return (int)(s / 60) + " min";
-            if (s < 86400) return (int)(s / 3600) + " h";
-            return (int)(s / 86400) + " g";
+            if (s < 60) return L.T("now");
+            if (s < 3600) return L.F("{0} min", (int)(s / 60));
+            if (s < 86400) return L.F("{0} h", (int)(s / 3600));
+            return L.F("{0} d", (int)(s / 86400));
+        }
+
+        /// <summary>"ora" oppure "5 min fa": quanto è vecchio un dato, in una frase.</summary>
+        public static string AgoPhrase(DateTime t)
+        {
+            return (DateTime.Now - t).TotalSeconds < 60 ? L.T("just now") : L.F("{0} ago", Ago(t));
         }
 
         public static string Until(DateTime t)
         {
             var span = t - DateTime.Now;
             if (span.TotalSeconds < 0) span = TimeSpan.Zero;
-            if (span.TotalDays >= 1) return (int)span.TotalDays + " g " + span.Hours + " h";
-            if (span.TotalHours >= 1) return (int)span.TotalHours + " h " + span.Minutes.ToString("00") + " min";
-            return Math.Max(1, (int)span.TotalMinutes) + " min";
+            if (span.TotalDays >= 1) return L.F("{0} d {1} h", (int)span.TotalDays, span.Hours);
+            if (span.TotalHours >= 1) return L.F("{0} h {1} min", (int)span.TotalHours, span.Minutes.ToString("00"));
+            return L.F("{0} min", Math.Max(1, (int)span.TotalMinutes));
         }
 
         public static string ResetText(UsageWindow w, Usage u)
@@ -186,18 +192,24 @@ namespace AIMeter
                 // finestre brevi (sessione): inizio e fine, più il tempo che manca
                 var r = w.ResetsAt.Value;
                 string span = w.StartedAt.Value.ToString("HH:mm", It) + " → " + r.ToString("HH:mm", It);
-                return r > DateTime.Now ? span + ", tra " + Until(r) : span;
+                return r > DateTime.Now ? L.F("{0}, in {1}", span, Until(r)) : span;
             }
             if (w.ResetsAt.HasValue)
             {
                 var r = w.ResetsAt.Value;
-                if (w.Spent != null) return "si rinnova " + r.ToString("d MMM", It);
-                if ((r - DateTime.Now).TotalHours < 24 && r.Date == DateTime.Today) return "si azzera tra " + Until(r);
-                if ((r - DateTime.Now).TotalHours < 24) return "si azzera domani " + r.ToString("HH:mm", It);
-                return "si azzera " + r.ToString("ddd HH:mm", It);
+                if (w.Spent != null) return L.F("renews {0}", r.ToString("d MMM", It));
+                if ((r - DateTime.Now).TotalHours < 24 && r.Date == DateTime.Today) return L.F("resets in {0}", Until(r));
+                if ((r - DateTime.Now).TotalHours < 24) return L.F("resets tomorrow {0}", r.ToString("HH:mm", It));
+                return L.F("resets {0}", r.ToString("ddd HH:mm", It));
             }
-            if (u.Source == "cache") return "rilevato " + (Ago(u.At) == "ora" ? "ora" : Ago(u.At) + " fa");
+            if (u.Source == "cache") return L.F("updated {0}", AgoPhrase(u.At));
             return "";
+        }
+
+        /// <summary>Nome del limite nella lingua attiva: l'etichetta è una chiave inglese, l'eventuale suffisso (modello) resta com'è.</summary>
+        public static string LabelOf(UsageWindow w)
+        {
+            return w.Suffix == null ? L.T(w.Label) : L.T(w.Label) + " · " + w.Suffix;
         }
 
         public static string PrettyModel(string m)
@@ -329,8 +341,8 @@ namespace AIMeter
             {
                 var w = Primary(p.Usage);
                 string n = p.Name;
-                return w == null ? n + ": nessun dato" : n + ": " + Math.Round(w.Remaining) + "% rimasto (" + w.Label + ")" +
-                       (w.ResetsAt.HasValue ? ", si azzera alle " + w.ResetsAt.Value.ToString("HH:mm") : "");
+                return w == null ? L.F("{0}: no data", n) : L.F("{0}: {1}% left ({2})", n, Math.Round(w.Remaining), LabelOf(w)) +
+                       (w.ResetsAt.HasValue ? L.F(", resets at {0}", w.ResetsAt.Value.ToString("HH:mm", It)) : "");
             }));
         }
 
@@ -356,13 +368,13 @@ namespace AIMeter
             var root = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
             var top = new DockPanel { LastChildFill = true };
             // per i crediti in denaro si mostra quanto resta, non la percentuale
-            string right = w.RightText ?? (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(w.Remaining).ToString(It) + "%");
+            string right = w.RightText != null ? L.T(w.RightText) : (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(w.Remaining).ToString(It) + "%");
             var pct = Text(right, 13, "Text", FontWeights.SemiBold);
             pct.Margin = new Thickness(8, 0, 0, 0);
             DockPanel.SetDock(pct, Dock.Right);
             top.Children.Add(pct);
             var left = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Bottom };
-            var lbl = new System.Windows.Documents.Run(w.Label);
+            var lbl = new System.Windows.Documents.Run(LabelOf(w));
             lbl.SetResourceReference(TextElement_Foreground, "Text2");
             left.Inlines.Add(lbl);
             string reset = ResetText(w, u);
@@ -377,12 +389,13 @@ namespace AIMeter
             var bar = Bar(w.Remaining, LevelBrush(w.Remaining, brand), 4);
             bar.Margin = new Thickness(0, 5, 0, 0);
             root.Children.Add(bar);
+            string when = "dddd d MMMM, HH:mm";
             root.ToolTip = (w.Spent != null
-                    ? string.Format(It, "{0}: usati {1} di {2}", w.Label, w.Spent.Format(w.Spent.Used), w.Spent.Format(w.Spent.Limit))
-                    : string.Format(It, "{0}: usato {1:0}%, rimasto {2:0}%", w.Label, w.Used, w.Remaining))
-                + (w.Detail != null ? "\n" + w.Detail : "")
-                + (w.StartedAt.HasValue ? "\nIniziata " + w.StartedAt.Value.ToString("dddd d MMMM, HH:mm", It) : "")
-                + (w.ResetsAt.HasValue ? "\n" + (w.Spent != null ? "Si rinnova " : "Si azzera ") + w.ResetsAt.Value.ToString("dddd d MMMM, HH:mm", It) : "");
+                    ? L.F("{0}: {1} used of {2}", LabelOf(w), w.Spent.Format(w.Spent.Used), w.Spent.Format(w.Spent.Limit))
+                    : L.F("{0}: {1:0}% used, {2:0}% left", LabelOf(w), w.Used, w.Remaining))
+                + (w.Detail != null ? "\n" + w.Detail() : "")
+                + (w.StartedAt.HasValue ? "\n" + L.F("Started {0}", w.StartedAt.Value.ToString(when, It)) : "")
+                + (w.ResetsAt.HasValue ? "\n" + L.F(w.Spent != null ? "Renews {0}" : "Resets {0}", w.ResetsAt.Value.ToString(when, It)) : "");
             return root;
         }
 
@@ -414,11 +427,11 @@ namespace AIMeter
             g.Children.Add(dot);
 
             var texts = new StackPanel();
-            texts.Children.Add(Text(s.Title, 13, s.Status == "idle" && (DateTime.Now - s.Updated).TotalHours > 3 ? "Text2" : "Text"));
-            var meta = new List<string> { s.Kind };
+            texts.Children.Add(Text(L.T(s.Title), 13, s.Status == "idle" && (DateTime.Now - s.Updated).TotalHours > 3 ? "Text2" : "Text"));
+            var meta = new List<string> { L.T(s.Kind) };
             string model = PrettyModel(s.Model);
             if (model != null) meta.Add(model);
-            if (s.Status == "busy") meta.Add("al lavoro");
+            if (s.Status == "busy") meta.Add(L.T("working"));
             texts.Children.Add(Text(string.Join(" · ", meta), 11.5, "Text3"));
             Grid.SetColumn(texts, 1);
             g.Children.Add(texts);
@@ -431,7 +444,7 @@ namespace AIMeter
                 Grid.SetColumn(ago, 2);
                 g.Children.Add(ago);
             }
-            g.ToolTip = s.Title + "\n" + string.Join(" · ", meta) + (s.Status != "app" ? "\nUltima attività: " + s.Updated.ToString("HH:mm", It) : "");
+            g.ToolTip = L.T(s.Title) + "\n" + string.Join(" · ", meta) + (s.Status != "app" ? "\n" + L.F("Last activity: {0}", s.Updated.ToString("HH:mm", It)) : "");
             return g;
         }
 
@@ -460,7 +473,7 @@ namespace AIMeter
             var count = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             if (p.Running)
             {
-                count.Children.Add(Text(p.Active + (p.Active == 1 ? " sessione" : " sessioni"), 12, "Text2"));
+                count.Children.Add(Text(L.N(p.Active, "{0} session", "{0} sessions"), 12, "Text2"));
                 if (p.Busy > 0)
                 {
                     var pill = new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(6, 1, 7, 1), Margin = new Thickness(6, 0, 0, 0) };
@@ -471,11 +484,11 @@ namespace AIMeter
                     sp.Children.Add(d);
                     sp.Children.Add(Text(p.Busy.ToString(It), 11.5, "Text", FontWeights.SemiBold));
                     pill.Child = sp;
-                    pill.ToolTip = p.Busy == 1 ? "1 sessione sta lavorando adesso" : p.Busy + " sessioni stanno lavorando adesso";
+                    pill.ToolTip = L.N(p.Busy, "{0} session is working right now", "{0} sessions are working right now");
                     count.Children.Add(pill);
                 }
             }
-            else count.Children.Add(Text("non attivo", 12, "Text3"));
+            else count.Children.Add(Text(L.T("not active"), 12, "Text3"));
             DockPanel.SetDock(count, Dock.Right);
             head.Children.Add(count);
 
@@ -499,14 +512,13 @@ namespace AIMeter
             if (p.Usage != null && p.Usage.Windows.Count > 0)
                 foreach (var w in p.Usage.Windows.Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
             else if (!p.NeedsLogin)
-                limits.Children.Add(new TextBlock { Text = "Nessun dato sui limiti per ora", FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
+                limits.Children.Add(new TextBlock { Text = L.T("No limit data yet"), FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
             stack.Children.Add(limits);
 
             // dato sui limiti non in tempo reale: lo si dice nella scheda, una volta sola
             if (p.Usage != null && p.Usage.Source != "live" && string.IsNullOrEmpty(p.Notice))
             {
-                string ago = Ago(p.Usage.At);
-                var st = Text("Limiti aggiornati " + (ago == "ora" ? "ora" : ago + " fa"), 11.5, "Text3");
+                var st = Text(L.F("Limits updated {0}", AgoPhrase(p.Usage.At)), 11.5, "Text3");
                 st.Margin = new Thickness(0, 8, 0, 0);
                 stack.Children.Add(st);
             }
@@ -514,14 +526,14 @@ namespace AIMeter
             // ripartizione della settimana e crediti extra, in piccolo
             if (p.Usage != null && p.Usage.Breakdown.Count > 0)
             {
-                var b = Text("Questa settimana: " + string.Join(" · ", p.Usage.Breakdown.Select(kv => kv.Key + " " + Math.Round(kv.Value) + "%")), 11.5, "Text3");
+                var b = Text(L.F("This week: {0}", string.Join(" · ", p.Usage.Breakdown.Select(kv => kv.Key + " " + Math.Round(kv.Value) + "%"))), 11.5, "Text3");
                 b.Margin = new Thickness(0, 8, 0, 0);
                 b.TextWrapping = TextWrapping.Wrap;
                 stack.Children.Add(b);
             }
-            if (p.Usage != null && !string.IsNullOrEmpty(p.Usage.CreditsNote))
+            if (p.Usage != null && p.Usage.CreditsNote != null)
             {
-                var c = Text(p.Usage.CreditsNote, 11.5, "Text3");
+                var c = Text(p.Usage.CreditsNote(), 11.5, "Text3");
                 c.Margin = new Thickness(0, p.Usage.Breakdown.Count > 0 ? 2 : 8, 0, 0);
                 c.TextWrapping = TextWrapping.Wrap;
                 stack.Children.Add(c);
@@ -536,7 +548,7 @@ namespace AIMeter
                 note.Children.Add(ic);
                 if (p.NeedsLogin && login != null)
                 {
-                    var link = new Button { Content = "Accedi", Padding = new Thickness(4, 0, 4, 1), FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
+                    var link = new Button { Content = L.T("Sign in"), Padding = new Thickness(4, 0, 4, 1), FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
                     link.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
                     link.Click += (o, e) => login(p.Id);
                     DockPanel.SetDock(link, Dock.Right);
@@ -561,7 +573,7 @@ namespace AIMeter
                 foreach (var s in ordered.Take(6)) stack.Children.Add(SessionRow(s, brand));
                 if (ordered.Count > 6)
                 {
-                    var more = Text("+" + (ordered.Count - 6) + " altre sessioni", 11.5, "Text3");
+                    var more = Text(L.F("+{0} more sessions", ordered.Count - 6), 11.5, "Text3");
                     more.Margin = new Thickness(18, 2, 0, 0);
                     stack.Children.Add(more);
                 }

@@ -136,12 +136,12 @@ namespace AIMeter
                 Settings.Save();
                 try { Settings.StartsWithWindows = true; } catch (Exception) { }
             }
+            L.Init(Settings.Language);
             collector = new Collector(Settings);
             Theme.Apply(Settings);
 
-            flyout = new Flyout(this);
+            CreateFlyout();
             hideDetails.Tick += (o, e) => { hideDetails.Stop(); if (flyout.HoverMode && !flyout.IsMouseOver && (pill == null || !pill.IsMouseOver)) flyout.Hide(); };
-            flyout.IsVisibleChanged += (o, e) => { if (!flyout.IsVisible) flyoutHiddenAt = DateTime.Now; UpdateVisibility(); };
 
             CreateTray();
             ApplySettings();
@@ -255,6 +255,26 @@ namespace AIMeter
             Rerender();
         }
 
+        private void CreateFlyout()
+        {
+            flyout = new Flyout(this);
+            flyout.IsVisibleChanged += (o, e) => { if (!flyout.IsVisible) flyoutHiddenAt = DateTime.Now; UpdateVisibility(); };
+        }
+
+        /// <summary>Cambio lingua al volo: ricrea finestre e menu con i nuovi testi e rilegge i limiti.</summary>
+        public void ApplyLanguage()
+        {
+            L.Init(Settings.Language);
+            if (desktop != null) { desktop.Close(); desktop = null; }
+            if (pill != null) { pill.Close(); pill = null; }
+            if (dock != null) { dock.Close(); dock = null; }
+            flyout.Close();
+            CreateFlyout();
+            ApplySettings();   // etichette, note e dettagli si traducono al momento di mostrarli: basta ridisegnare
+            if (settingsWindow != null) settingsWindow.Build();
+            wake.Set();        // gli avvisi dei servizi vengono riscritti alla prossima raccolta, subito
+        }
+
         public bool IsExpanded(string id)
         {
             return id == "claude" ? Settings.ExpandedClaude : id == "copilot" ? Settings.ExpandedCopilot : Settings.ExpandedOpenAI;
@@ -323,11 +343,11 @@ namespace AIMeter
             try
             {
                 if (UseWslForLogin())
-                    Process.Start(new ProcessStartInfo("wsl.exe", "-d " + Settings.WslDistro + " -- bash -lc \"claude auth login; echo; read -p 'Fatto. Premi Invio per chiudere.'\"") { UseShellExecute = true });
+                    Process.Start(new ProcessStartInfo("wsl.exe", "-d " + Settings.WslDistro + " -- bash -lc \"claude auth login; echo; read -p '" + L.T("Done. Press Enter to close.").Replace("'", "") + "'\"") { UseShellExecute = true });
                 else
                 {
                     string cli = ClaudeProvider.CliPath();
-                    if (cli == null) { MessageBox.Show("Non trovo Claude Code su questo PC.", "AI Meter"); return; }
+                    if (cli == null) { MessageBox.Show(L.T("Claude Code was not found on this PC."), "AI Meter"); return; }
                     Process.Start(new ProcessStartInfo("cmd.exe", "/c \"\"" + cli + "\" auth login & pause\"") { UseShellExecute = true });
                 }
             }
@@ -466,8 +486,8 @@ namespace AIMeter
         private void ShowPrivacyNotice()
         {
             tray.BalloonTipClicked += (o, e) => OpenSettings();
-            tray.ShowBalloonTip(20000, "AI Meter è attivo",
-                "Legge sessioni e limiti dai file locali. Solo i limiti Claude in tempo reale interpellano Anthropic con il tuo accesso di Claude Code: puoi disattivarli nelle Impostazioni.",
+            tray.ShowBalloonTip(20000, L.T("AI Meter is running"),
+                L.T("It reads sessions and limits from local files. Only real-time Claude limits contact Anthropic with your Claude Code login: you can turn them off in Settings."),
                 Forms.ToolTipIcon.Info);
         }
 
@@ -495,11 +515,11 @@ namespace AIMeter
         public void ShowMenu(Window anchor)
         {
             var menu = new ContextMenu();
-            menu.Items.Add(Item("Apri pannello", "\uE8A7", () => ToggleFlyout()));
+            menu.Items.Add(Item(L.T("Open panel"), "\uE8A7", () => ToggleFlyout()));
             menu.Items.Add(new Separator());
-            menu.Items.Add(Item("Widget sul desktop", "\uE7F4", () => { Settings.DesktopWidget = !Settings.DesktopWidget; Settings.Save(); ApplySettings(); }, Settings.DesktopWidget));
-            menu.Items.Add(Item("Nella barra delle applicazioni", "\uE7C4", () => SetTaskbarDock(!Settings.TaskbarDock), Settings.TaskbarDock));
-            menu.Items.Add(Item("Sovrimpressione compatta", "\uE718", () =>
+            menu.Items.Add(Item(L.T("Desktop widget"), "\uE7F4", () => { Settings.DesktopWidget = !Settings.DesktopWidget; Settings.Save(); ApplySettings(); }, Settings.DesktopWidget));
+            menu.Items.Add(Item(L.T("In the taskbar"), "\uE7C4", () => SetTaskbarDock(!Settings.TaskbarDock), Settings.TaskbarDock));
+            menu.Items.Add(Item(L.T("Compact overlay"), "\uE718", () =>
             {
                 Settings.Overlay = !Settings.Overlay;
                 if (Settings.Overlay) Settings.TaskbarDock = false;
@@ -509,17 +529,17 @@ namespace AIMeter
             {
                 var ids = Last == null ? new string[0] : Last.Providers.Select(p => p.Id).ToArray();
                 bool all = ids.Length > 0 && ids.All(IsExpanded);
-                menu.Items.Add(Item("Espandi sessioni", "\uE8C4", () =>
+                menu.Items.Add(Item(L.T("Expand sessions"), "\uE8C4", () =>
                 {
                     foreach (var id in ids) SetExpanded(id, !all);
                     Settings.Save(); Rerender();
                 }, all));
             }
             menu.Items.Add(new Separator());
-            menu.Items.Add(Item("Aggiorna adesso", "\uE72C", RefreshNow));
-            menu.Items.Add(Item("Impostazioni", "\uE713", OpenSettings));
+            menu.Items.Add(Item(L.T("Refresh now"), "\uE72C", RefreshNow));
+            menu.Items.Add(Item(L.T("Settings"), "\uE713", OpenSettings));
             menu.Items.Add(new Separator());
-            menu.Items.Add(Item("Esci", "\uE7E8", Exit));
+            menu.Items.Add(Item(L.T("Exit"), "\uE7E8", Exit));
 
             if (anchor != null)
             {

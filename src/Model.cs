@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -9,14 +9,15 @@ namespace AIMeter
 {
     internal sealed class UsageWindow
     {
-        public string Label;
+        public string Label;      // chiave inglese, tradotta al momento di mostrarla (Ui.LabelOf)
+        public string Suffix;     // aggiunta non tradotta, es. il nome del modello
         public string Short;      // etichetta breve per la pillola: "5h", "7g"
         public double Used;       // percentuale usata 0-100
         public DateTime? ResetsAt; // ora locale
         public DateTime? StartedAt; // inizio della finestra, se noto o ricavabile (fine − durata)
         public Money Spent;       // per i crediti in denaro: speso e limite
-        public string RightText;  // testo al posto della percentuale (es. "illimitate")
-        public string Detail;     // dettaglio per il suggerimento (es. "212 di 300 rimaste")
+        public string RightText;  // chiave inglese al posto della percentuale (es. "unlimited")
+        public Func<string> Detail; // dettaglio per il suggerimento, calcolato nella lingua attiva
         public double Remaining { get { return Math.Max(0, Math.Min(100, 100 - Used)); } }
     }
 
@@ -30,7 +31,10 @@ namespace AIMeter
         public string Format(double v)
         {
             string sym = Currency == "EUR" ? "€" : Currency == "USD" ? "$" : Currency == "GBP" ? "£" : Currency;
-            return v.ToString("0.00", new CultureInfo("it-IT")) + " " + sym;
+            // formato valuta della lingua attiva (es. $226.72 in inglese, 226,72 $ in italiano), con il simbolo del servizio
+            var nf = (NumberFormatInfo)L.Culture.NumberFormat.Clone();
+            nf.CurrencySymbol = sym;
+            return v.ToString("C2", nf);
         }
     }
 
@@ -41,8 +45,8 @@ namespace AIMeter
         public DateTime At;       // quando il dato è stato rilevato
         /// <summary>Come si ripartisce l'uso settimanale (es. Claude Code 98%, Cowork 2%).</summary>
         public List<KeyValuePair<string, double>> Breakdown = new List<KeyValuePair<string, double>>();
-        /// <summary>Riga di stato dei crediti extra / a consumo, se il servizio li prevede.</summary>
-        public string CreditsNote;
+        /// <summary>Riga di stato dei crediti extra / a consumo, calcolata nella lingua attiva al momento di mostrarla.</summary>
+        public Func<string> CreditsNote;
 
         /// <summary>Stessi dati, marcati come non più in tempo reale.</summary>
         public Usage AsCache()

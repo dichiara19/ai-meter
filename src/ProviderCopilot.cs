@@ -49,14 +49,14 @@ namespace AIMeter
         public override ProviderState Collect(Probe p)
         {
             var st = new ProviderState { Id = "copilot", Name = "Copilot" };
-            if (p.IsRunning("code.exe")) st.Sessions.Add(new Session { Kind = "VS Code", Title = "VS Code aperto", Status = "app" });
+            if (p.IsRunning("code.exe")) st.Sessions.Add(new Session { Kind = "VS Code", Title = "VS Code open", Status = "app" });
             st.Running = st.Sessions.Count > 0 || p.IsRunning("copilot.exe");
 
             string token = GitHubAuth.Token();
             if (token == null)
             {
                 st.NeedsLogin = true;
-                st.Notice = "Collega GitHub per vedere richieste premium e quote";
+                st.Notice = L.T("Connect GitHub to see premium requests and quotas");
                 return st;
             }
 
@@ -70,7 +70,7 @@ namespace AIMeter
             }
             st.Plan = plan;
             if (live != null) st.Usage = (DateTime.Now - live.At).TotalMinutes > interval + 2 ? live.AsCache() : live;
-            if (needsLogin) { st.NeedsLogin = true; st.Notice = "Accesso a GitHub scaduto: ricollegalo"; }
+            if (needsLogin) { st.NeedsLogin = true; st.Notice = L.T("GitHub sign-in expired: connect it again"); }
             return st;
         }
 
@@ -117,9 +117,9 @@ namespace AIMeter
             var snaps = Json.Obj(d, "quota_snapshots");
             if (snaps != null)
             {
-                AddQuota(u, Json.Obj(snaps, "premium_interactions"), "Richieste premium", reset, true);
+                AddQuota(u, Json.Obj(snaps, "premium_interactions"), "Premium requests", reset, true);
                 AddQuota(u, Json.Obj(snaps, "chat"), "Chat", reset, false);
-                AddQuota(u, Json.Obj(snaps, "completions"), "Completamenti", reset, false);
+                AddQuota(u, Json.Obj(snaps, "completions"), "Completions", reset, false);
             }
             // piano gratuito: totali mensili e quanto ne resta
             var monthly = Json.Obj(d, "monthly_quotas");
@@ -131,9 +131,9 @@ namespace AIMeter
                     if (total == null || rem == null || total <= 0) continue;
                     u.Windows.Add(new UsageWindow
                     {
-                        Label = k == "chat" ? "Chat" : "Completamenti", Short = u.Windows.Count == 0 ? "mese" : "m",
+                        Label = k == "chat" ? "Chat" : "Completions", Short = u.Windows.Count == 0 ? "mese" : "m",
                         Used = Math.Max(0, Math.Min(100, (total.Value - rem.Value) / total.Value * 100)), ResetsAt = reset,
-                        Detail = string.Format(CultureInfo.InvariantCulture, "{0:0} di {1:0} rimasti", rem.Value, total.Value),
+                        Detail = Left(rem.Value, total.Value),
                     });
                 }
             return u.Windows.Count > 0 ? u : null;
@@ -151,8 +151,8 @@ namespace AIMeter
             {
                 Label = label, Short = primary && !u.Windows.Any(w => w.Short == "mese") ? "mese" : "m",
                 Used = unlimited ? 0 : 100 - pctLeft.Value, ResetsAt = reset,
-                RightText = unlimited ? "illimitate" : null,
-                Detail = !unlimited && ent != null && rem != null ? string.Format(CultureInfo.InvariantCulture, "{0:0} di {1:0} rimaste", rem.Value, ent.Value) : null,
+                RightText = unlimited ? "unlimited" : null,
+                Detail = !unlimited && ent != null && rem != null ? Left(rem.Value, ent.Value) : null,
             });
         }
 
@@ -170,6 +170,8 @@ namespace AIMeter
                 default: return plan;
             }
         }
+
+        private static Func<string> Left(double rem, double total) { return () => L.F("{0:0} of {1:0} left", rem, total); }
 
         private static DateTime? ParseDate(string s)
         {
@@ -268,7 +270,7 @@ namespace AIMeter
 
         public GitHubLoginWindow()
         {
-            Title = "Collega GitHub Copilot";
+            Title = L.T("Connect GitHub Copilot");
             Width = 460;
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
@@ -280,11 +282,11 @@ namespace AIMeter
             SourceInitialized += (o, e) => Ui.ApplyBackdrop(this, 2, false);
 
             var root = new StackPanel { Margin = new Thickness(24, 40, 24, 24) };
-            var h = Ui.Text("Collega GitHub Copilot", 20, "Text", FontWeights.SemiBold);
+            var h = Ui.Text(L.T("Connect GitHub Copilot"), 20, "Text", FontWeights.SemiBold);
             h.FontFamily = Theme.DisplayFont;
             root.Children.Add(h);
-            var info = Ui.Text("Inserisci questo codice nella pagina di GitHub che si apre. AI Meter userà l'accesso solo per leggere le quote di Copilot. "
-                             + "GitHub mostrerà la richiesta come \"Visual Studio Code\": è l'app ufficiale di Copilot, attraverso cui si leggono le quote.", 13, "Text2");
+            var info = Ui.Text(L.T("Enter this code on the GitHub page that opens. AI Meter will use the access only to read your Copilot quotas.") + " "
+                             + L.T("GitHub will show the request as \"Visual Studio Code\": it is the official Copilot app, through which quotas are read."), 13, "Text2");
             info.TextWrapping = TextWrapping.Wrap;
             info.TextTrimming = TextTrimming.None;
             info.Margin = new Thickness(0, 8, 0, 16);
@@ -293,16 +295,16 @@ namespace AIMeter
             code.FontFamily = new System.Windows.Media.FontFamily("Cascadia Mono, Consolas");
             code.HorizontalAlignment = HorizontalAlignment.Center;
             root.Children.Add(code);
-            status = Ui.Text("Richiedo il codice a GitHub…", 12, "Text3");
+            status = Ui.Text(L.T("Requesting the code from GitHub…"), 12, "Text3");
             status.HorizontalAlignment = HorizontalAlignment.Center;
             status.Margin = new Thickness(0, 6, 0, 18);
             root.Children.Add(status);
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            open = new Button { Content = "Copia il codice e apri GitHub", IsEnabled = false, Margin = new Thickness(0, 0, 8, 0) };
+            open = new Button { Content = L.T("Copy the code and open GitHub"), IsEnabled = false, Margin = new Thickness(0, 0, 8, 0) };
             open.SetResourceReference(StyleProperty, "AccentButton");
             open.Click += (o, e) => OpenGitHub();
-            var cancel = new Button { Content = "Annulla" };
+            var cancel = new Button { Content = L.T("Cancel") };
             cancel.SetResourceReference(StyleProperty, "StdButton");
             cancel.Click += (o, e) => Close();
             buttons.Children.Add(open);
@@ -319,17 +321,17 @@ namespace AIMeter
             if (dc == null) return;
             try { Clipboard.SetText(dc.User); } catch (System.Runtime.InteropServices.COMException) { }
             Process.Start(dc.Uri);
-            status.Text = "Codice copiato. Conferma su GitHub, poi torna qui.";
+            status.Text = L.T("Code copied. Confirm on GitHub, then come back here.");
         }
 
         private async Task Run()
         {
             dc = await Task.Run(() => GitHubAuth.Start());
             if (closed) return;
-            if (dc == null) { status.Text = "GitHub non risponde. Riprova più tardi."; return; }
+            if (dc == null) { status.Text = L.T("GitHub is not responding. Try again later."); return; }
             code.Text = dc.User;
             open.IsEnabled = true;
-            status.Text = "In attesa della conferma su GitHub…";
+            status.Text = L.T("Waiting for confirmation on GitHub…");
             var until = DateTime.Now.AddSeconds(dc.ExpiresIn);
             int wait = Math.Max(5, dc.Interval);
             while (!closed && DateTime.Now < until)
@@ -341,16 +343,16 @@ namespace AIMeter
                 if (r == "ok")
                 {
                     GitHubAuth.Save(token);
-                    status.Text = "Collegato.";
+                    status.Text = L.T("Connected.");
                     if (SignedIn != null) SignedIn();
                     await Task.Delay(800);
                     Close();
                     return;
                 }
                 if (r == "slow_down") wait += 5;
-                else if (r != "pending") { status.Text = r == "access_denied" ? "Accesso negato su GitHub." : "Il codice è scaduto. Riapri questa finestra."; return; }
+                else if (r != "pending") { status.Text = L.T(r == "access_denied" ? "Access denied on GitHub." : "The code has expired. Open this window again."); return; }
             }
-            if (!closed) status.Text = "Il codice è scaduto. Riapri questa finestra.";
+            if (!closed) status.Text = L.T("The code has expired. Open this window again.");
         }
     }
 }

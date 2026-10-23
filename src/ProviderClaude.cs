@@ -46,7 +46,7 @@ namespace AIMeter
                 if (p.PathOf(kv.Key).IndexOf(@"\WindowsApps\Claude_", StringComparison.OrdinalIgnoreCase) >= 0) { app = true; break; }
             }
             if (app && S.ClaudeShowChat)
-                st.Sessions.Add(new Session { Kind = "Chat", Title = "App Claude aperta", Status = "app" });
+                st.Sessions.Add(new Session { Kind = "Chat", Title = "Claude app open", Status = "app" });
             if (S.ClaudeShowCode) st.Sessions.AddRange(CodeSessions(p));
             if (S.ClaudeShowCowork) st.Sessions.AddRange(CoworkSessions(p));
             st.Running = app || st.Sessions.Count > 0;
@@ -89,7 +89,7 @@ namespace AIMeter
                     list.Add(new Session
                     {
                         Kind = kind,
-                        Title = Json.Str(d, "name") ?? Json.Str(m, "title") ?? Probe.LastSegment(Json.Str(d, "cwd")) ?? "Sessione",
+                        Title = Json.Str(d, "name") ?? Json.Str(m, "title") ?? Probe.LastSegment(Json.Str(d, "cwd")) ?? "Session",
                         Status = (Json.Str(d, "status") ?? "idle") == "busy" ? "busy" : "idle",
                         Model = Json.Str(m, "model"),
                         Updated = Json.FromUnixMs(Json.Num(d, "updatedAt") ?? Json.Num(d, "statusUpdatedAt")) ?? file.LastWriteTime,
@@ -132,7 +132,7 @@ namespace AIMeter
                     list.Add(new Session
                     {
                         Kind = "Cowork",
-                        Title = Json.Str(d, "title") ?? "Attività Cowork",
+                        Title = Json.Str(d, "title") ?? "Cowork task",
                         Status = (DateTime.Now - last).TotalSeconds < 90 ? "busy" : "idle",
                         Model = Json.Str(d, "model"),
                         Updated = last,
@@ -168,11 +168,11 @@ namespace AIMeter
 
             if (!S.ClaudeLiveUsage) return;
             if (creds == null && !p.WslUp && wslHasClaude == true)
-                st.Notice = "WSL è spento: limiti all'ultimo aggiornamento";
+                st.Notice = L.T("WSL is off: limits from the last update");
             else if (creds == null || needsLogin)
             {
                 st.NeedsLogin = true;
-                st.Notice = "Collega l'account per i limiti in tempo reale";
+                st.Notice = L.T("Connect your account for real-time limits");
             }
         }
 
@@ -249,22 +249,22 @@ namespace AIMeter
                     if (pct == null) continue;
                     DateTime? resets = Json.FromIso(Json.Str(l, "resets_at"));
                     if (kind == "session")
-                        u.Windows.Add(new UsageWindow { Label = "Sessione 5 h", Short = "5h", Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddHours(-5) : (DateTime?)null });
+                        u.Windows.Add(new UsageWindow { Label = "Session 5 h", Short = "5h", Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddHours(-5) : (DateTime?)null });
                     else if (kind == "weekly_all")
-                        u.Windows.Add(new UsageWindow { Label = "Settimana", Short = "7g", Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddDays(-7) : (DateTime?)null });
+                        u.Windows.Add(new UsageWindow { Label = "Week", Short = "7g", Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddDays(-7) : (DateTime?)null });
                     else if (kind == "weekly_scoped")
                     {
                         string model = Json.Str(Json.Obj(Json.Obj(l, "scope"), "model"), "display_name");
-                        u.Windows.Add(new UsageWindow { Label = "Settimana · " + (model ?? "modello"), Short = "m", Used = pct.Value, ResetsAt = resets });
+                        u.Windows.Add(new UsageWindow { Label = "Week", Suffix = model ?? "model", Short = "m", Used = pct.Value, ResetsAt = resets });
                     }
                 }
             }
             if (u.Windows.Count == 0)
             {
-                AddWindow(u, d, "five_hour", "Sessione 5 h", "5h", TimeSpan.FromHours(5));
-                AddWindow(u, d, "seven_day", "Settimana", "7g", TimeSpan.FromDays(7));
-                AddWindow(u, d, "seven_day_opus", "Settimana · Opus", "m", null);
-                AddWindow(u, d, "seven_day_sonnet", "Settimana · Sonnet", "m", null);
+                AddWindow(u, d, "five_hour", "Session 5 h", null, "5h", TimeSpan.FromHours(5));
+                AddWindow(u, d, "seven_day", "Week", null, "7g", TimeSpan.FromDays(7));
+                AddWindow(u, d, "seven_day_opus", "Week", "Opus", "m", null);
+                AddWindow(u, d, "seven_day_sonnet", "Week", "Sonnet", "m", null);
             }
 
             // crediti in dollari con rinnovo: iguana_necktie sono i crediti per le sessioni cloud;
@@ -276,7 +276,7 @@ namespace AIMeter
                 if (limit == null || limit <= 0 || used == null) continue;
                 u.Windows.Add(new UsageWindow
                 {
-                    Label = kv.Key == "iguana_necktie" ? "Crediti sessioni cloud" : "Credito promozionale",
+                    Label = kv.Key == "iguana_necktie" ? "Cloud session credits" : "Promotional credit",
                     Short = "$", Used = Json.Num(g, "utilization") ?? used.Value / limit.Value * 100,
                     ResetsAt = Json.FromIso(Json.Str(g, "resets_at")), Spent = new Money { Used = used.Value, Limit = limit.Value, Currency = "USD" },
                 });
@@ -288,9 +288,9 @@ namespace AIMeter
             {
                 double scale = Math.Pow(10, Json.Num(extra, "decimal_places") ?? 2);
                 var m = new Money { Used = (Json.Num(extra, "used_credits") ?? 0) / scale, Limit = (Json.Num(extra, "monthly_limit") ?? 0) / scale, Currency = Json.Str(extra, "currency") ?? "USD" };
-                string state = Json.Bool(extra, "is_enabled") ? "attivi"
-                    : Json.Str(extra, "disabled_reason") == "out_of_credits" ? "sospesi, credito esaurito" : "disattivati";
-                u.CreditsNote = "Crediti extra: " + m.Format(m.Used) + " di " + m.Format(m.Limit) + " al mese · " + state;
+                string state = Json.Bool(extra, "is_enabled") ? "active"
+                    : Json.Str(extra, "disabled_reason") == "out_of_credits" ? "paused, out of credits" : "disabled";
+                u.CreditsNote = () => L.F("Extra usage: {0} of {1} per month · {2}", m.Format(m.Used), m.Format(m.Limit), L.T(state));
             }
 
             // come si ripartisce la settimana tra Claude Code, chat, Cowork…
@@ -305,7 +305,7 @@ namespace AIMeter
             return u.Windows.Count > 0 ? u : null;
         }
 
-        private static void AddWindow(Usage u, Dictionary<string, object> d, string key, string label, string shortLabel, TimeSpan? length)
+        private static void AddWindow(Usage u, Dictionary<string, object> d, string key, string label, string suffix, string shortLabel, TimeSpan? length)
         {
             var w = Json.Obj(d, key);
             double? used = Json.Num(w, "utilization");
@@ -313,7 +313,7 @@ namespace AIMeter
             DateTime? resets = Json.FromIso(Json.Str(w, "resets_at"));
             u.Windows.Add(new UsageWindow
             {
-                Label = label, Short = shortLabel, Used = used.Value, ResetsAt = resets,
+                Label = label, Suffix = suffix, Short = shortLabel, Used = used.Value, ResetsAt = resets,
                 StartedAt = resets.HasValue && length.HasValue ? resets.Value - length.Value : (DateTime?)null,
             });
         }
@@ -356,8 +356,8 @@ namespace AIMeter
                 var last = samples[samples.Length - 1] as Dictionary<string, object>;
                 var u = Json.Obj(last, "u");
                 var usage = new Usage { Source = "cache", At = Json.FromUnixMs(Json.Num(last, "t")) ?? fi.LastWriteTime };
-                if (Json.Num(u, "fh") != null) usage.Windows.Add(new UsageWindow { Label = "Sessione 5 h", Short = "5h", Used = Json.Num(u, "fh").Value });
-                if (Json.Num(u, "sd") != null) usage.Windows.Add(new UsageWindow { Label = "Settimana", Short = "7g", Used = Json.Num(u, "sd").Value });
+                if (Json.Num(u, "fh") != null) usage.Windows.Add(new UsageWindow { Label = "Session 5 h", Short = "5h", Used = Json.Num(u, "fh").Value });
+                if (Json.Num(u, "sd") != null) usage.Windows.Add(new UsageWindow { Label = "Week", Short = "7g", Used = Json.Num(u, "sd").Value });
                 return usage;
             }) as Usage;
         }

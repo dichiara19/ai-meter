@@ -48,11 +48,11 @@ namespace AIMeter
         /// <summary>Descrizione leggibile per le Impostazioni.</summary>
         public string Describe()
         {
-            if (!Horizontal) return "Rilevato: barra sul lato dello schermo. La pillola nella barra funziona solo con la barra in basso o in alto.";
-            if (AutoHide) return "Rilevato: la barra si nasconde automaticamente. La pillola resterebbe sospesa da sola: meglio la sovrimpressione.";
-            return string.Format("Rilevato: barra {0}, icone {1}, pulsante Widget {2}. Posizione consigliata: {3}.",
-                Edge == 3 ? "in basso" : "in alto", Centered ? "al centro" : "a sinistra", WidgetsButton ? "visibile" : "nascosto",
-                RecommendedSide == "left" ? "angolo sinistro" : "accanto all'area di notifica");
+            if (!Horizontal) return L.T("Detected: taskbar on the side of the screen. The taskbar pill works only with the taskbar at the bottom or top.");
+            if (AutoHide) return L.T("Detected: the taskbar hides automatically. The pill would float on its own: the overlay is a better fit.");
+            return L.F("Detected: taskbar {0}, icons {1}, Widgets button {2}. Recommended position: {3}.",
+                L.T(Edge == 3 ? "at the bottom" : "at the top"), L.T(Centered ? "centered" : "on the left"), L.T(WidgetsButton ? "visible" : "hidden"),
+                L.T(RecommendedSide == "left" ? "left corner" : "next to the notification area"));
         }
     }
 
@@ -75,7 +75,7 @@ namespace AIMeter
         public TaskbarPill(Controller c)
         {
             C = c;
-            Title = "AI Meter - barra delle applicazioni";
+            Title = "AI Meter - taskbar";
             WindowStyle = WindowStyle.None;
             AllowsTransparency = true;
             Background = Brushes.Transparent;
@@ -95,7 +95,7 @@ namespace AIMeter
 
             // un pulsante vero, con l'evidenziazione al passaggio come i pulsanti della barra
             chip.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
-            System.Windows.Automation.AutomationProperties.SetName(chip, "AI Meter: apri il pannello");
+            System.Windows.Automation.AutomationProperties.SetName(chip, L.T("AI Meter: open the panel"));
             chip.Click += (o, e) => C.ToggleFlyoutFromTaskbar(this);
             MouseRightButtonUp += (o, e) => { C.ShowMenu(this); e.Handled = true; };
 
@@ -133,7 +133,7 @@ namespace AIMeter
         public void Render(Snapshot s, string metric)
         {
             chip.Content = Ui.PillRow(s, metric, Dark);
-            ToolTip = Ui.Summary(s) + "\nClic per i dettagli · clic destro per le opzioni";
+            ToolTip = Ui.Summary(s) + "\n" + L.T("Click for details · right-click for options");
         }
 
         /// <summary>Posiziona la pillola nello spazio libero della barra del monitor principale.</summary>

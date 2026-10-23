@@ -19,13 +19,14 @@ namespace AIMeter
         private readonly StackPanel page = new StackPanel { Margin = new Thickness(36, 0, 36, 36), MaxWidth = 860 };
         private readonly DispatcherTimer stats = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         private TextBlock statsText;
+        private TextBlock titleText;
         private TimeSpan lastCpu;
         private DateTime lastCpuAt;
 
         public SettingsWindow(Controller c)
         {
             C = c;
-            Title = "Impostazioni di AI Meter";
+            Title = L.T("AI Meter Settings");
             Width = 760; Height = 720; MinWidth = 560; MinHeight = 480;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             FontFamily = Theme.Font;
@@ -42,7 +43,7 @@ namespace AIMeter
             var titleBar = new StackPanel { Orientation = Orientation.Horizontal, Height = 48, Margin = new Thickness(16, 0, 0, 0) };
             var ico = new Image { Source = Icon, Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
             titleBar.Children.Add(ico);
-            var tt = Ui.Text("Impostazioni di AI Meter", 12, "Text");
+            var tt = titleText = Ui.Text(Title, 12, "Text");
             tt.VerticalAlignment = VerticalAlignment.Center;
             titleBar.Children.Add(tt);
             DockPanel.SetDock(titleBar, Dock.Top);
@@ -59,137 +60,143 @@ namespace AIMeter
         public void Build()
         {
             page.Children.Clear();
-            var h = Ui.Text("Impostazioni", 28, "Text", FontWeights.SemiBold);
+            Title = L.T("AI Meter Settings");
+            if (titleText != null) titleText.Text = Title;
+            var h = Ui.Text(L.T("Settings"), 28, "Text", FontWeights.SemiBold);
             h.FontFamily = Theme.DisplayFont;
             h.Margin = new Thickness(0, 8, 0, 4);
             page.Children.Add(h);
-            var sub = Ui.Text("Scegli quali servizi AI monitorare e dove vedere sessioni e limiti.", 14, "Text2");
+            var sub = Ui.Text(L.T("Choose which AI services to monitor and where to see sessions and limits."), 14, "Text2");
             sub.TextWrapping = TextWrapping.Wrap;
             page.Children.Add(sub);
 
             // ------------------------------------------------ servizi
             // ogni servizio si attiva a parte; le sue opzioni compaiono solo quando è attivo
-            Section("Servizi");
-            Hint("Attiva solo i servizi che usi. Al primo avvio AI Meter attiva da solo quelli che trova sul PC.");
+            Section(L.T("Services"));
+            Hint(L.T("Turn on only the services you use. On first run AI Meter turns on the ones it finds on this PC."));
             var claude = C.Last == null ? null : C.Last.Providers.FirstOrDefault(p => p.Id == "claude");
             var claudeRows = new List<FrameworkElement>
             {
                 Row(Ui.Logo("claude", 28), "Claude",
-                    S.ClaudeEnabled ? ClaudeStatus(claude) : Found(ClaudeProvider.Detected()) + "Claude Code, Cowork e app desktop.",
+                    S.ClaudeEnabled ? ClaudeStatus(claude) : Found(ClaudeProvider.Detected()) + L.T("Claude Code, Cowork and the desktop app."),
                     Toggle(S.ClaudeEnabled, v => { S.ClaudeEnabled = v; Changed(); Rebuild(); })),
             };
             if (S.ClaudeEnabled)
                 claudeRows.AddRange(new[]
                 {
-                    Row(null, "Limiti in tempo reale",
-                        "Legge l'utilizzo del tuo account con l'accesso di Claude Code (WSL o Windows). Il token resta sul PC e viene rinnovato dalla CLI.",
-                        Pair(Button("Accedi…", () => C.LoginClaude(), false), Toggle(S.ClaudeLiveUsage, v => { S.ClaudeLiveUsage = v; Changed(); C.RefreshNow(); }))),
-                    Row(null, "Sessioni Claude Code", "Desktop, CLI (anche in WSL) e VS Code, con titolo, modello e stato.", Toggle(S.ClaudeShowCode, v => { S.ClaudeShowCode = v; Changed(); })),
-                    Row(null, "Attività Cowork", "Le attività Cowork in corso negli ultimi 30 minuti.", Toggle(S.ClaudeShowCowork, v => { S.ClaudeShowCowork = v; Changed(); })),
-                    Row(null, "App Claude aperta", "Le singole chat non lasciano tracce sul PC: si vede solo se l'app è aperta.", Toggle(S.ClaudeShowChat, v => { S.ClaudeShowChat = v; Changed(); })),
+                    Row(null, L.T("Real-time limits"),
+                        L.T("Reads your account usage with your Claude Code login (WSL or Windows). The token stays on this PC and is refreshed by the CLI."),
+                        Pair(Button(L.T("Sign in…"), () => C.LoginClaude(), false), Toggle(S.ClaudeLiveUsage, v => { S.ClaudeLiveUsage = v; Changed(); C.RefreshNow(); }))),
+                    Row(null, L.T("Claude Code sessions"), L.T("Desktop, CLI (also in WSL) and VS Code, with title, model and status."), Toggle(S.ClaudeShowCode, v => { S.ClaudeShowCode = v; Changed(); })),
+                    Row(null, L.T("Cowork tasks"), L.T("Cowork tasks running in the last 30 minutes."), Toggle(S.ClaudeShowCowork, v => { S.ClaudeShowCowork = v; Changed(); })),
+                    Row(null, L.T("Claude app open"), L.T("Individual chats leave no trace on the PC: you only see whether the app is open."), Toggle(S.ClaudeShowChat, v => { S.ClaudeShowChat = v; Changed(); })),
                 });
             Group(claudeRows.ToArray());
 
             var openaiRows = new List<FrameworkElement>
             {
                 Row(Ui.Logo("openai", 28), "ChatGPT · Codex",
-                    Found(CodexProvider.Detected()) + "Limiti del piano ChatGPT in tempo reale, chiesti al programma Codex installato con il suo accesso: AI Meter non tocca i token.",
+                    Found(CodexProvider.Detected()) + L.T("ChatGPT plan limits in real time, requested from the installed Codex program with its own login: AI Meter never touches the tokens."),
                     Toggle(S.OpenAIEnabled, v => { S.OpenAIEnabled = v; Changed(); Rebuild(); })),
             };
             if (S.OpenAIEnabled)
-                openaiRows.Add(Row(null, "App ChatGPT aperta", "ChatGPT non espone i limiti della chat: si vede solo se l'app è aperta.", Toggle(S.OpenAIShowChat, v => { S.OpenAIShowChat = v; Changed(); })));
+                openaiRows.Add(Row(null, L.T("ChatGPT app open"), L.T("ChatGPT does not expose chat limits: you only see whether the app is open."), Toggle(S.OpenAIShowChat, v => { S.OpenAIShowChat = v; Changed(); })));
             Group(openaiRows.ToArray());
 
             bool gh = GitHubAuth.HasToken;
             var copilotRows = new List<FrameworkElement>
             {
                 Row(Ui.Logo("copilot", 28), "GitHub Copilot",
-                    Found(CopilotProvider.Detected()) + "Richieste premium e quote mensili del tuo account GitHub.",
+                    Found(CopilotProvider.Detected()) + L.T("Premium requests and monthly quotas of your GitHub account."),
                     Toggle(S.CopilotEnabled, v => { S.CopilotEnabled = v; Changed(); Rebuild(); })),
             };
             if (S.CopilotEnabled)
-                copilotRows.Add(Row(null, "Account GitHub",
-                    gh ? "Collegato. Il token è cifrato con la protezione dati di Windows e resta su questo PC."
-                       : "Collega il tuo account per leggere le quote di Copilot.",
-                    gh ? Button("Scollega", () => { C.SignOutGitHub(); Build(); }, false) : Button("Collega GitHub…", () => C.LoginGitHub(), true)));
+                copilotRows.Add(Row(null, L.T("GitHub account"),
+                    gh ? L.T("Connected. The token is encrypted with Windows data protection and stays on this PC.")
+                       : L.T("Connect your account to read your Copilot quotas."),
+                    gh ? Button(L.T("Disconnect"), () => { C.SignOutGitHub(); Build(); }, false) : Button(L.T("Connect GitHub…"), () => C.LoginGitHub(), true)));
             Group(copilotRows.ToArray());
 
-            var wslRow = Row(null, "Distribuzione WSL", "Dove cercare Claude Code e Codex installati in Linux. Il widget non avvia mai WSL: lo legge solo se è già acceso.",
+            var wslRow = Row(null, L.T("WSL distribution"), L.T("Where to look for Claude Code and Codex installed in Linux. AI Meter never starts WSL: it reads it only if it is already running."),
                 Combo(new[] { S.WslDistro }.Concat(WslDistros()).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => Tuple.Create(x, x)).ToArray(), S.WslDistro,
                       v => { S.WslDistro = v; Changed(); }));
             Group(wslRow);
 
             // ------------------------------------------------ dove vederlo
-            Section("Dove vederlo");
+            Section(L.T("Where to see it"));
             Group(
-                Row(Ui.Glyph("", 20, "Text"), "Widget sul desktop", "Resta sotto le finestre, come parte dello sfondo. Trascinalo dall'intestazione.",
-                    Pair(Button("Ripristina posizione", () => C.ResetDesktopPosition(), false), Toggle(S.DesktopWidget, v => { S.DesktopWidget = v; Changed(); }))));
+                Row(Ui.Glyph("\uE7F4", 20, "Text"), L.T("Desktop widget"), L.T("Stays below your windows, like part of the wallpaper. Drag it by its header."),
+                    Pair(Button(L.T("Reset position"), () => C.ResetDesktopPosition(), false), Toggle(S.DesktopWidget, v => { S.DesktopWidget = v; Changed(); }))));
             var bar = TaskbarInfo.Read();
-            string rec = bar.RecommendedSide == "left" ? "angolo sinistro" : "accanto all'area di notifica";
+            string rec = L.T(bar.RecommendedSide == "left" ? "left corner" : "next to the notification area");
             Group(
-                Row(Ui.Glyph("\uE7C4", 20, "Text"), "Nella barra delle applicazioni",
-                    "La pillola si appoggia nello spazio libero della barra del monitor principale; un clic apre il pannello completo. " + bar.Describe(),
+                Row(Ui.Glyph("\uE7C4", 20, "Text"), L.T("In the taskbar"),
+                    L.T("The pill sits in the free space of the main monitor's taskbar; a click opens the full panel.") + " " + bar.Describe(),
                     Toggle(S.TaskbarDock, v => { C.SetTaskbarDock(v); Rebuild(); })),
-                Row(null, "Posizione nella barra", null, Combo(new[]
+                Row(null, L.T("Position in the taskbar"), null, Combo(new[]
                 {
-                    Tuple.Create("auto", "Automatica (" + rec + ")"), Tuple.Create("left", "Angolo sinistro"),
-                    Tuple.Create("right", "Accanto all'area di notifica"),
+                    Tuple.Create("auto", L.F("Automatic ({0})", rec)), Tuple.Create("left", L.T("Left corner")),
+                    Tuple.Create("right", L.T("Next to the notification area")),
                 }, S.TaskbarSide, v => { S.TaskbarSide = v; Changed(); })));
-            Hint("Barra e sovrimpressione sono alternative: attivandone una si spegne l'altra.");
+            Hint(L.T("Taskbar and overlay are alternatives: turning one on turns the other off."));
             Group(
-                Row(Ui.Glyph("", 20, "Text"), "Sovrimpressione compatta", "Una pillola minuscola sempre in primo piano. Passaci sopra per vedere i dettagli.",
+                Row(Ui.Glyph("\uE718", 20, "Text"), L.T("Compact overlay"), L.T("A tiny pill, always on top. Hover over it to see the details."),
                     Toggle(S.Overlay, v => { S.Overlay = v; if (v) S.TaskbarDock = false; Changed(); Rebuild(); })),
-                Row(null, "Posizione", null, Combo(new[]
+                Row(null, L.T("Position"), null, Combo(new[]
                 {
-                    Tuple.Create("tr", "In alto a destra"), Tuple.Create("tl", "In alto a sinistra"),
-                    Tuple.Create("br", "In basso a destra"), Tuple.Create("bl", "In basso a sinistra"),
+                    Tuple.Create("tr", L.T("Top right")), Tuple.Create("tl", L.T("Top left")),
+                    Tuple.Create("br", L.T("Bottom right")), Tuple.Create("bl", L.T("Bottom left")),
                 }, S.OverlayCorner, v => { S.OverlayCorner = v; Changed(); })),
-                Row(null, "Valori mostrati", "Percentuale rimasta del limite scelto.", Combo(new[]
+                Row(null, L.T("Values shown"), L.T("Remaining share of the chosen limit."), Combo(new[]
                 {
-                    Tuple.Create("5h", "Limite di 5 ore"), Tuple.Create("week", "Limite settimanale"), Tuple.Create("both", "Entrambi"),
+                    Tuple.Create("5h", L.T("5-hour limit")), Tuple.Create("week", L.T("Weekly limit")), Tuple.Create("both", L.T("Both")),
                 }, S.OverlayMetric, v => { S.OverlayMetric = v; Changed(); })),
-                Row(null, "Nascondi a schermo intero", "Durante giochi, video e presentazioni la pillola sparisce da sola.",
+                Row(null, L.T("Hide in full screen"), L.T("During games, videos and presentations the pill disappears by itself."),
                     Toggle(S.OverlayHideFullscreen, v => { S.OverlayHideFullscreen = v; Changed(); })));
-            Hint("Il pannello completo è sempre a un clic dall'icona di AI Meter nell'area di notifica.");
+            Hint(L.T("The full panel is always one click away from the AI Meter icon in the notification area."));
 
             // ------------------------------------------------ generale
-            Section("Generale");
+            Section(L.T("General"));
+            var langs = new[] { Tuple.Create("system", L.T("Use the Windows language")) }
+                .Concat(L.Languages.Select(l => Tuple.Create(l.Key, l.Value))).ToArray();
             Group(
-                Row(Ui.Glyph("", 20, "Text"), "Avvia con Windows", "AI Meter parte all'accesso, in silenzio, dopo che il desktop è pronto.",
+                Row(Ui.Glyph("\uE7E8", 20, "Text"), L.T("Start with Windows"), L.T("AI Meter starts at sign-in, silently, once the desktop is ready."),
                     Toggle(Settings.StartsWithWindows, v => { Settings.StartsWithWindows = v; })),
-                Row(Ui.Glyph("", 20, "Text"), "Tema", null, Combo(new[]
+                Row(Ui.Glyph("\uF2B7", 20, "Text"), L.T("Language"), null,
+                    Combo(langs, S.Language ?? "system", v => { S.Language = v; S.Save(); C.ApplyLanguage(); })),
+                Row(Ui.Glyph("\uE790", 20, "Text"), L.T("Theme"), null, Combo(new[]
                 {
-                    Tuple.Create("system", "Usa il tema di Windows"), Tuple.Create("light", "Chiaro"), Tuple.Create("dark", "Scuro"),
+                    Tuple.Create("system", L.T("Use the Windows theme")), Tuple.Create("light", L.T("Light")), Tuple.Create("dark", L.T("Dark")),
                 }, S.Theme, v => { S.Theme = v; Changed(); C.ApplyTheme(); })),
-                Row(Ui.Glyph("", 20, "Text"), "Frequenza di aggiornamento", "Automatica: ogni 10 secondi, ogni 30 a batteria o con il Risparmio energia. Si ferma con il PC bloccato.",
-                    Combo(new[] { Tuple.Create("auto", "Automatica"), Tuple.Create("low", "Risparmio massimo") }, S.Refresh, v => { S.Refresh = v; Changed(); })));
+                Row(Ui.Glyph("\uE8BE", 20, "Text"), L.T("Refresh rate"), L.T("Automatic: every 10 seconds, every 30 on battery or with Energy Saver. Stops while the PC is locked."),
+                    Combo(new[] { Tuple.Create("auto", L.T("Automatic")), Tuple.Create("low", L.T("Maximum saving")) }, S.Refresh, v => { S.Refresh = v; Changed(); })));
 
             // ------------------------------------------------ informazioni
-            Section("Informazioni");
+            Section(L.T("About"));
             statsText = Ui.Text("", 12, "Text2");
             statsText.TextWrapping = TextWrapping.Wrap;
             Group(
-                Row(Ui.Glyph("", 20, "Text"), "AI Meter", null, Button("Apri cartella dati", () => Process.Start("explorer.exe", "\"" + Settings.Folder + "\""), false), statsText),
-                Row(Ui.Glyph("", 20, "Text"), "Privacy",
-                    "Sessioni e limiti vengono letti dai file locali. L'unico dato che esce dal PC è la richiesta dei limiti Claude in tempo reale ad Anthropic, con il tuo accesso di Claude Code: si spegne con l'interruttore \"Limiti in tempo reale\".",
-                    Button("Codice sorgente", () => Process.Start("https://github.com/dichiara19/ai-meter#privacy-policy"), false)));
+                Row(Ui.Glyph("\uE946", 20, "Text"), "AI Meter", null, Button(L.T("Open data folder"), () => Process.Start("explorer.exe", "\"" + Settings.Folder + "\""), false), statsText),
+                Row(Ui.Glyph("\uE72E", 20, "Text"), L.T("Privacy"),
+                    L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program) and Copilot (GitHub), and each one can be turned off."),
+                    Button(L.T("Source code"), () => Process.Start("https://github.com/dichiara19/ai-meter#privacy-policy"), false)));
             UpdateStats();
         }
 
         private string ClaudeStatus(ProviderState p)
         {
-            if (!S.ClaudeEnabled) return "Disattivato";
-            if (p == null) return "In attesa del primo aggiornamento";
-            string plan = p.Plan != null ? " · piano " + p.Plan.ToUpperInvariant() : "";
-            if (p.Usage != null && p.Usage.Source == "live") return "Collegato" + plan + " · limiti in tempo reale";
-            if (p.NeedsLogin) return "Accesso necessario per i limiti in tempo reale";
+            if (!S.ClaudeEnabled) return L.T("Off");
+            if (p == null) return L.T("Waiting for the first update");
+            string plan = p.Plan != null ? " · " + L.F("{0} plan", p.Plan.ToUpperInvariant()) : "";
+            if (p.Usage != null && p.Usage.Source == "live") return L.T("Connected") + plan + " · " + L.T("real-time limits");
+            if (p.NeedsLogin) return L.T("Sign-in needed for real-time limits");
             if (!string.IsNullOrEmpty(p.Notice)) return p.Notice;
-            return "Limiti dall'ultimo dato disponibile" + plan;
+            return L.T("Limits from the last available data") + plan;
         }
 
         private void Changed() { S.Save(); C.ApplySettings(); }
 
-        private static string Found(bool detected) { return detected ? "Trovato su questo PC. " : "Non trovato su questo PC. "; }
+        private static string Found(bool detected) { return L.T(detected ? "Found on this PC." : "Not found on this PC.") + " "; }
 
         /// <summary>Ridisegna la pagina dopo un cambio che ne modifica altri interruttori.</summary>
         private void Rebuild() { Dispatcher.BeginInvoke(new Action(Build), System.Windows.Threading.DispatcherPriority.Background); }
@@ -203,13 +210,10 @@ namespace AIMeter
             var cpu = proc.TotalProcessorTime;
             double pct = (cpu - lastCpu).TotalMilliseconds / Math.Max(1, (now - lastCpuAt).TotalMilliseconds) / Environment.ProcessorCount * 100;
             lastCpu = cpu; lastCpuAt = now;
-            var it = new CultureInfo("it-IT");
-            statsText.Text = string.Format(it,
-                "Versione {5} · memoria in uso {0:0} MB (privata {1:0} MB) · CPU {2:0.0}% · aggiornamento ogni {3} s{4}",
+            statsText.Text = L.F("Version {5} · memory in use {0:0} MB (private {1:0} MB) · CPU {2:0.0}% · refresh every {3} s{4}",
                 proc.WorkingSet64 / 1048576.0, proc.PrivateMemorySize64 / 1048576.0, pct, C.CurrentInterval,
-                C.SavingPower ? " (risparmio energia)" : "", Controller.Version);
+                C.SavingPower ? " " + L.T("(energy saving)") : "", Controller.Version);
         }
-
         // ------------------------------------------------------------ costruttori stile Impostazioni
         private void Section(string title)
         {

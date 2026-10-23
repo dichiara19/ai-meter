@@ -31,7 +31,7 @@ namespace AIMeter
 
             var root = new DockPanel { Margin = new Thickness(10, 4, 10, 10) };
             var header = new DockPanel { Height = 34, Background = Brushes.Transparent, Cursor = Cursors.SizeAll };
-            var more = Ui.IconButton("", "Altre opzioni", (o, e) => C.ShowMenu(this));
+            var more = Ui.IconButton("", L.T("More options"), (o, e) => C.ShowMenu(this));
             more.Cursor = Cursors.Arrow;
             DockPanel.SetDock(more, Dock.Right);
             header.Children.Add(more);
@@ -100,7 +100,7 @@ namespace AIMeter
 
         public static FrameworkElement EmptyState()
         {
-            var t = Ui.Text("Nessun servizio collegato. Aprili dalle Impostazioni.", 12, "Text2");
+            var t = Ui.Text(L.T("No services enabled. Turn them on in Settings."), 12, "Text2");
             t.TextWrapping = TextWrapping.Wrap;
             return Ui.Card(t, new Thickness(14));
         }
@@ -119,7 +119,7 @@ namespace AIMeter
         public OverlayPill(Controller c)
         {
             C = c;
-            Title = "AI Meter - sovrimpressione";
+            Title = "AI Meter - overlay";
             // niente SizeToContent: con WindowChrome WPF aggiunge il bordo di sistema e lascia una fascia vuota.
             // La dimensione la calcoliamo noi dal contenuto (vedi Fit).
             SizeToContent = SizeToContent.Manual;
@@ -153,9 +153,8 @@ namespace AIMeter
             // un pulsante vero: clic, tastiera e strumenti di accessibilità lo riespandono allo stesso modo
             var b = new Button { Content = icon, Padding = new Thickness(6), Cursor = Cursors.Hand };
             b.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
-            System.Windows.Automation.AutomationProperties.SetName(b, "Espandi AI Meter");
-            b.ToolTip = string.Join("\n", five.Select(t => t.Item1.Name + ": " +
-                (t.Item2 == null ? "nessun dato" : Math.Round(t.Item2.Remaining) + "% rimasto (" + t.Item2.Label + ")"))) + "\nClic per espandere";
+            System.Windows.Automation.AutomationProperties.SetName(b, L.T("Expand AI Meter"));
+            b.ToolTip = Ui.Summary(s) + "\n" + L.T("Click to expand");
             b.Click += (o, e) => { hover.Stop(); C.SetOverlayCollapsed(false); };
             return b;
         }
@@ -172,8 +171,8 @@ namespace AIMeter
             div.SetResourceReference(Border.BackgroundProperty, "Divider");
             outer.Children.Add(div);
             var buttons = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(3, 2, 3, 2) };
-            buttons.Children.Add(MiniButton("\uE921", "Riduci a icona", () => C.SetOverlayCollapsed(true)));
-            buttons.Children.Add(MiniButton("\uE8BB", "Chiudi la sovrimpressione (riattivala dal menu dell'icona)", C.CloseOverlay));
+            buttons.Children.Add(MiniButton("\uE921", L.T("Minimize to icon"), () => C.SetOverlayCollapsed(true)));
+            buttons.Children.Add(MiniButton("\uE8BB", L.T("Close the overlay (turn it back on from the icon menu)"), C.CloseOverlay));
             outer.Children.Add(buttons);
             return outer;
         }
@@ -227,7 +226,7 @@ namespace AIMeter
         public Flyout(Controller c)
         {
             C = c;
-            Title = "AI Meter - pannello";
+            Title = "AI Meter - panel";
             Width = 344;
             SizeToContent = SizeToContent.Height;
             Topmost = true;
@@ -236,8 +235,8 @@ namespace AIMeter
 
             var root = new DockPanel { Margin = new Thickness(12, 10, 12, 12), RenderTransform = slide };
             var header = new DockPanel { Height = 36 };
-            var settings = Ui.IconButton("", "Impostazioni", (o, e) => { Hide(); C.OpenSettings(); });
-            var refresh = Ui.IconButton("", "Aggiorna adesso", (o, e) => C.RefreshNow());
+            var settings = Ui.IconButton("", L.T("Settings"), (o, e) => { Hide(); C.OpenSettings(); });
+            var refresh = Ui.IconButton("", L.T("Refresh now"), (o, e) => C.RefreshNow());
             DockPanel.SetDock(settings, Dock.Right);
             DockPanel.SetDock(refresh, Dock.Right);
             header.Children.Add(settings);
@@ -277,7 +276,7 @@ namespace AIMeter
                 body.Children.Add(card);
             }
             // un dato non in tempo reale è segnalato nella scheda del servizio, non qui
-            footer.Text = "Aggiornato alle " + s.Taken.ToString("HH:mm");
+            footer.Text = L.F("Updated at {0}", s.Taken.ToString("HH:mm", L.Culture));
         }
 
         /// <summary>Apertura dall'area di notifica, sopra la barra delle applicazioni, come i pannelli di sistema.</summary>

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Markup;
 using System.Windows.Media;
@@ -208,7 +208,7 @@ namespace AIMeter
     <Setter Property='Template'><Setter.Value>
       <ControlTemplate TargetType='CheckBox'>
         <StackPanel Orientation='Horizontal' Background='Transparent'>
-          <TextBlock x:Name='lbl' Text='Disattivato' FontSize='14' VerticalAlignment='Center' Margin='0,0,12,0' MinWidth='70' TextAlignment='Right' Foreground='{DynamicResource Text}'/>
+          <TextBlock x:Name='lbl' Text='{DynamicResource StrOff}' FontSize='14' VerticalAlignment='Center' Margin='0,0,12,0' MinWidth='70' TextAlignment='Right' Foreground='{DynamicResource Text}'/>
           <Grid Width='40' Height='20'>
             <Border x:Name='track' CornerRadius='10' BorderThickness='1' BorderBrush='{DynamicResource ControlStrong}' Background='{DynamicResource Subtle}'/>
             <Ellipse x:Name='knob' Width='12' Height='12' HorizontalAlignment='Left' Margin='4,0,0,0' Fill='{DynamicResource Text2}'/>
@@ -221,7 +221,7 @@ namespace AIMeter
             <Setter TargetName='knob' Property='Margin' Value='3,0,0,0'/>
           </Trigger>
           <Trigger Property='IsChecked' Value='True'>
-            <Setter TargetName='lbl' Property='Text' Value='Attivato'/>
+            <Setter TargetName='lbl' Property='Text' Value='{DynamicResource StrOn}'/>
             <Setter TargetName='track' Property='Background' Value='{DynamicResource Accent}'/>
             <Setter TargetName='track' Property='BorderBrush' Value='{DynamicResource Accent}'/>
             <Setter TargetName='knob' Property='Fill' Value='{DynamicResource OnAccent}'/>
