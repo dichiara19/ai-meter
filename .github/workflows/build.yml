@@ -61,3 +61,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: AIMeter.zip
+          body: |
+            Built by GitHub Actions from the tagged source of this repository.
+
+            **Code signing policy:** https://github.com/dichiara19/ai-meter#code-signing-policy
+            **Privacy policy:** https://github.com/dichiara19/ai-meter#privacy-policy
+
+            Unzip, run `AIMeter.exe`. Requires Windows 10/11 (uses .NET Framework 4.8, already part of Windows).
