@@ -93,9 +93,21 @@ namespace AIMeter
             Group(
                 Row(Ui.Glyph("", 20, "Text"), "Widget sul desktop", "Resta sotto le finestre, come parte dello sfondo. Trascinalo dall'intestazione.",
                     Pair(Button("Ripristina posizione", () => C.ResetDesktopPosition(), false), Toggle(S.DesktopWidget, v => { S.DesktopWidget = v; Changed(); }))));
+            var bar = TaskbarInfo.Read();
+            string rec = bar.RecommendedSide == "left" ? "angolo sinistro" : "accanto all'area di notifica";
+            Group(
+                Row(Ui.Glyph("\uE7C4", 20, "Text"), "Nella barra delle applicazioni",
+                    "La pillola si appoggia nello spazio libero della barra del monitor principale; un clic apre il pannello completo. " + bar.Describe(),
+                    Toggle(S.TaskbarDock, v => { C.SetTaskbarDock(v); Rebuild(); })),
+                Row(null, "Posizione nella barra", null, Combo(new[]
+                {
+                    Tuple.Create("auto", "Automatica (" + rec + ")"), Tuple.Create("left", "Angolo sinistro"),
+                    Tuple.Create("right", "Accanto all'area di notifica"),
+                }, S.TaskbarSide, v => { S.TaskbarSide = v; Changed(); })));
+            Hint("Barra e sovrimpressione sono alternative: attivandone una si spegne l'altra.");
             Group(
                 Row(Ui.Glyph("", 20, "Text"), "Sovrimpressione compatta", "Una pillola minuscola sempre in primo piano. Passaci sopra per vedere i dettagli.",
-                    Toggle(S.Overlay, v => { S.Overlay = v; Changed(); })),
+                    Toggle(S.Overlay, v => { S.Overlay = v; if (v) S.TaskbarDock = false; Changed(); Rebuild(); })),
                 Row(null, "Posizione", null, Combo(new[]
                 {
                     Tuple.Create("tr", "In alto a destra"), Tuple.Create("tl", "In alto a sinistra"),
@@ -145,6 +157,9 @@ namespace AIMeter
         }
 
         private void Changed() { S.Save(); C.ApplySettings(); }
+
+        /// <summary>Ridisegna la pagina dopo un cambio che ne modifica altri interruttori.</summary>
+        private void Rebuild() { Dispatcher.BeginInvoke(new Action(Build), System.Windows.Threading.DispatcherPriority.Background); }
 
         private void UpdateStats()
         {

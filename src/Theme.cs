@@ -31,6 +31,19 @@ namespace AIMeter
             }
         }
 
+        /// <summary>
+        /// Tema della barra delle applicazioni: segue la "modalità di Windows" (SystemUsesLightTheme),
+        /// che può differire dalla modalità delle app.
+        /// </summary>
+        public static bool TaskbarIsDark()
+        {
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                    return k == null || !Equals(k.GetValue("SystemUsesLightTheme"), 1);
+            }
+            catch (Exception) { return true; }
+        }
         public static bool SystemIsDark()
         {
             try
@@ -45,7 +58,7 @@ namespace AIMeter
 
         private static Color C(uint argb) { return Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb); }
 
-        private static ResourceDictionary BuildPalette(bool dark)
+        public static ResourceDictionary BuildPalette(bool dark)
         {
             var d = new ResourceDictionary();
             Action<string, uint> add = (k, v) => { var b = new SolidColorBrush(C(v)); b.Freeze(); d[k] = b; };

@@ -163,49 +163,8 @@ namespace AIMeter
         private FrameworkElement Expanded(Snapshot s, string metric)
         {
             var outer = new StackPanel { Orientation = Orientation.Horizontal };
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 6, 8, 6), VerticalAlignment = VerticalAlignment.Center };
-            foreach (var p in s.Providers)
-            {
-                if (row.Children.Count > 0)
-                {
-                    var sep = new Border { Width = 1, Margin = new Thickness(10, 2, 10, 2) };
-                    sep.SetResourceReference(Border.BackgroundProperty, "Divider");
-                    row.Children.Add(sep);
-                }
-                var item = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-                var logoHost = new Grid { Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center };
-                logoHost.Children.Add(Ui.Logo(p.Id, 16));
-                if (p.Busy > 0)
-                {
-                    var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -2, -2, 0), BorderThickness = new Thickness(1.2) };
-                    dot.SetResourceReference(Border.BackgroundProperty, Ui.BrandBrush(p.Id));
-                    dot.SetResourceReference(Border.BorderBrushProperty, "Fallback");
-                    logoHost.Children.Add(dot);
-                }
-                item.Children.Add(logoHost);
-
-                var windows = p.Usage == null ? new UsageWindow[0] : p.Usage.Windows.ToArray();
-                var five = windows.FirstOrDefault(w => w.Short == "5h");
-                var week = windows.FirstOrDefault(w => w.Short == "7g");
-                var shown = metric == "week" ? new[] { week } : metric == "both" ? new[] { five, week } : new[] { five };
-                bool any = false;
-                foreach (var w in shown.Where(x => x != null))
-                {
-                    var stack = new StackPanel { Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-                    var t = Ui.Text(Math.Round(w.Remaining).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
-                    t.HorizontalAlignment = HorizontalAlignment.Center;
-                    stack.Children.Add(t);
-                    var bar = Ui.Bar(w.Remaining, Ui.LevelBrush(w.Remaining, Ui.BrandBrush(p.Id)), 2);
-                    bar.Width = 26;
-                    bar.Margin = new Thickness(0, 1, 0, 0);
-                    stack.Children.Add(bar);
-                    item.Children.Add(stack);
-                    any = true;
-                }
-                if (!any) { var t = Ui.Text("–", 12, "Text3"); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); }
-                row.Children.Add(item);
-            }
-            if (s.Providers.Count == 0) row.Children.Add(Ui.Text("AI Meter", 12, "Text2"));
+            var row = Ui.PillRow(s, metric, null);
+            row.Margin = new Thickness(10, 6, 8, 6);
             outer.Children.Add(row);
 
             // colonna di due micro-pulsanti, separata da una linea sottile
@@ -262,6 +221,8 @@ namespace AIMeter
         private readonly TextBlock footer;
         private readonly TranslateTransform slide = new TranslateTransform();
         public bool HoverMode { get; private set; }
+        /// <summary>Aperto dalla pillola nella barra: senza focus, si chiude quando un'altra app passa in primo piano.</summary>
+        public bool TaskbarMode { get; private set; }
 
         public Flyout(Controller c)
         {
@@ -300,6 +261,7 @@ namespace AIMeter
             Content = root;
 
             Deactivated += (o, e) => { if (!HoverMode) Hide(); };
+            IsVisibleChanged += (o, e) => { if (!IsVisible) TaskbarMode = false; };
             MouseEnter += (o, e) => C.CancelHideDetails();
             MouseLeave += (o, e) => { if (HoverMode) C.ScheduleHideDetails(); };
         }
@@ -356,10 +318,34 @@ namespace AIMeter
             Animate(below ? -8 : 8);
         }
 
-        private void Animate(double from)
+        /// <summary>
+        /// Apertura dalla pillola nella barra: appoggiato sopra la barra, dal lato della pillola,
+        /// entra scorrendo orizzontalmente come il pannello Widget di Windows.
+        /// </summary>
+        public void ShowFromTaskbar(bool fromLeft)
+        {
+            HoverMode = false;
+            MaxHeight = SystemParameters.WorkArea.Height - 24;
+            // senza attivazione: la pillola nella barra non prende il focus, quindi Windows potrebbe negarlo anche al pannello.
+            // Si chiude cliccando altrove (cambio di app in primo piano) o di nuovo sulla pillola.
+            ShowActivated = false;
+            Show();
+            TaskbarMode = true;
+            UpdateLayout();
+            var wa = SystemParameters.WorkArea;
+            Left = fromLeft ? wa.Left + 12 : wa.Right - ActualWidth - 12;
+            Top = wa.Bottom - ActualHeight - 12;
+            slide.BeginAnimation(TranslateTransform.YProperty, null);
+            slide.Y = 0;
+            Animate(fromLeft ? -28 : 28, TranslateTransform.XProperty);
+        }
+
+        private void Animate(double from) { slide.BeginAnimation(TranslateTransform.XProperty, null); slide.X = 0; Animate(from, TranslateTransform.YProperty); }
+
+        private void Animate(double from, DependencyProperty axis)
         {
             var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-            slide.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(from, 0, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease });
+            slide.BeginAnimation(axis, new DoubleAnimation(from, 0, TimeSpan.FromMilliseconds(240)) { EasingFunction = ease });
             ((UIElement)Content).BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
         }
     }

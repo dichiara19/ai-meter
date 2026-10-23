@@ -100,6 +100,7 @@ namespace AIMeter
         private Dispatcher ui;
         private DesktopWidget desktop;
         private OverlayPill pill;
+        private TaskbarPill dock;
         private Flyout flyout;
         private SettingsWindow settingsWindow;
         private Window menuHost;
@@ -149,7 +150,7 @@ namespace AIMeter
             SystemEvents.SessionSwitch += OnSessionSwitch;
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
-            SystemEvents.DisplaySettingsChanged += (o, e) => ui.BeginInvoke(new Action(() => { if (desktop != null) desktop.Place(); if (pill != null) pill.Place(); }));
+            SystemEvents.DisplaySettingsChanged += (o, e) => ui.BeginInvoke(new Action(() => { if (desktop != null) desktop.Place(); if (pill != null) pill.Place(); if (dock != null) { dock.Place(); UpdatePillVisibility(); } }));
             foregroundProc = OnForegroundChanged;
             Native.SetWinEventHook(Native.EVENT_SYSTEM_FOREGROUND, Native.EVENT_SYSTEM_FOREGROUND, IntPtr.Zero, foregroundProc, 0, 0, 0);
             ThreadPool.RegisterWaitForSingleObject(showSignal, (s, t) => ui.BeginInvoke(new Action(ToggleFlyout)), null, -1, false);
@@ -201,6 +202,7 @@ namespace AIMeter
             lastSignature = sig;
             if (desktop != null) desktop.Render(s);
             if (pill != null) pill.Render(s, Settings.OverlayMetric);
+            if (dock != null) dock.Render(s, Settings.OverlayMetric);
             if (flyout.IsVisible) flyout.Render(s);
         }
 
@@ -225,6 +227,19 @@ namespace AIMeter
                 pill.Place();
             }
             else if (pill != null) { pill.Close(); pill = null; }
+
+            if (Settings.TaskbarDock)
+            {
+                if (dock == null)
+                {
+                    dock = new TaskbarPill(this);
+                    if (Last != null) dock.Render(Last, Settings.OverlayMetric);
+                    dock.Show();
+                }
+                dock.Place();
+                UpdatePillVisibility();
+            }
+            else if (dock != null) { dock.Close(); dock = null; }
 
             UpdateVisibility();
             Rerender();
@@ -346,12 +361,14 @@ namespace AIMeter
 
         private void UpdateVisibility()
         {
-            anyVisible = (desktop != null && desktop.IsVisible) || (pill != null && pill.IsVisible) || flyout.IsVisible
+            anyVisible = (desktop != null && desktop.IsVisible) || (pill != null && pill.IsVisible) || (dock != null && dock.IsVisible) || flyout.IsVisible
                          || settingsWindow != null;
         }
 
         private void OnForegroundChanged(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time)
         {
+            if (dock != null && Native.IsTaskbar(hwnd)) dock.BringAboveTaskbar();   // clic sulla barra: torniamo davanti
+            if (flyout.IsVisible && flyout.TaskbarMode && !Native.IsOwnWindow(hwnd)) flyout.Hide();   // clic altrove
             bool busy = Native.UserIsBusyFullscreen();
             if (busy == fullscreenBusy) return;
             fullscreenBusy = busy;
@@ -360,11 +377,39 @@ namespace AIMeter
 
         private void UpdatePillVisibility()
         {
-            if (pill == null) return;
-            bool hide = Settings.OverlayHideFullscreen && fullscreenBusy;
-            if (hide && pill.IsVisible) pill.Hide();
-            else if (!hide && !pill.IsVisible) pill.Show();
+            if (pill != null)
+            {
+                bool hide = Settings.OverlayHideFullscreen && fullscreenBusy;
+                if (hide && pill.IsVisible) pill.Hide();
+                else if (!hide && !pill.IsVisible) pill.Show();
+            }
+            if (dock != null)
+            {
+                // a schermo intero la barra sparisce, e con lei la pillola; idem se la barra non la può ospitare
+                bool hide = fullscreenBusy || !dock.Usable;
+                if (hide && dock.IsVisible) dock.Hide();
+                else if (!hide && !dock.IsVisible) { dock.Show(); dock.Place(); }
+            }
             UpdateVisibility();
+        }
+
+        public void ToggleFlyoutFromTaskbar(TaskbarPill anchor)
+        {
+            if (flyout.IsVisible && !flyout.HoverMode) { flyout.Hide(); return; }
+            if ((DateTime.Now - flyoutHiddenAt).TotalMilliseconds < 300) return; // chiuso proprio da questo clic
+            if (Last != null) flyout.Render(Last);
+            flyout.ShowFromTaskbar(anchor.OnLeft);
+            UpdateVisibility();
+            RefreshNow();
+        }
+
+        /// <summary>Pillola nella barra e sovrimpressione sono alternative: attivarne una spegne l'altra.</summary>
+        public void SetTaskbarDock(bool on)
+        {
+            Settings.TaskbarDock = on;
+            if (on) Settings.Overlay = false;
+            Settings.Save();
+            ApplySettings();
         }
 
         // ================================================================ area di notifica e menu
@@ -420,7 +465,13 @@ namespace AIMeter
             menu.Items.Add(Item("Apri pannello", "\uE8A7", () => ToggleFlyout()));
             menu.Items.Add(new Separator());
             menu.Items.Add(Item("Widget sul desktop", "\uE7F4", () => { Settings.DesktopWidget = !Settings.DesktopWidget; Settings.Save(); ApplySettings(); }, Settings.DesktopWidget));
-            menu.Items.Add(Item("Sovrimpressione compatta", "\uE718", () => { Settings.Overlay = !Settings.Overlay; Settings.Save(); ApplySettings(); }, Settings.Overlay));
+            menu.Items.Add(Item("Nella barra delle applicazioni", "\uE7C4", () => SetTaskbarDock(!Settings.TaskbarDock), Settings.TaskbarDock));
+            menu.Items.Add(Item("Sovrimpressione compatta", "\uE718", () =>
+            {
+                Settings.Overlay = !Settings.Overlay;
+                if (Settings.Overlay) Settings.TaskbarDock = false;
+                Settings.Save(); ApplySettings();
+            }, Settings.Overlay));
             if (anchor == desktop && desktop != null)
             {
                 menu.Items.Add(Item("Espandi sessioni", "\uE8C4", () =>
@@ -517,6 +568,7 @@ namespace AIMeter
                 bool wasDark = Theme.Dark;
                 Theme.Apply(Settings);
                 if (wasDark != Theme.Dark || e.Category == UserPreferenceCategory.Color) ApplyTheme();
+                if (dock != null) { dock.Refresh(Last, Settings.OverlayMetric); UpdatePillVisibility(); }
             }));
         }
     }

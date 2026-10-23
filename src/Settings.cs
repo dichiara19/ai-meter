@@ -33,6 +33,10 @@ namespace AIMeter
         public bool OverlayHideFullscreen { get; set; }
         public bool OverlayCollapsed { get; set; }
 
+        // pillola nella barra delle applicazioni
+        public bool TaskbarDock { get; set; }
+        public string TaskbarSide { get; set; }     // "auto", "left", "right"
+
         // generale
         public string Theme { get; set; }           // "system", "light", "dark"
         public string Refresh { get; set; }         // "auto", "low"
@@ -44,6 +48,7 @@ namespace AIMeter
             OpenAIEnabled = true; OpenAIShowChat = true;
             WslDistro = DefaultWslDistro(); WslUser = Environment.UserName;
             DesktopWidget = true; DesktopX = double.MinValue; DesktopY = double.MinValue;
+            TaskbarDock = false; TaskbarSide = "auto";
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
             Theme = "system"; Refresh = "auto";
         }
