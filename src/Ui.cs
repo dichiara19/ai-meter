@@ -95,6 +95,7 @@ namespace AIMeter
         /// <summary>Cerca l'icona nel pacchetto dell'app installata (registro dei pacchetti dell'utente).</summary>
         private static string FindInstalledLogo(string id, bool dark)
         {
+            if (id == "copilot") return FindCopilotLogo();
             string[] prefixes = id == "openai" ? new[] { "OpenAI.ChatGPT", "OpenAI.Codex_" } : new[] { "Claude_" };
             string[] names = id == "openai" && !dark
                 ? new[] { "Square44x44Logo.targetsize-256_altform-lightunplated.png", "Square44x44Logo.targetsize-256_altform-unplated.png" }
@@ -122,7 +123,34 @@ namespace AIMeter
             return null;
         }
 
-        public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : "Claude"; }
+        /// <summary>Icona ufficiale di Copilot, dall'estensione inclusa in VS Code.</summary>
+        private static string FindCopilotLogo()
+        {
+            foreach (var baseDir in new[] { Path.Combine(Probe.LocalAppData, @"Programs\Microsoft VS Code"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft VS Code") })
+            {
+                try
+                {
+                    if (!Directory.Exists(baseDir)) continue;
+                    foreach (var dir in new[] { baseDir }.Concat(Directory.GetDirectories(baseDir)))
+                    {
+                        string f = Path.Combine(dir, @"resources\app\extensions\copilot\assets\copilot.png");
+                        if (File.Exists(f)) return f;
+                    }
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            return null;
+        }
+
+        public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : id == "copilot" ? "Copilot" : "Claude"; }
+
+        /// <summary>Il limite da mostrare in pillola, icona e suggerimenti: la sessione di 5 ore, altrimenti il primo limite in percentuale.</summary>
+        public static UsageWindow Primary(Usage u)
+        {
+            if (u == null) return null;
+            return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null);
+        }
 
         public static string LevelBrush(double remaining, string brand)
         {
@@ -270,7 +298,7 @@ namespace AIMeter
                 item.Children.Add(logoHost);
 
                 var windows = p.Usage == null ? new UsageWindow[0] : p.Usage.Windows.ToArray();
-                var five = windows.FirstOrDefault(w => w.Short == "5h");
+                var five = Primary(p.Usage);
                 var week = windows.FirstOrDefault(w => w.Short == "7g");
                 var shown = metric == "week" ? new[] { week } : metric == "both" ? new[] { five, week } : new[] { five };
                 bool any = false;
@@ -299,9 +327,9 @@ namespace AIMeter
         {
             return string.Join("\n", s.Providers.Select(p =>
             {
-                var w = p.Usage == null ? null : p.Usage.Windows.FirstOrDefault(x => x.Short == "5h");
-                string n = p.Id == "claude" ? "Claude" : "ChatGPT";
-                return w == null ? n + ": nessun dato" : n + ": " + Math.Round(w.Remaining) + "% rimasto (5 ore)" +
+                var w = Primary(p.Usage);
+                string n = p.Name;
+                return w == null ? n + ": nessun dato" : n + ": " + Math.Round(w.Remaining) + "% rimasto (" + w.Label + ")" +
                        (w.ResetsAt.HasValue ? ", si azzera alle " + w.ResetsAt.Value.ToString("HH:mm") : "");
             }));
         }
@@ -328,7 +356,7 @@ namespace AIMeter
             var root = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
             var top = new DockPanel { LastChildFill = true };
             // per i crediti in denaro si mostra quanto resta, non la percentuale
-            string right = w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(w.Remaining).ToString(It) + "%";
+            string right = w.RightText ?? (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(w.Remaining).ToString(It) + "%");
             var pct = Text(right, 13, "Text", FontWeights.SemiBold);
             pct.Margin = new Thickness(8, 0, 0, 0);
             DockPanel.SetDock(pct, Dock.Right);
@@ -352,6 +380,7 @@ namespace AIMeter
             root.ToolTip = (w.Spent != null
                     ? string.Format(It, "{0}: usati {1} di {2}", w.Label, w.Spent.Format(w.Spent.Used), w.Spent.Format(w.Spent.Limit))
                     : string.Format(It, "{0}: usato {1:0}%, rimasto {2:0}%", w.Label, w.Used, w.Remaining))
+                + (w.Detail != null ? "\n" + w.Detail : "")
                 + (w.StartedAt.HasValue ? "\nIniziata " + w.StartedAt.Value.ToString("dddd d MMMM, HH:mm", It) : "")
                 + (w.ResetsAt.HasValue ? "\n" + (w.Spent != null ? "Si rinnova " : "Si azzera ") + w.ResetsAt.Value.ToString("dddd d MMMM, HH:mm", It) : "");
             return root;
@@ -407,7 +436,7 @@ namespace AIMeter
         }
 
         /// <summary>Scheda di un servizio: intestazione, limiti, avviso, elenco sessioni (se espansa).</summary>
-        public static Border ProviderCard(ProviderState p, bool expanded, Action toggle, Action login)
+        public static Border ProviderCard(ProviderState p, bool expanded, Action toggle, Action<string> login)
         {
             string brand = BrandBrush(p.Id);
             var stack = new StackPanel();
@@ -469,9 +498,18 @@ namespace AIMeter
             var limits = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
             if (p.Usage != null && p.Usage.Windows.Count > 0)
                 foreach (var w in p.Usage.Windows.Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
-            else
+            else if (!p.NeedsLogin)
                 limits.Children.Add(new TextBlock { Text = "Nessun dato sui limiti per ora", FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
             stack.Children.Add(limits);
+
+            // dato sui limiti non in tempo reale: lo si dice nella scheda, una volta sola
+            if (p.Usage != null && p.Usage.Source != "live" && string.IsNullOrEmpty(p.Notice))
+            {
+                string ago = Ago(p.Usage.At);
+                var st = Text("Limiti aggiornati " + (ago == "ora" ? "ora" : ago + " fa"), 11.5, "Text3");
+                st.Margin = new Thickness(0, 8, 0, 0);
+                stack.Children.Add(st);
+            }
 
             // ripartizione della settimana e crediti extra, in piccolo
             if (p.Usage != null && p.Usage.Breakdown.Count > 0)
@@ -500,12 +538,13 @@ namespace AIMeter
                 {
                     var link = new Button { Content = "Accedi", Padding = new Thickness(4, 0, 4, 1), FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
                     link.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
-                    link.Click += (o, e) => login();
+                    link.Click += (o, e) => login(p.Id);
                     DockPanel.SetDock(link, Dock.Right);
                     note.Children.Add(link);
                 }
                 var nt = Text(p.Notice, 11.5, "Text3");
                 nt.VerticalAlignment = VerticalAlignment.Center;
+                nt.TextWrapping = TextWrapping.Wrap;
                 note.Children.Add(nt);
                 stack.Children.Add(note);
             }

@@ -24,7 +24,7 @@ $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $refs = @(
     "$fw\WPF\PresentationCore.dll", "$fw\WPF\PresentationFramework.dll", "$fw\WPF\WindowsBase.dll",
     "$fw\System.Xaml.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll",
-    "$fw\System.Drawing.dll", "$fw\System.Core.dll"
+    "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll"
 )
 $src = Get-ChildItem (Join-Path $here 'src') -Filter *.cs | ForEach-Object { $_.FullName }
 

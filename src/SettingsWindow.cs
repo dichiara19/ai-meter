@@ -83,6 +83,14 @@ namespace AIMeter
                     Toggle(S.OpenAIEnabled, v => { S.OpenAIEnabled = v; Changed(); })),
                 Row(null, "App ChatGPT aperta", "ChatGPT non espone i limiti della chat: si vede solo se l'app è aperta.", Toggle(S.OpenAIShowChat, v => { S.OpenAIShowChat = v; Changed(); })));
 
+            bool gh = GitHubAuth.HasToken;
+            Group(
+                Row(Ui.Logo("copilot", 28), "GitHub Copilot",
+                    gh ? "Collegato a GitHub: richieste premium e quote mensili. Il token è cifrato con la protezione dati di Windows."
+                       : "Collega il tuo account GitHub per vedere richieste premium e quote mensili di Copilot.",
+                    Pair(gh ? Button("Scollega", () => { C.SignOutGitHub(); Build(); }, false) : Button("Collega GitHub…", () => C.LoginGitHub(), true),
+                         Toggle(S.CopilotEnabled, v => { S.CopilotEnabled = v; Changed(); }))));
+
             var wslRow = Row(null, "Distribuzione WSL", "Dove cercare Claude Code e Codex installati in Linux. Il widget non avvia mai WSL: lo legge solo se è già acceso.",
                 Combo(new[] { S.WslDistro }.Concat(WslDistros()).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => Tuple.Create(x, x)).ToArray(), S.WslDistro,
                       v => { S.WslDistro = v; Changed(); }));

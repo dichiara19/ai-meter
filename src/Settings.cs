@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text;
 using Microsoft.Win32;
@@ -16,6 +16,7 @@ namespace AIMeter
         public bool ClaudeShowCowork { get; set; }
         public bool OpenAIEnabled { get; set; }
         public bool OpenAIShowChat { get; set; }
+        public bool CopilotEnabled { get; set; }
         public string WslDistro { get; set; }
         public string WslUser { get; set; }
 
@@ -25,6 +26,7 @@ namespace AIMeter
         public double DesktopY { get; set; }
         public bool ExpandedClaude { get; set; }
         public bool ExpandedOpenAI { get; set; }
+        public bool ExpandedCopilot { get; set; }
 
         // sovrimpressione
         public bool Overlay { get; set; }
@@ -45,7 +47,7 @@ namespace AIMeter
         public Settings()
         {
             ClaudeEnabled = true; ClaudeLiveUsage = true; ClaudeShowChat = true; ClaudeShowCode = true; ClaudeShowCowork = true;
-            OpenAIEnabled = true; OpenAIShowChat = true;
+            OpenAIEnabled = true; OpenAIShowChat = true; CopilotEnabled = true;
             WslDistro = DefaultWslDistro(); WslUser = Environment.UserName;
             DesktopWidget = true; DesktopX = double.MinValue; DesktopY = double.MinValue;
             TaskbarDock = false; TaskbarSide = "auto";
