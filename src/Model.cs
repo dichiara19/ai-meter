@@ -41,6 +41,12 @@ namespace AIMeter
         public List<KeyValuePair<string, double>> Breakdown = new List<KeyValuePair<string, double>>();
         /// <summary>Riga di stato dei crediti extra / a consumo, se il servizio li prevede.</summary>
         public string CreditsNote;
+
+        /// <summary>Stessi dati, marcati come non più in tempo reale.</summary>
+        public Usage AsCache()
+        {
+            return new Usage { Windows = Windows, Source = "cache", At = At, Breakdown = Breakdown, CreditsNote = CreditsNote };
+        }
     }
 
     internal sealed class Session

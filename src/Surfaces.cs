@@ -278,10 +278,10 @@ namespace AIMeter
             }
             var parts = s.Providers.Where(p => p.Usage != null).Select(p =>
             {
-                string n = p.Id == "claude" ? "Claude" : "Codex";
-                if (p.Usage.Source == "live") return n + ": in tempo reale";
-                if (p.Usage.Source == "cache") return n + ": dato di " + (Ui.Ago(p.Usage.At) == "ora" ? "adesso" : Ui.Ago(p.Usage.At) + " fa");
-                return n + ": dai log locali";
+                // uguale per tutti i servizi: conta solo quanto è recente il dato sui limiti
+                if (p.Usage.Source == "live") return p.Name + ": in tempo reale";
+                string ago = Ui.Ago(p.Usage.At);
+                return p.Name + ": " + (ago == "ora" ? "aggiornato ora" : "aggiornato " + ago + " fa");
             });
             footer.Text = "Aggiornato alle " + s.Taken.ToString("HH:mm") + "  ·  " + string.Join("  ·  ", parts);
         }
