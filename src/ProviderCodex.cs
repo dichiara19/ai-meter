@@ -11,7 +11,7 @@ namespace AIMeter
 {
     /// <summary>
     /// ChatGPT / Codex: thread Codex attivi dai log locali, app ChatGPT aperta, limiti in tempo reale chiedendoli
-    /// al programma codex installato (JSON-RPC "app-server", tecnica di CodexBar, MIT). È Codex a usare il proprio
+    /// al programma codex installato (JSON-RPC "app-server"). È Codex a usare il proprio
     /// accesso: noi non leggiamo né rinnoviamo token. Se codex non risponde, si ripiega sull'ultimo dato nei log.
     /// </summary>
     internal sealed class CodexProvider : Provider
@@ -24,6 +24,12 @@ namespace AIMeter
         public CodexProvider(Settings s) { S = s; }
 
         public override string Id { get { return "openai"; } }
+
+        /// <summary>Codex (app o CLI) è presente su questo PC.</summary>
+        public static bool Detected()
+        {
+            return Directory.Exists(Path.Combine(Probe.Home, ".codex")) || CodexPath() != null;
+        }
         public override bool Enabled(Settings s) { return s.OpenAIEnabled; }
         public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; }
 

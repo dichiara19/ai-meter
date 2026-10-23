@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text;
 using Microsoft.Win32;
@@ -46,8 +46,8 @@ namespace AIMeter
 
         public Settings()
         {
-            ClaudeEnabled = true; ClaudeLiveUsage = true; ClaudeShowChat = true; ClaudeShowCode = true; ClaudeShowCowork = true;
-            OpenAIEnabled = true; OpenAIShowChat = true; CopilotEnabled = true;
+            ClaudeEnabled = ClaudeProvider.Detected(); ClaudeLiveUsage = true; ClaudeShowChat = true; ClaudeShowCode = true; ClaudeShowCowork = true;
+            OpenAIEnabled = CodexProvider.Detected(); OpenAIShowChat = true; CopilotEnabled = false;
             WslDistro = DefaultWslDistro(); WslUser = Environment.UserName;
             DesktopWidget = true; DesktopX = double.MinValue; DesktopY = double.MinValue;
             TaskbarDock = false; TaskbarSide = "auto";
