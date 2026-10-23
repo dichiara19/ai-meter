@@ -164,6 +164,52 @@ namespace AIMeter
         private struct APPBARDATA { public int cbSize; public IntPtr hWnd; public uint uCallbackMessage, uEdge; public RECT rc; public IntPtr lParam; }
         [DllImport("shell32.dll")] private static extern IntPtr SHAppBarMessage(uint msg, ref APPBARDATA data);
 
+        /// <summary>Rettangolo (pixel fisici), lato e nascondimento automatico della barra del monitor principale.</summary>
+        public static void TaskbarPos(out RECT rect, out int edge, out bool autoHide)
+        {
+            var d = new APPBARDATA();
+            d.cbSize = Marshal.SizeOf(d);
+            SHAppBarMessage(5 /* ABM_GETTASKBARPOS */, ref d);
+            rect = d.rc;
+            edge = (int)d.uEdge;
+            var s = new APPBARDATA();
+            s.cbSize = Marshal.SizeOf(s);
+            autoHide = ((long)SHAppBarMessage(4 /* ABM_GETSTATE */, ref s) & 1) != 0;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowW(string cls, string title);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string title);
+        [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT r);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
+
+        /// <summary>Bordo sinistro dell'area di notifica della barra principale (pixel fisici), 0 se non rilevabile.</summary>
+        public static int TrayLeft()
+        {
+            IntPtr bar = FindWindowW("Shell_TrayWnd", null);
+            IntPtr tray = bar == IntPtr.Zero ? IntPtr.Zero : FindWindowExW(bar, IntPtr.Zero, "TrayNotifyWnd", null);
+            RECT r;
+            return tray != IntPtr.Zero && GetWindowRect(tray, out r) && r.Right > r.Left ? r.Left : 0;
+        }
+
+        /// <summary>Vero se la finestra è la barra delle applicazioni (principale o secondaria).</summary>
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+
+        public static bool IsOwnWindow(IntPtr hwnd)
+        {
+            uint pid;
+            GetWindowThreadProcessId(hwnd, out pid);
+            return pid == (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+        }
+
+        public static bool IsTaskbar(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            var sb = new StringBuilder(64);
+            GetClassNameW(hwnd, sb, sb.Capacity);
+            string c = sb.ToString();
+            return c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd";
+        }
+
         /// <summary>Lato della barra delle applicazioni: 0 sinistra, 1 alto, 2 destra, 3 basso.</summary>
         public static int TaskbarEdge()
         {

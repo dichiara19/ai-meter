@@ -49,13 +49,15 @@ namespace AIMeter
         /// Logo ufficiale del servizio, letto dall'app installata sul PC (i marchi non sono inclusi nel progetto).
         /// Se l'app non c'è, un monogramma con il colore del servizio.
         /// </summary>
-        public static FrameworkElement Logo(string id, double size)
+        public static FrameworkElement Logo(string id, double size) { return Logo(id, size, Theme.Dark); }
+
+        public static FrameworkElement Logo(string id, double size, bool dark)
         {
-            string key = id + (Theme.Dark ? ":dark" : ":light");
+            string key = id + (dark ? ":dark" : ":light");
             BitmapImage bmp;
             if (!Logos.TryGetValue(key, out bmp))
             {
-                string file = FindInstalledLogo(id, Theme.Dark);
+                string file = FindInstalledLogo(id, dark);
                 if (file != null)
                 {
                     try
@@ -230,6 +232,70 @@ namespace AIMeter
                 if (r <= t) break;
             }
             return g;
+        }
+
+        /// <summary>
+        /// Riga compatta "logo + % rimasto + barretta" per ogni servizio: è il contenuto della pillola,
+        /// sia in sovrimpressione sia nella barra delle applicazioni. dark: tema per i loghi (null = tema dell'app).
+        /// </summary>
+        public static StackPanel PillRow(Snapshot s, string metric, bool? dark)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            foreach (var p in s.Providers)
+            {
+                if (row.Children.Count > 0)
+                {
+                    var sep = new Border { Width = 1, Margin = new Thickness(10, 2, 10, 2) };
+                    sep.SetResourceReference(Border.BackgroundProperty, "Divider");
+                    row.Children.Add(sep);
+                }
+                var item = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                var logoHost = new Grid { Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center };
+                logoHost.Children.Add(Logo(p.Id, 16, dark ?? Theme.Dark));
+                if (p.Busy > 0)
+                {
+                    var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -2, -2, 0), BorderThickness = new Thickness(1.2) };
+                    dot.SetResourceReference(Border.BackgroundProperty, BrandBrush(p.Id));
+                    dot.SetResourceReference(Border.BorderBrushProperty, "Fallback");
+                    logoHost.Children.Add(dot);
+                }
+                item.Children.Add(logoHost);
+
+                var windows = p.Usage == null ? new UsageWindow[0] : p.Usage.Windows.ToArray();
+                var five = windows.FirstOrDefault(w => w.Short == "5h");
+                var week = windows.FirstOrDefault(w => w.Short == "7g");
+                var shown = metric == "week" ? new[] { week } : metric == "both" ? new[] { five, week } : new[] { five };
+                bool any = false;
+                foreach (var w in shown.Where(x => x != null))
+                {
+                    var stack = new StackPanel { Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+                    var t = Text(Math.Round(w.Remaining).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
+                    t.HorizontalAlignment = HorizontalAlignment.Center;
+                    stack.Children.Add(t);
+                    var bar = Bar(w.Remaining, LevelBrush(w.Remaining, BrandBrush(p.Id)), 2);
+                    bar.Width = 26;
+                    bar.Margin = new Thickness(0, 1, 0, 0);
+                    stack.Children.Add(bar);
+                    item.Children.Add(stack);
+                    any = true;
+                }
+                if (!any) { var t = Text("–", 12, "Text3"); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); }
+                row.Children.Add(item);
+            }
+            if (s.Providers.Count == 0) row.Children.Add(Text("AI Meter", 12, "Text2"));
+            return row;
+        }
+
+        /// <summary>Riepilogo testuale dei limiti a 5 ore, per i suggerimenti.</summary>
+        public static string Summary(Snapshot s)
+        {
+            return string.Join("\n", s.Providers.Select(p =>
+            {
+                var w = p.Usage == null ? null : p.Usage.Windows.FirstOrDefault(x => x.Short == "5h");
+                string n = p.Id == "claude" ? "Claude" : "ChatGPT";
+                return w == null ? n + ": nessun dato" : n + ": " + Math.Round(w.Remaining) + "% rimasto (5 ore)" +
+                       (w.ResetsAt.HasValue ? ", si azzera alle " + w.ResetsAt.Value.ToString("HH:mm") : "");
+            }));
         }
 
         public static FrameworkElement Bar(double remaining, string brush, double height)
