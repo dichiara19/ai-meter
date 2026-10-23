@@ -219,7 +219,7 @@ namespace AIMeter
             if (claudeLive != null && (fallback == null || claudeLive.At >= fallback.At)) p.Usage = claudeLive;
             else p.Usage = fallback;
             if (p.Usage == claudeLive && claudeLive != null && (DateTime.Now - claudeLive.At).TotalMinutes > interval + 2)
-                p.Usage = new Usage { Windows = claudeLive.Windows, Source = "cache", At = claudeLive.At };
+                p.Usage = new Usage { Windows = claudeLive.Windows, Source = "cache", At = claudeLive.At, Breakdown = claudeLive.Breakdown, CreditsNote = claudeLive.CreditsNote };
 
             if (!S.ClaudeLiveUsage) return;
             if (creds == null && !wslUp && WslHasClaude == true)
@@ -271,7 +271,13 @@ namespace AIMeter
                 req.ReadWriteTimeout = 15000;
                 using (var resp = (HttpWebResponse)req.GetResponse())
                 using (var r = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                    return ParseClaudeUsage(Json.Parse(r.ReadToEnd()));
+                {
+                    string body = r.ReadToEnd();
+                    // ultima risposta così com'è (solo percentuali e date, nessun token): utile per diagnosi e nuovi campi
+                    try { File.WriteAllText(Path.Combine(Settings.Folder, "claude-usage-raw.json"), body, new UTF8Encoding(false)); }
+                    catch (IOException) { }
+                    return ParseClaudeUsage(Json.Parse(body));
+                }
             }
             catch (WebException e)
             {
@@ -283,23 +289,89 @@ namespace AIMeter
             catch (IOException) { return null; }
         }
 
+        /// <summary>
+        /// Interpreta la risposta di /api/oauth/usage. Usa l'elenco "limits" (sessione, settimana, settimana per modello)
+        /// e, se manca, i campi storici five_hour / seven_day. Aggiunge crediti promozionali, crediti extra e ripartizione.
+        /// </summary>
         private static Usage ParseClaudeUsage(Dictionary<string, object> d)
         {
             if (d == null) return null;
             var u = new Usage { Source = "live", At = DateTime.Now };
-            AddClaudeWindow(u, d, "five_hour", "5 ore", "5h");
-            AddClaudeWindow(u, d, "seven_day", "Settimana", "7g");
-            AddClaudeWindow(u, d, "seven_day_opus", "Settimana · Opus", "Op");
-            AddClaudeWindow(u, d, "seven_day_sonnet", "Settimana · Sonnet", "So");
+            var limits = d.ContainsKey("limits") ? d["limits"] as object[] : null;
+            if (limits != null)
+            {
+                foreach (var l in limits.OfType<Dictionary<string, object>>())
+                {
+                    string kind = Json.Str(l, "kind");
+                    double? pct = Json.Num(l, "percent");
+                    if (pct == null) continue;
+                    DateTime? resets = Json.FromIso(Json.Str(l, "resets_at"));
+                    if (kind == "session")
+                        u.Windows.Add(new UsageWindow { Label = "Sessione 5 h", Short = "5h", Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddHours(-5) : (DateTime?)null });
+                    else if (kind == "weekly_all")
+                        u.Windows.Add(new UsageWindow { Label = "Settimana", Short = "7g", Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddDays(-7) : (DateTime?)null });
+                    else if (kind == "weekly_scoped")
+                    {
+                        string model = Json.Str(Json.Obj(Json.Obj(l, "scope"), "model"), "display_name");
+                        u.Windows.Add(new UsageWindow { Label = "Settimana · " + (model ?? "modello"), Short = "m", Used = pct.Value, ResetsAt = resets });
+                    }
+                }
+            }
+            if (u.Windows.Count == 0)
+            {
+                AddClaudeWindow(u, d, "five_hour", "Sessione 5 h", "5h", TimeSpan.FromHours(5));
+                AddClaudeWindow(u, d, "seven_day", "Settimana", "7g", TimeSpan.FromDays(7));
+                AddClaudeWindow(u, d, "seven_day_opus", "Settimana · Opus", "m", null);
+                AddClaudeWindow(u, d, "seven_day_sonnet", "Settimana · Sonnet", "m", null);
+            }
+
+            // crediti promozionali (in dollari, con rinnovo): l'app Claude li riconosce da limit_dollars > 0
+            foreach (var kv in d)
+            {
+                var g = kv.Value as Dictionary<string, object>;
+                double? limit = Json.Num(g, "limit_dollars"), used = Json.Num(g, "used_dollars");
+                if (limit == null || limit <= 0 || used == null) continue;
+                u.Windows.Add(new UsageWindow
+                {
+                    Label = "Credito promozionale", Short = "$", Used = Json.Num(g, "utilization") ?? used.Value / limit.Value * 100,
+                    ResetsAt = Json.FromIso(Json.Str(g, "resets_at")), Spent = new Money { Used = used.Value, Limit = limit.Value, Currency = "USD" },
+                });
+            }
+
+            // crediti extra a consumo (oltre i limiti del piano)
+            var extra = Json.Obj(d, "extra_usage");
+            if (extra != null && (Json.Bool(extra, "is_enabled") || Json.Bool(extra, "credits_ever_enabled")))
+            {
+                double scale = Math.Pow(10, Json.Num(extra, "decimal_places") ?? 2);
+                var m = new Money { Used = (Json.Num(extra, "used_credits") ?? 0) / scale, Limit = (Json.Num(extra, "monthly_limit") ?? 0) / scale, Currency = Json.Str(extra, "currency") ?? "USD" };
+                string state = Json.Bool(extra, "is_enabled") ? "attivi"
+                    : Json.Str(extra, "disabled_reason") == "out_of_credits" ? "sospesi, credito esaurito" : "disattivati";
+                u.CreditsNote = "Crediti extra: " + m.Format(m.Used) + " di " + m.Format(m.Limit) + " al mese · " + state;
+            }
+
+            // come si ripartisce la settimana tra Claude Code, chat, Cowork…
+            var rows = Json.Obj(d, "seven_day_breakdown") != null && Json.Obj(d, "seven_day_breakdown").ContainsKey("rows")
+                ? Json.Obj(d, "seven_day_breakdown")["rows"] as object[] : null;
+            if (rows != null)
+                foreach (var r in rows.OfType<Dictionary<string, object>>())
+                {
+                    double? p = Json.Num(r, "percent");
+                    if (p != null && p > 0) u.Breakdown.Add(new KeyValuePair<string, double>(Json.Str(r, "display_name") ?? Json.Str(r, "key"), p.Value));
+                }
             return u.Windows.Count > 0 ? u : null;
         }
 
-        private static void AddClaudeWindow(Usage u, Dictionary<string, object> d, string key, string label, string shortLabel)
+        private static void AddClaudeWindow(Usage u, Dictionary<string, object> d, string key, string label, string shortLabel, TimeSpan? length)
         {
             var w = Json.Obj(d, key);
             double? used = Json.Num(w, "utilization");
             if (used == null) return;
-            u.Windows.Add(new UsageWindow { Label = label, Short = shortLabel, Used = used.Value, ResetsAt = Json.FromIso(Json.Str(w, "resets_at")) });
+            DateTime? resets = Json.FromIso(Json.Str(w, "resets_at"));
+            u.Windows.Add(new UsageWindow
+            {
+                Label = label, Short = shortLabel, Used = used.Value, ResetsAt = resets,
+                StartedAt = resets.HasValue && length.HasValue ? resets.Value - length.Value : (DateTime?)null,
+            });
         }
 
         private void RefreshClaudeLogin(string credsPath)
@@ -347,34 +419,31 @@ namespace AIMeter
             }) as Usage;
         }
 
+        private static string UsageRawFile { get { return Path.Combine(Settings.Folder, "claude-usage-raw.json"); } }
+
+        /// <summary>Ricorda il piano (serve anche quando WSL è spento); i limiti restano nella risposta grezza salvata.</summary>
         private void PersistClaudeUsage(Usage u)
         {
             try
             {
                 Directory.CreateDirectory(Settings.Folder);
-                var rows = u.Windows.Select(w => new Dictionary<string, object>
-                {
-                    { "label", w.Label }, { "short", w.Short }, { "used", w.Used },
-                    { "resets", w.ResetsAt.HasValue ? w.ResetsAt.Value.ToUniversalTime().ToString("o") : null },
-                }).ToList();
-                var doc = new Dictionary<string, object> { { "at", u.At.ToUniversalTime().ToString("o") }, { "plan", claudePlan }, { "windows", rows } };
-                File.WriteAllText(UsageCacheFile, Json.Serialize(doc), new UTF8Encoding(false));
+                File.WriteAllText(UsageCacheFile, Json.Serialize(new Dictionary<string, object> { { "plan", claudePlan } }), new UTF8Encoding(false));
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
 
+        /// <summary>All'avvio riparte dall'ultima risposta salvata, marcata come non in tempo reale.</summary>
         private void LoadPersistedClaudeUsage()
         {
-            var d = Json.ParseFile(UsageCacheFile);
-            if (d == null) return;
-            var u = new Usage { Source = "cache", At = Json.FromIso(Json.Str(d, "at")) ?? DateTime.MinValue };
-            claudePlan = Json.Str(d, "plan");
-            var rows = d.ContainsKey("windows") ? d["windows"] as object[] : null;
-            if (rows == null) return;
-            foreach (Dictionary<string, object> r in rows.OfType<Dictionary<string, object>>())
-                u.Windows.Add(new UsageWindow { Label = Json.Str(r, "label"), Short = Json.Str(r, "short"), Used = Json.Num(r, "used") ?? 0, ResetsAt = Json.FromIso(Json.Str(r, "resets")) });
-            if (u.Windows.Count > 0) claudeLive = u;
+            claudePlan = Json.Str(Json.ParseFile(UsageCacheFile), "plan");
+            var fi = new FileInfo(UsageRawFile);
+            if (!fi.Exists) return;
+            var u = ParseClaudeUsage(Json.ParseFile(fi.FullName));
+            if (u == null) return;
+            u.Source = "cache";
+            u.At = fi.LastWriteTime;
+            claudeLive = u;
         }
 
         // ================================================================ ChatGPT · Codex
@@ -482,9 +551,14 @@ namespace AIMeter
                     var w = Json.Obj(rl, key);
                     if (w == null) continue;
                     int mins = (int)(Json.Num(w, "window_minutes") ?? 0);
-                    string label = mins == 300 ? "5 ore" : mins == 10080 ? "Settimana" : (mins / 60) + " ore";
+                    string label = mins == 300 ? "Sessione 5 h" : mins == 10080 ? "Settimana" : (mins / 60) + " ore";
                     string sh = mins == 300 ? "5h" : mins == 10080 ? "7g" : (mins / 60) + "h";
-                    u.Windows.Add(new UsageWindow { Label = label, Short = sh, Used = Json.Num(w, "used_percent") ?? 0, ResetsAt = Json.FromUnix(Json.Num(w, "resets_at")) });
+                    DateTime? resets = Json.FromUnix(Json.Num(w, "resets_at"));
+                    u.Windows.Add(new UsageWindow
+                    {
+                        Label = label, Short = sh, Used = Json.Num(w, "used_percent") ?? 0, ResetsAt = resets,
+                        StartedAt = resets.HasValue && mins > 0 ? resets.Value.AddMinutes(-mins) : (DateTime?)null,
+                    });
                 }
                 return Tuple.Create(u, Json.Str(rl, "plan_type"));
             }) as Tuple<Usage, string>;

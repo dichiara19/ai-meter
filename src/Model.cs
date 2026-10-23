@@ -13,7 +13,23 @@ namespace AIMeter
         public string Short;      // etichetta breve per la pillola: "5h", "7g"
         public double Used;       // percentuale usata 0-100
         public DateTime? ResetsAt; // ora locale
+        public DateTime? StartedAt; // inizio della finestra, se noto o ricavabile (fine − durata)
+        public Money Spent;       // per i crediti in denaro: speso e limite
         public double Remaining { get { return Math.Max(0, Math.Min(100, 100 - Used)); } }
+    }
+
+    /// <summary>Importo speso su un limite, nella valuta del servizio.</summary>
+    internal sealed class Money
+    {
+        public double Used;
+        public double Limit;
+        public string Currency;   // "USD", "EUR"…
+
+        public string Format(double v)
+        {
+            string sym = Currency == "EUR" ? "€" : Currency == "USD" ? "$" : Currency == "GBP" ? "£" : Currency;
+            return v.ToString("0.00", new CultureInfo("it-IT")) + " " + sym;
+        }
     }
 
     internal sealed class Usage
@@ -21,6 +37,10 @@ namespace AIMeter
         public List<UsageWindow> Windows = new List<UsageWindow>();
         public string Source;     // "live", "cache", "log"
         public DateTime At;       // quando il dato è stato rilevato
+        /// <summary>Come si ripartisce l'uso settimanale (es. Claude Code 98%, Cowork 2%).</summary>
+        public List<KeyValuePair<string, double>> Breakdown = new List<KeyValuePair<string, double>>();
+        /// <summary>Riga di stato dei crediti extra / a consumo, se il servizio li prevede.</summary>
+        public string CreditsNote;
     }
 
     internal sealed class Session
