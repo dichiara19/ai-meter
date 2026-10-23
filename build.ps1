@@ -1,7 +1,9 @@
-# Compila AI Meter con il compilatore C# di .NET Framework 4.8 (già incluso in Windows) e lo installa per l'utente.
+﻿# Compila AI Meter con il compilatore C# di .NET Framework 4.8 (già incluso in Windows) e lo installa per l'utente.
 #   powershell -ExecutionPolicy Bypass -File build.ps1            compila e installa
 #   powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstall compila soltanto (in .\bin)
-param([switch]$NoInstall)
+#   -Mode exe     installa l'eseguibile compilato (serve un eseguibile firmato se Smart App Control è attivo)
+#   -Mode script  installa il sorgente con il launcher AIMeter.ps1 (predefinito: funziona con Smart App Control)
+param([switch]$NoInstall, [ValidateSet('script', 'exe')][string]$Mode = 'script')
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $bin = Join-Path $root 'bin'
@@ -89,16 +91,45 @@ if ($NoInstall) { return }
 
 # --- installazione per l'utente corrente (nessun permesso di amministratore)
 $dest = Join-Path $env:LOCALAPPDATA 'Programs\AI Meter'
+
+# ferma l'istanza in esecuzione, sia come eseguibile sia come script
 Get-Process AIMeter -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+    Where-Object { $_.CommandLine -like '*AIMeter.ps1*' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Milliseconds 500
+
+if (Test-Path $dest) { Remove-Item (Join-Path $dest '*') -Recurse -Force }
 New-Item -ItemType Directory -Force $dest | Out-Null
-Copy-Item (Join-Path $bin 'AIMeter.exe'), (Join-Path $bin 'AIMeter.exe.config') $dest -Force
+if ($Mode -eq 'exe') {
+    Copy-Item (Join-Path $bin 'AIMeter.exe'), (Join-Path $bin 'AIMeter.exe.config') $dest -Force
+    $target = Join-Path $dest 'AIMeter.exe'; $arguments = ''
+    $run = "`"$target`""
+}
+else {
+    New-Item -ItemType Directory -Force (Join-Path $dest 'src'), (Join-Path $dest 'assets') | Out-Null
+    Copy-Item (Join-Path $root 'src\*.cs') (Join-Path $dest 'src') -Force
+    Copy-Item (Join-Path $root 'assets\app.ico') (Join-Path $dest 'assets') -Force
+    Copy-Item (Join-Path $root 'AIMeter.ps1') $dest -Force
+    $target = Join-Path $env:WINDIR 'System32\conhost.exe'
+    $arguments = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File `"$(Join-Path $dest 'AIMeter.ps1')`""
+    $run = "conhost.exe $arguments"
+}
 
 $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\AI Meter.lnk'
 $sh = New-Object -ComObject WScript.Shell
 $s = $sh.CreateShortcut($lnk)
-$s.TargetPath = Join-Path $dest 'AIMeter.exe'
+$s.TargetPath = $target
+$s.Arguments = $arguments
 $s.WorkingDirectory = $dest
+$s.IconLocation = (Join-Path $dest 'assets\app.ico') -replace '^(.*)$', '$1,0'
+if ($Mode -eq 'exe') { $s.IconLocation = "$target,0" }
 $s.Description = 'Sessioni e limiti dei modelli AI'
 $s.Save()
-Write-Host "Installato in $dest (collegamento nel menu Start)"
+
+# l'avvio automatico, se attivo, segue la modalità installata
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+if (Get-ItemProperty $runKey -Name 'AI Meter' -ErrorAction SilentlyContinue) {
+    Set-ItemProperty $runKey -Name 'AI Meter' -Value "$run --startup"
+}
+Write-Host "Installato in $dest (modalità $Mode, collegamento nel menu Start)"

@@ -90,6 +90,15 @@ namespace AIMeter
             return s.SystemStatusFlag == 1 || s.ACLineStatus == 0;
         }
 
+        [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+        /// <summary>DPI per monitor (V2). Serve quando manca il manifest dell'eseguibile, cioè nell'avvio da PowerShell.</summary>
+        public static void EnablePerMonitorDpi()
+        {
+            try { SetProcessDpiAwarenessContext(new IntPtr(-4)); }
+            catch (EntryPointNotFoundException) { }
+        }
+
         // --- finestre e DWM -------------------------------------------------------
         [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
 

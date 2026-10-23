@@ -117,7 +117,7 @@ namespace AIMeter
             {
                 using (var k = Registry.CurrentUser.CreateSubKey(RunKey))
                 {
-                    if (value) k.SetValue("AI Meter", "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\" --startup");
+                    if (value) k.SetValue("AI Meter", Program.LaunchCommand + " --startup");
                     else k.DeleteValue("AI Meter", false);
                 }
             }

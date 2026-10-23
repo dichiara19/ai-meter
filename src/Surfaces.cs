@@ -136,12 +136,7 @@ namespace AIMeter
             hover.Tick += (o, e) => { hover.Stop(); C.ShowDetails(this); };
             MouseEnter += (o, e) => { C.CancelHideDetails(); hover.Start(); };
             MouseLeave += (o, e) => { hover.Stop(); C.ScheduleHideDetails(); };
-            MouseLeftButtonUp += (o, e) =>
-            {
-                hover.Stop();
-                if (C.Settings.OverlayCollapsed) C.SetOverlayCollapsed(false);
-                else C.ShowDetails(this);
-            };
+            MouseLeftButtonUp += (o, e) => { hover.Stop(); C.ShowDetails(this); };
             MouseRightButtonUp += (o, e) => { hover.Stop(); C.ShowMenu(this); e.Handled = true; };
         }
 
@@ -155,10 +150,14 @@ namespace AIMeter
         {
             var five = s.Providers.Select(p => Tuple.Create(p, p.Usage == null ? null : p.Usage.Windows.FirstOrDefault(w => w.Short == "5h"))).ToList();
             var icon = Ui.RingIcon(five, 24);
-            icon.Margin = new Thickness(6);
-            icon.ToolTip = string.Join("\n", five.Select(t => (t.Item1.Id == "claude" ? "Claude" : "ChatGPT") + ": " +
+            // un pulsante vero: clic, tastiera e strumenti di accessibilità lo riespandono allo stesso modo
+            var b = new Button { Content = icon, Padding = new Thickness(6), Cursor = Cursors.Hand };
+            b.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
+            System.Windows.Automation.AutomationProperties.SetName(b, "Espandi AI Meter");
+            b.ToolTip = string.Join("\n", five.Select(t => (t.Item1.Id == "claude" ? "Claude" : "ChatGPT") + ": " +
                 (t.Item2 == null ? "nessun dato" : Math.Round(t.Item2.Remaining) + "% rimasto (5 ore)"))) + "\nClic per espandere";
-            return icon;
+            b.Click += (o, e) => { hover.Stop(); C.SetOverlayCollapsed(false); };
+            return b;
         }
 
         private FrameworkElement Expanded(Snapshot s, string metric)
@@ -225,6 +224,7 @@ namespace AIMeter
             var b = Ui.IconButton(glyph, tip, (o, e) => { hover.Stop(); click(); });
             b.Width = 18; b.Height = 15; b.FontSize = 8;
             b.Cursor = Cursors.Arrow;
+            System.Windows.Automation.AutomationProperties.SetName(b, tip);
             return b;
         }
 

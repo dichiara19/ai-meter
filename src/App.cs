@@ -15,10 +15,52 @@ using Forms = System.Windows.Forms;
 
 namespace AIMeter
 {
+    /// <summary>
+    /// Punto d'ingresso pubblico per l'avvio da PowerShell (AIMeter.ps1): con Smart App Control attivo un eseguibile
+    /// non firmato viene bloccato, mentre PowerShell (firmato da Microsoft) può compilare ed eseguire il sorgente.
+    /// </summary>
+    public static class Entry
+    {
+        public static void Run(string[] args)
+        {
+            // senza il manifest dell'eseguibile: DPI per monitor impostati qui, prima che WPF si inizializzi
+            Native.EnablePerMonitorDpi();
+            AppContext.SetSwitch("Switch.System.Windows.DoNotScaleForDpiChanges", false);
+            Program.Run(args);
+        }
+    }
+
     internal static class Program
     {
+        /// <summary>Cartella dell'installazione: quella dell'eseguibile, o quella indicata dal launcher PowerShell.</summary>
+        public static string Home
+        {
+            get { return Environment.GetEnvironmentVariable("AIMETER_HOME") ?? AppDomain.CurrentDomain.BaseDirectory; }
+        }
+
+        /// <summary>Comando con cui Windows deve avviare l'app (avvio automatico).</summary>
+        public static string LaunchCommand
+        {
+            get
+            {
+                return Environment.GetEnvironmentVariable("AIMETER_LAUNCH")
+                       ?? "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\"";
+            }
+        }
+
+        /// <summary>Risorsa incorporata nell'eseguibile, oppure il file corrispondente in assets\ (avvio da sorgente).</summary>
+        public static Stream OpenAsset(string name)
+        {
+            var s = typeof(Program).Assembly.GetManifestResourceStream(name);
+            if (s != null) return s;
+            string f = Path.Combine(Home, "assets", name);
+            return File.Exists(f) ? File.OpenRead(f) : null;
+        }
+
         [STAThread]
-        private static void Main(string[] args)
+        private static void Main(string[] args) { Run(args); }
+
+        internal static void Run(string[] args)
         {
             bool created;
             using (var mutex = new Mutex(true, @"Local\AIMeter.Instance", out created))
@@ -329,7 +371,7 @@ namespace AIMeter
         private void CreateTray()
         {
             tray = new Forms.NotifyIcon { Text = "AI Meter", Visible = true };
-            using (var s = typeof(Controller).Assembly.GetManifestResourceStream("app.ico"))
+            using (var s = Program.OpenAsset("app.ico"))
                 tray.Icon = new System.Drawing.Icon(s, Forms.SystemInformation.SmallIconSize);
             tray.MouseUp += (o, e) =>
             {
@@ -444,7 +486,7 @@ namespace AIMeter
 
         public static ImageSource AppIconImage()
         {
-            using (var s = typeof(Controller).Assembly.GetManifestResourceStream("app.ico"))
+            using (var s = Program.OpenAsset("app.ico"))
             {
                 var dec = new IconBitmapDecoder(s, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
                 return dec.Frames.OrderByDescending(f => f.PixelWidth).First();
