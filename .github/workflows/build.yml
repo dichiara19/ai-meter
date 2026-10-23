@@ -50,22 +50,25 @@ jobs:
           New-Item -ItemType Directory dist | Out-Null
           Copy-Item $exe, bin\AIMeter.exe.config dist
           Compress-Archive dist\* AIMeter.zip
+          # stessa app, avviata dal sorgente con PowerShell: per i PC con Smart App Control attivo
+          New-Item -ItemType Directory script, script\src, script\assets | Out-Null
+          Copy-Item src\*.cs script\src
+          Copy-Item assets\app.ico script\assets
+          Copy-Item AIMeter.ps1, 'Start AI Meter.cmd', LICENSE script
+          Compress-Archive script\* AIMeter-script.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: AIMeter
-          path: AIMeter.zip
+          path: |
+            AIMeter.zip
+            AIMeter-script.zip
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: AIMeter.zip
-          body: |
-            Built by GitHub Actions from the tagged source of this repository.
-
-            Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
-            **Code signing policy:** https://github.com/dichiara19/ai-meter#code-signing-policy
-            **Privacy policy:** https://github.com/dichiara19/ai-meter#privacy-policy
-
-            Unzip, run `AIMeter.exe`. Requires Windows 10/11 (uses .NET Framework 4.8, already part of Windows).
+          files: |
+            AIMeter.zip
+            AIMeter-script.zip
+          body_path: RELEASE_NOTES.md
