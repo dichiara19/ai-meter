@@ -43,7 +43,7 @@ namespace AIMeter
             var st = new ProviderState { Id = "openai", Name = "ChatGPT" };
             bool app = p.IsRunning("chatgpt.exe");
             if (app && S.OpenAIShowChat)
-                st.Sessions.Add(new Session { Kind = "Chat", Title = "App ChatGPT aperta", Status = "app" });
+                st.Sessions.Add(new Session { Kind = "Chat", Title = "ChatGPT app open", Status = "app" });
 
             var rollouts = Rollouts(p, 14);
             var names = ThreadNames(p);
@@ -189,10 +189,10 @@ namespace AIMeter
                     AddWindows(u, other, Json.Str(other, "limitName") ?? kv.Key);
                 }
 
-            var notes = new List<string>();
+            var notes = new List<Func<string>>();
             var credits = Json.Obj(rl, "credits");
-            if (credits != null && Json.Bool(credits, "unlimited")) notes.Add("Crediti Codex: illimitati");
-            else if (credits != null && Json.Bool(credits, "hasCredits")) notes.Add("Crediti Codex: " + (Json.Str(credits, "balance") ?? "0"));
+            if (credits != null && Json.Bool(credits, "unlimited")) notes.Add(() => L.T("Codex credits: unlimited"));
+            else if (credits != null && Json.Bool(credits, "hasCredits")) { string bal = Json.Str(credits, "balance") ?? "0"; notes.Add(() => L.F("Codex credits: {0}", bal)); }
 
             var resets = Json.Obj(r, "rateLimitResetCredits");
             var list = resets != null && resets.ContainsKey("credits") ? resets["credits"] as object[] : null;
@@ -202,11 +202,12 @@ namespace AIMeter
                 if (available.Count > 0)
                 {
                     DateTime? exp = available.Select(c => Json.FromUnix(Json.Num(c, "expiresAt"))).Where(x => x.HasValue).OrderBy(x => x).FirstOrDefault();
-                    notes.Add((available.Count == 1 ? "1 reset gratuito dei limiti disponibile" : available.Count + " reset gratuiti dei limiti disponibili")
-                              + (exp.HasValue ? ", scade il " + exp.Value.ToString("d MMM", new CultureInfo("it-IT")) : ""));
+                    int count = available.Count;
+                    notes.Add(() => L.N(count, "{0} free limit reset available", "{0} free limit resets available")
+                                    + (exp.HasValue ? L.F(", expires {0}", exp.Value.ToString("d MMM", L.Culture)) : ""));
                 }
             }
-            if (notes.Count > 0) u.CreditsNote = string.Join(" · ", notes);
+            if (notes.Count > 0) u.CreditsNote = () => string.Join(" · ", notes.Select(n => n()));
             return u.Windows.Count > 0 ? u : null;
         }
 
@@ -225,11 +226,11 @@ namespace AIMeter
 
         private static UsageWindow Window(string prefix, int mins, double used, DateTime? resets)
         {
-            string label = mins == 300 ? "Sessione 5 h" : mins == 10080 ? "Settimana" : mins >= 60 ? (mins / 60) + " ore" : mins + " min";
+            string label = mins == 300 ? "Session 5 h" : mins == 10080 ? "Week" : mins >= 60 ? (mins / 60) + " h" : mins + " min";
             string sh = prefix != null ? "m" : mins == 300 ? "5h" : mins == 10080 ? "7g" : (mins / 60) + "h";
             return new UsageWindow
             {
-                Label = prefix != null ? prefix + " · " + label : label, Short = sh, Used = used, ResetsAt = resets,
+                Label = label, Suffix = prefix, Short = sh, Used = used, ResetsAt = resets,
                 StartedAt = resets.HasValue && mins > 0 ? resets.Value.AddMinutes(-mins) : (DateTime?)null,
             };
         }

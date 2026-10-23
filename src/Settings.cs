@@ -41,6 +41,7 @@ namespace AIMeter
 
         // generale
         public string Theme { get; set; }           // "system", "light", "dark"
+        public string Language { get; set; }        // "system" o un codice di L.Languages
         public string Refresh { get; set; }         // "auto", "low"
         public bool FirstRunDone { get; set; }
 
@@ -52,7 +53,7 @@ namespace AIMeter
             DesktopWidget = true; DesktopX = double.MinValue; DesktopY = double.MinValue;
             TaskbarDock = false; TaskbarSide = "auto";
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
-            Theme = "system"; Refresh = "auto";
+            Theme = "system"; Language = "system"; Refresh = "auto";
         }
 
         public static string Folder
