@@ -15,7 +15,7 @@ using System.Windows.Shell;
 namespace AIMeter
 {
     /// <summary>
-    /// GitHub Copilot: richieste premium e quote chat dall'API interna di Copilot, come in CodexBar (MIT).
+    /// GitHub Copilot: richieste premium e quote chat dall'API interna di Copilot.
     /// L'accesso a GitHub lo fa AI Meter con il flusso "codice dispositivo"; il token resta cifrato con DPAPI.
     /// </summary>
     internal sealed class CopilotProvider : Provider
@@ -31,8 +31,10 @@ namespace AIMeter
 
         public override string Id { get { return "copilot"; } }
 
-        /// <summary>Compare se è collegato o se sul PC c'è VS Code (che include Copilot).</summary>
-        public override bool Enabled(Settings s) { return s.CopilotEnabled && (GitHubAuth.HasToken || VsCodeInstalled()); }
+        public override bool Enabled(Settings s) { return s.CopilotEnabled; }
+
+        /// <summary>Copilot è disponibile: account già collegato o VS Code installato (che lo include).</summary>
+        public static bool Detected() { return GitHubAuth.HasToken || VsCodeInstalled(); }
 
         public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; }
 
@@ -94,7 +96,7 @@ namespace AIMeter
                     try { File.WriteAllText(Path.Combine(Settings.Folder, "copilot-usage-raw.json"), body, new UTF8Encoding(false)); }
                     catch (IOException) { }
                     var d = Json.Parse(body);
-                    planName = Json.Str(d, "copilot_plan");
+                    planName = PlanName(Json.Str(d, "copilot_plan"), Json.Str(d, "access_type_sku"));
                     return Parse(d);
                 }
             }
@@ -154,6 +156,21 @@ namespace AIMeter
             });
         }
 
+        /// <summary>Nome breve del piano per l'etichetta (es. licenza gratuita per studenti → EDU).</summary>
+        private static string PlanName(string plan, string sku)
+        {
+            sku = (sku ?? "").ToLowerInvariant();
+            if (sku.Contains("educational")) return "edu";
+            if (sku.Contains("free_limited") || plan == "free") return "free";
+            switch (plan)
+            {
+                case "individual": return sku.Contains("pro_plus") ? "pro+" : "pro";
+                case "business": return "business";
+                case "enterprise": return "enterprise";
+                default: return plan;
+            }
+        }
+
         private static DateTime? ParseDate(string s)
         {
             if (string.IsNullOrEmpty(s)) return null;
@@ -166,7 +183,7 @@ namespace AIMeter
     /// <summary>Accesso a GitHub con il flusso "codice dispositivo"; token cifrato con DPAPI per l'utente corrente.</summary>
     internal static class GitHubAuth
     {
-        // stesso client OAuth usato da CodexBar (quello di Copilot per VS Code): GitHub mostra "Visual Studio Code"
+        // client OAuth di Copilot per VS Code: è quello che può leggere le quote, e GitHub lo mostra come "Visual Studio Code"
         private const string ClientId = "Iv1.b507a08c87ecfe98";
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("AIMeter.GitHub");
         private static string FilePath { get { return Path.Combine(Settings.Folder, "github-token.bin"); } }
@@ -267,7 +284,7 @@ namespace AIMeter
             h.FontFamily = Theme.DisplayFont;
             root.Children.Add(h);
             var info = Ui.Text("Inserisci questo codice nella pagina di GitHub che si apre. AI Meter userà l'accesso solo per leggere le quote di Copilot. "
-                             + "GitHub mostrerà la richiesta come \"Visual Studio Code\": è l'app di Copilot, la stessa usata da CodexBar.", 13, "Text2");
+                             + "GitHub mostrerà la richiesta come \"Visual Studio Code\": è l'app ufficiale di Copilot, attraverso cui si leggono le quote.", 13, "Text2");
             info.TextWrapping = TextWrapping.Wrap;
             info.TextTrimming = TextTrimming.None;
             info.Margin = new Thickness(0, 8, 0, 16);

@@ -10,7 +10,7 @@ namespace AIMeter
     /// <summary>
     /// Claude: sessioni di Claude Code (Windows e WSL) e Cowork, app aperta, limiti dall'API di utilizzo
     /// con l'accesso di Claude Code. Il token lo rinnova la CLI stessa: non tocchiamo mai il refresh token.
-    /// Tecnica dell'API come in CodexBar (MIT): GET /api/oauth/usage con anthropic-beta oauth-2025-04-20.
+    /// API: GET /api/oauth/usage con anthropic-beta oauth-2025-04-20.
     /// </summary>
     internal sealed class ClaudeProvider : Provider
     {
@@ -27,6 +27,12 @@ namespace AIMeter
         public ClaudeProvider(Settings s) { S = s; LoadPersisted(); }
 
         public override string Id { get { return "claude"; } }
+
+        /// <summary>Claude Code o l'app Claude sono presenti su questo PC.</summary>
+        public static bool Detected()
+        {
+            return Directory.Exists(Path.Combine(Probe.Home, ".claude")) || Directory.Exists(Path.Combine(Probe.AppData, "Claude"));
+        }
         public override bool Enabled(Settings s) { return s.ClaudeEnabled; }
         public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; }
 
@@ -261,7 +267,7 @@ namespace AIMeter
                 AddWindow(u, d, "seven_day_sonnet", "Settimana · Sonnet", "m", null);
             }
 
-            // crediti in dollari con rinnovo: iguana_necktie sono i crediti per le sessioni cloud (come in CodexBar);
+            // crediti in dollari con rinnovo: iguana_necktie sono i crediti per le sessioni cloud;
             // altri crediti promozionali hanno la stessa forma
             foreach (var kv in d)
             {

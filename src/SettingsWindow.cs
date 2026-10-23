@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
@@ -66,30 +67,52 @@ namespace AIMeter
             sub.TextWrapping = TextWrapping.Wrap;
             page.Children.Add(sub);
 
-            // ------------------------------------------------ servizi collegati
-            Section("Servizi collegati");
+            // ------------------------------------------------ servizi
+            // ogni servizio si attiva a parte; le sue opzioni compaiono solo quando è attivo
+            Section("Servizi");
+            Hint("Attiva solo i servizi che usi. Al primo avvio AI Meter attiva da solo quelli che trova sul PC.");
             var claude = C.Last == null ? null : C.Last.Providers.FirstOrDefault(p => p.Id == "claude");
-            Group(
-                Row(Ui.Logo("claude", 28), "Claude", ClaudeStatus(claude), Toggle(S.ClaudeEnabled, v => { S.ClaudeEnabled = v; Changed(); })),
-                Row(null, "Limiti in tempo reale",
-                    "Legge l'utilizzo del tuo account con l'accesso di Claude Code (WSL o Windows). Il token resta sul PC e viene rinnovato dalla CLI.",
-                    Pair(Button("Accedi…", () => C.LoginClaude(), false), Toggle(S.ClaudeLiveUsage, v => { S.ClaudeLiveUsage = v; Changed(); C.RefreshNow(); }))),
-                Row(null, "Sessioni Claude Code", "Desktop, CLI (anche in WSL) e VS Code, con titolo, modello e stato.", Toggle(S.ClaudeShowCode, v => { S.ClaudeShowCode = v; Changed(); })),
-                Row(null, "Attività Cowork", "Le attività Cowork in corso negli ultimi 30 minuti.", Toggle(S.ClaudeShowCowork, v => { S.ClaudeShowCowork = v; Changed(); })),
-                Row(null, "App Claude aperta", "Le singole chat non lasciano tracce sul PC: si vede solo se l'app è aperta.", Toggle(S.ClaudeShowChat, v => { S.ClaudeShowChat = v; Changed(); })));
+            var claudeRows = new List<FrameworkElement>
+            {
+                Row(Ui.Logo("claude", 28), "Claude",
+                    S.ClaudeEnabled ? ClaudeStatus(claude) : Found(ClaudeProvider.Detected()) + "Claude Code, Cowork e app desktop.",
+                    Toggle(S.ClaudeEnabled, v => { S.ClaudeEnabled = v; Changed(); Rebuild(); })),
+            };
+            if (S.ClaudeEnabled)
+                claudeRows.AddRange(new[]
+                {
+                    Row(null, "Limiti in tempo reale",
+                        "Legge l'utilizzo del tuo account con l'accesso di Claude Code (WSL o Windows). Il token resta sul PC e viene rinnovato dalla CLI.",
+                        Pair(Button("Accedi…", () => C.LoginClaude(), false), Toggle(S.ClaudeLiveUsage, v => { S.ClaudeLiveUsage = v; Changed(); C.RefreshNow(); }))),
+                    Row(null, "Sessioni Claude Code", "Desktop, CLI (anche in WSL) e VS Code, con titolo, modello e stato.", Toggle(S.ClaudeShowCode, v => { S.ClaudeShowCode = v; Changed(); })),
+                    Row(null, "Attività Cowork", "Le attività Cowork in corso negli ultimi 30 minuti.", Toggle(S.ClaudeShowCowork, v => { S.ClaudeShowCowork = v; Changed(); })),
+                    Row(null, "App Claude aperta", "Le singole chat non lasciano tracce sul PC: si vede solo se l'app è aperta.", Toggle(S.ClaudeShowChat, v => { S.ClaudeShowChat = v; Changed(); })),
+                });
+            Group(claudeRows.ToArray());
 
-            Group(
-                Row(Ui.Logo("openai", 28), "ChatGPT · Codex", "Limiti del piano ChatGPT in tempo reale, chiesti al programma Codex installato: usa il suo accesso, AI Meter non tocca i token. Senza Codex, ultimo dato nei suoi log.",
-                    Toggle(S.OpenAIEnabled, v => { S.OpenAIEnabled = v; Changed(); })),
-                Row(null, "App ChatGPT aperta", "ChatGPT non espone i limiti della chat: si vede solo se l'app è aperta.", Toggle(S.OpenAIShowChat, v => { S.OpenAIShowChat = v; Changed(); })));
+            var openaiRows = new List<FrameworkElement>
+            {
+                Row(Ui.Logo("openai", 28), "ChatGPT · Codex",
+                    Found(CodexProvider.Detected()) + "Limiti del piano ChatGPT in tempo reale, chiesti al programma Codex installato con il suo accesso: AI Meter non tocca i token.",
+                    Toggle(S.OpenAIEnabled, v => { S.OpenAIEnabled = v; Changed(); Rebuild(); })),
+            };
+            if (S.OpenAIEnabled)
+                openaiRows.Add(Row(null, "App ChatGPT aperta", "ChatGPT non espone i limiti della chat: si vede solo se l'app è aperta.", Toggle(S.OpenAIShowChat, v => { S.OpenAIShowChat = v; Changed(); })));
+            Group(openaiRows.ToArray());
 
             bool gh = GitHubAuth.HasToken;
-            Group(
+            var copilotRows = new List<FrameworkElement>
+            {
                 Row(Ui.Logo("copilot", 28), "GitHub Copilot",
-                    gh ? "Collegato a GitHub: richieste premium e quote mensili. Il token è cifrato con la protezione dati di Windows."
-                       : "Collega il tuo account GitHub per vedere richieste premium e quote mensili di Copilot.",
-                    Pair(gh ? Button("Scollega", () => { C.SignOutGitHub(); Build(); }, false) : Button("Collega GitHub…", () => C.LoginGitHub(), true),
-                         Toggle(S.CopilotEnabled, v => { S.CopilotEnabled = v; Changed(); }))));
+                    Found(CopilotProvider.Detected()) + "Richieste premium e quote mensili del tuo account GitHub.",
+                    Toggle(S.CopilotEnabled, v => { S.CopilotEnabled = v; Changed(); Rebuild(); })),
+            };
+            if (S.CopilotEnabled)
+                copilotRows.Add(Row(null, "Account GitHub",
+                    gh ? "Collegato. Il token è cifrato con la protezione dati di Windows e resta su questo PC."
+                       : "Collega il tuo account per leggere le quote di Copilot.",
+                    gh ? Button("Scollega", () => { C.SignOutGitHub(); Build(); }, false) : Button("Collega GitHub…", () => C.LoginGitHub(), true)));
+            Group(copilotRows.ToArray());
 
             var wslRow = Row(null, "Distribuzione WSL", "Dove cercare Claude Code e Codex installati in Linux. Il widget non avvia mai WSL: lo legge solo se è già acceso.",
                 Combo(new[] { S.WslDistro }.Concat(WslDistros()).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => Tuple.Create(x, x)).ToArray(), S.WslDistro,
@@ -165,6 +188,8 @@ namespace AIMeter
         }
 
         private void Changed() { S.Save(); C.ApplySettings(); }
+
+        private static string Found(bool detected) { return detected ? "Trovato su questo PC. " : "Non trovato su questo PC. "; }
 
         /// <summary>Ridisegna la pagina dopo un cambio che ne modifica altri interruttori.</summary>
         private void Rebuild() { Dispatcher.BeginInvoke(new Action(Build), System.Windows.Threading.DispatcherPriority.Background); }

@@ -1,6 +1,6 @@
 # AI Meter
 
-A native, lightweight Windows 11 widget that shows which AI sessions are running on your PC and how much of your usage limits is left: **Claude** (Claude Code, Cowork, desktop app) and **ChatGPT / Codex**.
+A native, lightweight Windows 11 widget that shows which AI sessions are running on your PC and how much of your usage limits is left: **Claude** (Claude Code, Cowork, desktop app), **ChatGPT / Codex** and **GitHub Copilot**. Each service can be turned on or off in Settings; on first run AI Meter enables the ones it finds on your PC.
 
 > The interface is currently in Italian. Translations are welcome.
 
@@ -27,6 +27,7 @@ Everything is read locally from files the official apps already write. Nothing i
   - Limits **in real time** from your account's usage endpoint, using your existing Claude Code login. The token never leaves your PC except to call Anthropic, and it is refreshed by the Claude Code CLI itself: AI Meter never touches the refresh token. Without a login it falls back to the last value saved by the Claude app.
   The panel shows the 5-hour session with its start and end time, weekly and per-model weekly limits, cloud session credits, extra usage credits and how the week splits between Claude Code, chats and Cowork.
 - **ChatGPT / Codex**: active Codex threads (app, CLI, VS Code) from Codex's local logs. Limits **in real time** by asking the installed `codex` program (`codex app-server`, JSON-RPC `account/rateLimits/read`): Codex uses its own login, AI Meter never reads or refreshes its tokens. Includes credits and free limit resets. If Codex is not available, the last value in its logs is used.
+- **GitHub Copilot** (off by default): premium requests and monthly quotas from GitHub's Copilot usage API. You sign in to GitHub from AI Meter with a device code; the token is encrypted with Windows Data Protection (DPAPI) for your user only. GitHub shows the request as "Visual Studio Code", the official Copilot app that can read quotas.
 - Individual claude.ai / ChatGPT chats leave no trace on disk, so for those you only see whether the app is open.
 - Service logos are read at runtime from the Claude and ChatGPT apps installed on your PC; they are trademarks of their owners and are not part of this repository.
 
@@ -102,11 +103,14 @@ AI Meter does not collect, store or send any data to its authors, and contains n
 
 It reads local files written by the Claude and ChatGPT/Codex apps and keeps its own settings in `%APPDATA%\AIMeter`, on your PC only.
 
-The single network connection it makes is optional and on by default: **real-time Claude limits**. When enabled, AI Meter sends a request to Anthropic's API (`api.anthropic.com`) using the OAuth access token of your existing Claude Code login, to read your own usage percentages. That request is governed by [Anthropic's privacy policy](https://www.anthropic.com/legal/privacy). You are told about it on first launch, and you can turn it off in Settings → *Limiti in tempo reale*; with it off, AI Meter makes no network connections at all.
+Network connections are limited to reading your own usage:
 
-## Acknowledgements
+- **Claude limits** (on by default): a request to Anthropic's API (`api.anthropic.com`) with the OAuth access token of your existing Claude Code login. Governed by [Anthropic's privacy policy](https://www.anthropic.com/legal/privacy). You are told about it on first launch and can turn it off in Settings → *Limiti in tempo reale*.
+- **Codex limits**: requested by the installed `codex` program with its own login; AI Meter never handles that token.
+- **GitHub Copilot quotas** (off by default): a request to `api.github.com`, only if you enable Copilot and sign in to GitHub.
 
-How usage data is fetched from each service follows the techniques of [CodexBar](https://github.com/steipete/CodexBar) by Peter Steinberger (MIT), a macOS menu bar app, adapted to Windows.
+With these off, AI Meter makes no network connections at all.
+
 
 ## License
 
