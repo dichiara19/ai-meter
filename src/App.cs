@@ -86,7 +86,8 @@ namespace AIMeter
         {
             ui = Dispatcher.CurrentDispatcher;
             Settings = Settings.Load();
-            if (!Settings.FirstRunDone)
+            bool firstRun = !Settings.FirstRunDone;
+            if (firstRun)
             {
                 Settings.FirstRunDone = true;
                 Settings.Save();
@@ -101,6 +102,7 @@ namespace AIMeter
 
             CreateTray();
             ApplySettings();
+            if (firstRun) ShowPrivacyNotice();
 
             SystemEvents.SessionSwitch += OnSessionSwitch;
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
@@ -334,6 +336,28 @@ namespace AIMeter
                 if (e.Button == Forms.MouseButtons.Left) ToggleFlyout();
                 else if (e.Button == Forms.MouseButtons.Right) ShowMenu(null);
             };
+        }
+
+        /// <summary>
+        /// Al primo avvio dice chiaramente quale dato esce dal PC e come spegnerlo
+        /// (unico accesso alla rete: i limiti Claude in tempo reale).
+        /// </summary>
+        private void ShowPrivacyNotice()
+        {
+            tray.BalloonTipClicked += (o, e) => OpenSettings();
+            tray.ShowBalloonTip(20000, "AI Meter è attivo",
+                "Legge sessioni e limiti dai file locali. Solo i limiti Claude in tempo reale interpellano Anthropic con il tuo accesso di Claude Code: puoi disattivarli nelle Impostazioni.",
+                Forms.ToolTipIcon.Info);
+        }
+
+        public static string Version
+        {
+            get
+            {
+                var a = (System.Reflection.AssemblyInformationalVersionAttribute)Attribute.GetCustomAttribute(
+                    typeof(Controller).Assembly, typeof(System.Reflection.AssemblyInformationalVersionAttribute));
+                return a == null ? "" : a.InformationalVersion;
+            }
         }
 
         private void UpdateTrayText(Snapshot s)

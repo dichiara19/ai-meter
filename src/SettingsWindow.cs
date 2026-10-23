@@ -126,7 +126,10 @@ namespace AIMeter
             statsText = Ui.Text("", 12, "Text2");
             statsText.TextWrapping = TextWrapping.Wrap;
             Group(
-                Row(Ui.Glyph("", 20, "Text"), "AI Meter", null, Button("Apri cartella dati", () => Process.Start("explorer.exe", "\"" + Settings.Folder + "\""), false), statsText));
+                Row(Ui.Glyph("", 20, "Text"), "AI Meter", null, Button("Apri cartella dati", () => Process.Start("explorer.exe", "\"" + Settings.Folder + "\""), false), statsText),
+                Row(Ui.Glyph("", 20, "Text"), "Privacy",
+                    "Sessioni e limiti vengono letti dai file locali. L'unico dato che esce dal PC è la richiesta dei limiti Claude in tempo reale ad Anthropic, con il tuo accesso di Claude Code: si spegne con l'interruttore \"Limiti in tempo reale\".",
+                    Button("Codice sorgente", () => Process.Start("https://github.com/dichiara19/ai-meter#privacy-policy"), false)));
             UpdateStats();
         }
 
@@ -154,9 +157,9 @@ namespace AIMeter
             lastCpu = cpu; lastCpuAt = now;
             var it = new CultureInfo("it-IT");
             statsText.Text = string.Format(it,
-                "Versione 2.0 · memoria in uso {0:0} MB (privata {1:0} MB) · CPU {2:0.0}% · aggiornamento ogni {3} s{4}",
+                "Versione {5} · memoria in uso {0:0} MB (privata {1:0} MB) · CPU {2:0.0}% · aggiornamento ogni {3} s{4}",
                 proc.WorkingSet64 / 1048576.0, proc.PrivateMemorySize64 / 1048576.0, pct, C.CurrentInterval,
-                C.SavingPower ? " (risparmio energia)" : "");
+                C.SavingPower ? " (risparmio energia)" : "", Controller.Version);
         }
 
         // ------------------------------------------------------------ costruttori stile Impostazioni
