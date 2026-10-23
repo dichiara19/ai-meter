@@ -78,7 +78,7 @@ $bw.Flush()
 $refs = @(
     "$fw\WPF\PresentationCore.dll", "$fw\WPF\PresentationFramework.dll", "$fw\WPF\WindowsBase.dll",
     "$fw\System.Xaml.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll",
-    "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.dll"
+    "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
 ) | ForEach-Object { "/r:$_" }
 $res = @('app.ico' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
 $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }

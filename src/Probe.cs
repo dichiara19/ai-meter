@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -244,7 +244,7 @@ namespace AIMeter
         public Collector(Settings settings)
         {
             probe = new Probe(settings);
-            providers = new List<Provider> { new ClaudeProvider(settings), new CodexProvider(settings) };
+            providers = new List<Provider> { new ClaudeProvider(settings), new CodexProvider(settings), new CopilotProvider(settings) };
         }
 
         public bool WslUp { get { return probe.WslUp; } }

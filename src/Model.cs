@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -15,6 +15,8 @@ namespace AIMeter
         public DateTime? ResetsAt; // ora locale
         public DateTime? StartedAt; // inizio della finestra, se noto o ricavabile (fine − durata)
         public Money Spent;       // per i crediti in denaro: speso e limite
+        public string RightText;  // testo al posto della percentuale (es. "illimitate")
+        public string Detail;     // dettaglio per il suggerimento (es. "212 di 300 rimaste")
         public double Remaining { get { return Math.Max(0, Math.Min(100, 100 - Used)); } }
     }
 

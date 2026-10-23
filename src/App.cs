@@ -196,7 +196,7 @@ namespace AIMeter
         private void Apply(Snapshot s)
         {
             Last = s;
-            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed;
+            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed;
             UpdateTrayText(s);
             if (sig == lastSignature) return;   // niente è cambiato: nessun ridisegno
             lastSignature = sig;
@@ -255,14 +255,48 @@ namespace AIMeter
             Rerender();
         }
 
-        public bool IsExpanded(string id) { return id == "claude" ? Settings.ExpandedClaude : Settings.ExpandedOpenAI; }
+        public bool IsExpanded(string id)
+        {
+            return id == "claude" ? Settings.ExpandedClaude : id == "copilot" ? Settings.ExpandedCopilot : Settings.ExpandedOpenAI;
+        }
 
         public void ToggleExpanded(string id)
         {
-            if (id == "claude") Settings.ExpandedClaude = !Settings.ExpandedClaude;
-            else Settings.ExpandedOpenAI = !Settings.ExpandedOpenAI;
+            SetExpanded(id, !IsExpanded(id));
             Settings.Save();
             Rerender();
+        }
+
+        private void SetExpanded(string id, bool v)
+        {
+            if (id == "claude") Settings.ExpandedClaude = v;
+            else if (id == "copilot") Settings.ExpandedCopilot = v;
+            else Settings.ExpandedOpenAI = v;
+        }
+
+        /// <summary>Accesso del servizio indicato: login di Claude Code nel terminale, o accesso a GitHub per Copilot.</summary>
+        public void Login(string id)
+        {
+            if (id == "copilot") LoginGitHub();
+            else LoginClaude();
+        }
+
+        private GitHubLoginWindow githubLogin;
+
+        public void LoginGitHub()
+        {
+            if (githubLogin != null) { githubLogin.Activate(); return; }
+            githubLogin = new GitHubLoginWindow();
+            githubLogin.SignedIn += () => { RefreshNow(); if (settingsWindow != null) settingsWindow.Build(); };
+            githubLogin.Closed += (o, e) => githubLogin = null;
+            githubLogin.Show();
+            githubLogin.Activate();
+        }
+
+        public void SignOutGitHub()
+        {
+            GitHubAuth.SignOut();
+            RefreshNow();
         }
 
         public void ResetDesktopPosition()
@@ -451,9 +485,8 @@ namespace AIMeter
         {
             var parts = s.Providers.Select(p =>
             {
-                var w = p.Usage == null ? null : p.Usage.Windows.FirstOrDefault(x => x.Short == "5h");
-                string n = p.Id == "claude" ? "Claude" : "ChatGPT";
-                return w == null ? n + " –" : n + " " + Math.Round(w.Remaining) + "%";
+                var w = Ui.Primary(p.Usage);
+                return w == null ? p.Name + " –" : p.Name + " " + Math.Round(w.Remaining) + "%";
             });
             string text = "AI Meter · " + string.Join(" · ", parts);
             tray.Text = text.Length > 63 ? text.Substring(0, 63) : text;
@@ -474,11 +507,13 @@ namespace AIMeter
             }, Settings.Overlay));
             if (anchor == desktop && desktop != null)
             {
+                var ids = Last == null ? new string[0] : Last.Providers.Select(p => p.Id).ToArray();
+                bool all = ids.Length > 0 && ids.All(IsExpanded);
                 menu.Items.Add(Item("Espandi sessioni", "\uE8C4", () =>
                 {
-                    bool v = !(Settings.ExpandedClaude && Settings.ExpandedOpenAI);
-                    Settings.ExpandedClaude = v; Settings.ExpandedOpenAI = v; Settings.Save(); Rerender();
-                }, Settings.ExpandedClaude && Settings.ExpandedOpenAI));
+                    foreach (var id in ids) SetExpanded(id, !all);
+                    Settings.Save(); Rerender();
+                }, all));
             }
             menu.Items.Add(new Separator());
             menu.Items.Add(Item("Aggiorna adesso", "\uE72C", RefreshNow));

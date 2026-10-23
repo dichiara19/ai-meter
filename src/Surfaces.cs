@@ -91,7 +91,7 @@ namespace AIMeter
             foreach (var p in s.Providers)
             {
                 string id = p.Id;
-                var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.LoginClaude);
+                var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.Login);
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
                 body.Children.Add(card);
             }
@@ -148,14 +148,14 @@ namespace AIMeter
 
         private FrameworkElement Collapsed(Snapshot s)
         {
-            var five = s.Providers.Select(p => Tuple.Create(p, p.Usage == null ? null : p.Usage.Windows.FirstOrDefault(w => w.Short == "5h"))).ToList();
+            var five = s.Providers.Select(p => Tuple.Create(p, Ui.Primary(p.Usage))).ToList();
             var icon = Ui.RingIcon(five, 24);
             // un pulsante vero: clic, tastiera e strumenti di accessibilità lo riespandono allo stesso modo
             var b = new Button { Content = icon, Padding = new Thickness(6), Cursor = Cursors.Hand };
             b.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
             System.Windows.Automation.AutomationProperties.SetName(b, "Espandi AI Meter");
-            b.ToolTip = string.Join("\n", five.Select(t => (t.Item1.Id == "claude" ? "Claude" : "ChatGPT") + ": " +
-                (t.Item2 == null ? "nessun dato" : Math.Round(t.Item2.Remaining) + "% rimasto (5 ore)"))) + "\nClic per espandere";
+            b.ToolTip = string.Join("\n", five.Select(t => t.Item1.Name + ": " +
+                (t.Item2 == null ? "nessun dato" : Math.Round(t.Item2.Remaining) + "% rimasto (" + t.Item2.Label + ")"))) + "\nClic per espandere";
             b.Click += (o, e) => { hover.Stop(); C.SetOverlayCollapsed(false); };
             return b;
         }
@@ -272,18 +272,12 @@ namespace AIMeter
             if (s.Providers.Count == 0) body.Children.Add(DesktopWidget.EmptyState());
             foreach (var p in s.Providers)
             {
-                var card = Ui.ProviderCard(p, true, null, C.LoginClaude);
+                var card = Ui.ProviderCard(p, true, null, C.Login);
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
                 body.Children.Add(card);
             }
-            var parts = s.Providers.Where(p => p.Usage != null).Select(p =>
-            {
-                // uguale per tutti i servizi: conta solo quanto è recente il dato sui limiti
-                if (p.Usage.Source == "live") return p.Name + ": in tempo reale";
-                string ago = Ui.Ago(p.Usage.At);
-                return p.Name + ": " + (ago == "ora" ? "aggiornato ora" : "aggiornato " + ago + " fa");
-            });
-            footer.Text = "Aggiornato alle " + s.Taken.ToString("HH:mm") + "  ·  " + string.Join("  ·  ", parts);
+            // un dato non in tempo reale è segnalato nella scheda del servizio, non qui
+            footer.Text = "Aggiornato alle " + s.Taken.ToString("HH:mm");
         }
 
         /// <summary>Apertura dall'area di notifica, sopra la barra delle applicazioni, come i pannelli di sistema.</summary>
