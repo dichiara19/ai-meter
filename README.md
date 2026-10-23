@@ -35,7 +35,7 @@ Measured on a Windows 11 laptop:
 
 | | |
 |---|---|
-| RAM | ~100 MB, one process |
+| RAM | ~100 MB as executable, ~145 MB with the PowerShell launcher |
 | CPU at rest | ~0.02% |
 | GPU | 0% (software drawing; Mica/Acrylic composed by Windows) |
 
@@ -57,7 +57,10 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 Compiles with the `csc.exe` that ships with .NET Framework (no SDK needed), installs to `%LOCALAPPDATA%\Programs\AI Meter`, adds a Start menu shortcut. On first run it registers itself to start with Windows (you can turn this off in Settings). `-NoInstall` only builds into `bin\`.
 
-> **Smart App Control.** If Smart App Control is on, Windows blocks unsigned executables, including the one you build yourself. Releases are not signed yet (see [Code signing policy](#code-signing-policy)), so for now they run only with Smart App Control off.
+Two install modes:
+
+- **`-Mode script` (default).** Installs the source with the `AIMeter.ps1` launcher. Windows PowerShell, which is signed by Microsoft, compiles the C# code in memory at startup (about 2 s) and runs it, without a console window (`conhost --headless`). This works with **Smart App Control on**, at the cost of roughly 45 MB more RAM.
+- **`-Mode exe`.** Installs the compiled `AIMeter.exe`. Lighter, but with Smart App Control on Windows blocks it until releases are signed (see [Code signing policy](#code-signing-policy)).
 
 Command line: `--settings` opens Settings of the running instance, `--gpu` draws with the GPU.
 
