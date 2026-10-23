@@ -292,7 +292,7 @@ namespace AIMeter
                     Process.Start(new ProcessStartInfo("wsl.exe", "-d " + Settings.WslDistro + " -- bash -lc \"claude auth login; echo; read -p 'Fatto. Premi Invio per chiudere.'\"") { UseShellExecute = true });
                 else
                 {
-                    string cli = Collector.ClaudeCliPath();
+                    string cli = ClaudeProvider.CliPath();
                     if (cli == null) { MessageBox.Show("Non trovo Claude Code su questo PC.", "AI Meter"); return; }
                     Process.Start(new ProcessStartInfo("cmd.exe", "/c \"\"" + cli + "\" auth login & pause\"") { UseShellExecute = true });
                 }

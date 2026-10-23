@@ -79,7 +79,7 @@ namespace AIMeter
                 Row(null, "App Claude aperta", "Le singole chat non lasciano tracce sul PC: si vede solo se l'app è aperta.", Toggle(S.ClaudeShowChat, v => { S.ClaudeShowChat = v; Changed(); })));
 
             Group(
-                Row(Ui.Logo("openai", 28), "ChatGPT · Codex", "Limiti del piano ChatGPT letti dai log locali di Codex: nessun accesso alla rete.",
+                Row(Ui.Logo("openai", 28), "ChatGPT · Codex", "Limiti del piano ChatGPT in tempo reale, chiesti al programma Codex installato: usa il suo accesso, AI Meter non tocca i token. Senza Codex, ultimo dato nei suoi log.",
                     Toggle(S.OpenAIEnabled, v => { S.OpenAIEnabled = v; Changed(); })),
                 Row(null, "App ChatGPT aperta", "ChatGPT non espone i limiti della chat: si vede solo se l'app è aperta.", Toggle(S.OpenAIShowChat, v => { S.OpenAIShowChat = v; Changed(); })));
 
