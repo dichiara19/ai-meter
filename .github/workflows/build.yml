@@ -64,6 +64,7 @@ jobs:
           body: |
             Built by GitHub Actions from the tagged source of this repository.
 
+            Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
             **Code signing policy:** https://github.com/dichiara19/ai-meter#code-signing-policy
             **Privacy policy:** https://github.com/dichiara19/ai-meter#privacy-policy
 
