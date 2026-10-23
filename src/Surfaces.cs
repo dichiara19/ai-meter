@@ -1,0 +1,366 @@
+using System;
+using System.Globalization;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
+
+namespace AIMeter
+{
+    /// <summary>Widget sul desktop: resta sempre sotto le altre finestre, come parte dello sfondo.</summary>
+    internal sealed class DesktopWidget : Window
+    {
+        private readonly Controller C;
+        private readonly StackPanel body = new StackPanel();
+        private readonly TextBlock status;
+
+        public DesktopWidget(Controller c)
+        {
+            C = c;
+            Title = "AI Meter - widget";
+            Width = 316;
+            SizeToContent = SizeToContent.Height;
+            ShowInTaskbar = false;
+            ShowActivated = false;
+            Ui.MakeFluent(this, 2, false, true, false);
+
+            var root = new DockPanel { Margin = new Thickness(10, 4, 10, 10) };
+            var header = new DockPanel { Height = 34, Background = Brushes.Transparent, Cursor = Cursors.SizeAll };
+            var more = Ui.IconButton("", "Altre opzioni", (o, e) => C.ShowMenu(this));
+            more.Cursor = Cursors.Arrow;
+            DockPanel.SetDock(more, Dock.Right);
+            header.Children.Add(more);
+            var title = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0) };
+            title.Children.Add(Ui.Text("AI Meter", 12, "Text2", FontWeights.SemiBold));
+            status = Ui.Text("", 11.5, "Text3");
+            status.Margin = new Thickness(8, 0, 0, 0);
+            title.Children.Add(status);
+            header.Children.Add(title);
+            header.MouseLeftButtonDown += (o, e) =>
+            {
+                if (e.OriginalSource is TextBlock && ((TextBlock)e.OriginalSource).FontFamily == Theme.Icons) return;
+                DragMove();
+                C.Settings.DesktopX = Left; C.Settings.DesktopY = Top; C.Settings.Save();
+            };
+            DockPanel.SetDock(header, Dock.Top);
+            root.Children.Add(header);
+            root.Children.Add(body);
+            Content = root;
+
+            SourceInitialized += (o, e) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle).AddHook(StayAtBottom);
+            Loaded += (o, e) => Place();
+        }
+
+        private IntPtr StayAtBottom(IntPtr hwnd, int msg, IntPtr w, IntPtr l, ref bool handled)
+        {
+            if (msg == Native.WM_WINDOWPOSCHANGING)
+            {
+                var pos = (Native.WINDOWPOS)Marshal.PtrToStructure(l, typeof(Native.WINDOWPOS));
+                pos.hwndInsertAfter = Native.HWND_BOTTOM;
+                pos.flags &= ~Native.SWP_NOZORDER;
+                Marshal.StructureToPtr(pos, l, false);
+            }
+            return IntPtr.Zero;
+        }
+
+        public void Place()
+        {
+            var wa = SystemParameters.WorkArea;
+            double x = C.Settings.DesktopX, y = C.Settings.DesktopY;
+            bool valid = x > -1e9 && x > SystemParameters.VirtualScreenLeft - 50 && x < SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - 80
+                         && y > SystemParameters.VirtualScreenTop - 10 && y < SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 60;
+            Left = valid ? x : wa.Right - Width - 24;
+            Top = valid ? y : wa.Top + 24;
+        }
+
+        public void ResetPosition()
+        {
+            C.Settings.DesktopX = double.MinValue; C.Settings.DesktopY = double.MinValue; C.Settings.Save();
+            Place();
+        }
+
+        public void Render(Snapshot s)
+        {
+            body.Children.Clear();
+            if (s.Providers.Count == 0) { body.Children.Add(EmptyState()); return; }
+            foreach (var p in s.Providers)
+            {
+                string id = p.Id;
+                var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.LoginClaude);
+                card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
+                body.Children.Add(card);
+            }
+            status.Text = "· " + s.Taken.ToString("HH:mm");
+        }
+
+        public static FrameworkElement EmptyState()
+        {
+            var t = Ui.Text("Nessun servizio collegato. Aprili dalle Impostazioni.", 12, "Text2");
+            t.TextWrapping = TextWrapping.Wrap;
+            return Ui.Card(t, new Thickness(14));
+        }
+    }
+
+    /// <summary>
+    /// Pillola in sovrimpressione: minuscola, non ruba il focus, sparisce a schermo intero.
+    /// Due micro-pulsanti: riduci a icona (anelli live) e chiudi. Dall'icona un clic la riapre.
+    /// </summary>
+    internal sealed class OverlayPill : Window
+    {
+        private readonly Controller C;
+        private readonly Border host = new Border();
+        private readonly DispatcherTimer hover = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(380) };
+
+        public OverlayPill(Controller c)
+        {
+            C = c;
+            Title = "AI Meter - sovrimpressione";
+            // niente SizeToContent: con WindowChrome WPF aggiunge il bordo di sistema e lascia una fascia vuota.
+            // La dimensione la calcoliamo noi dal contenuto (vedi Fit).
+            SizeToContent = SizeToContent.Manual;
+            Width = 120; Height = 36;
+            Topmost = true;
+            ShowInTaskbar = false;
+            ShowActivated = false;
+            Ui.MakeFluent(this, 2, false, true, true);
+            Content = host;
+            Cursor = Cursors.Hand;
+            host.HorizontalAlignment = HorizontalAlignment.Center;
+            host.VerticalAlignment = VerticalAlignment.Center;
+
+            hover.Tick += (o, e) => { hover.Stop(); C.ShowDetails(this); };
+            MouseEnter += (o, e) => { C.CancelHideDetails(); hover.Start(); };
+            MouseLeave += (o, e) => { hover.Stop(); C.ScheduleHideDetails(); };
+            MouseLeftButtonUp += (o, e) =>
+            {
+                hover.Stop();
+                if (C.Settings.OverlayCollapsed) C.SetOverlayCollapsed(false);
+                else C.ShowDetails(this);
+            };
+            MouseRightButtonUp += (o, e) => { hover.Stop(); C.ShowMenu(this); e.Handled = true; };
+        }
+
+        public void Render(Snapshot s, string metric)
+        {
+            host.Child = C.Settings.OverlayCollapsed ? Collapsed(s) : Expanded(s, metric);
+            Fit();
+        }
+
+        private FrameworkElement Collapsed(Snapshot s)
+        {
+            var five = s.Providers.Select(p => Tuple.Create(p, p.Usage == null ? null : p.Usage.Windows.FirstOrDefault(w => w.Short == "5h"))).ToList();
+            var icon = Ui.RingIcon(five, 24);
+            icon.Margin = new Thickness(6);
+            icon.ToolTip = string.Join("\n", five.Select(t => (t.Item1.Id == "claude" ? "Claude" : "ChatGPT") + ": " +
+                (t.Item2 == null ? "nessun dato" : Math.Round(t.Item2.Remaining) + "% rimasto (5 ore)"))) + "\nClic per espandere";
+            return icon;
+        }
+
+        private FrameworkElement Expanded(Snapshot s, string metric)
+        {
+            var outer = new StackPanel { Orientation = Orientation.Horizontal };
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 6, 8, 6), VerticalAlignment = VerticalAlignment.Center };
+            foreach (var p in s.Providers)
+            {
+                if (row.Children.Count > 0)
+                {
+                    var sep = new Border { Width = 1, Margin = new Thickness(10, 2, 10, 2) };
+                    sep.SetResourceReference(Border.BackgroundProperty, "Divider");
+                    row.Children.Add(sep);
+                }
+                var item = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                var logoHost = new Grid { Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center };
+                logoHost.Children.Add(Ui.Logo(p.Id, 16));
+                if (p.Busy > 0)
+                {
+                    var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -2, -2, 0), BorderThickness = new Thickness(1.2) };
+                    dot.SetResourceReference(Border.BackgroundProperty, Ui.BrandBrush(p.Id));
+                    dot.SetResourceReference(Border.BorderBrushProperty, "Fallback");
+                    logoHost.Children.Add(dot);
+                }
+                item.Children.Add(logoHost);
+
+                var windows = p.Usage == null ? new UsageWindow[0] : p.Usage.Windows.ToArray();
+                var five = windows.FirstOrDefault(w => w.Short == "5h");
+                var week = windows.FirstOrDefault(w => w.Short == "7g");
+                var shown = metric == "week" ? new[] { week } : metric == "both" ? new[] { five, week } : new[] { five };
+                bool any = false;
+                foreach (var w in shown.Where(x => x != null))
+                {
+                    var stack = new StackPanel { Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+                    var t = Ui.Text(Math.Round(w.Remaining).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
+                    t.HorizontalAlignment = HorizontalAlignment.Center;
+                    stack.Children.Add(t);
+                    var bar = Ui.Bar(w.Remaining, Ui.LevelBrush(w.Remaining, Ui.BrandBrush(p.Id)), 2);
+                    bar.Width = 26;
+                    bar.Margin = new Thickness(0, 1, 0, 0);
+                    stack.Children.Add(bar);
+                    item.Children.Add(stack);
+                    any = true;
+                }
+                if (!any) { var t = Ui.Text("–", 12, "Text3"); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); }
+                row.Children.Add(item);
+            }
+            if (s.Providers.Count == 0) row.Children.Add(Ui.Text("AI Meter", 12, "Text2"));
+            outer.Children.Add(row);
+
+            // colonna di due micro-pulsanti, separata da una linea sottile
+            var div = new Border { Width = 1, Margin = new Thickness(0, 6, 0, 6) };
+            div.SetResourceReference(Border.BackgroundProperty, "Divider");
+            outer.Children.Add(div);
+            var buttons = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(3, 2, 3, 2) };
+            buttons.Children.Add(MiniButton("\uE921", "Riduci a icona", () => C.SetOverlayCollapsed(true)));
+            buttons.Children.Add(MiniButton("\uE8BB", "Chiudi la sovrimpressione (riattivala dal menu dell'icona)", C.CloseOverlay));
+            outer.Children.Add(buttons);
+            return outer;
+        }
+
+        private Button MiniButton(string glyph, string tip, Action click)
+        {
+            var b = Ui.IconButton(glyph, tip, (o, e) => { hover.Stop(); click(); });
+            b.Width = 18; b.Height = 15; b.FontSize = 8;
+            b.Cursor = Cursors.Arrow;
+            return b;
+        }
+
+        /// <summary>
+        /// Dimensiona la finestra esattamente sul contenuto e la riancora all'angolo scelto.
+        /// Windows non scende sotto un'altezza minima per le finestre con cornice: l'icona ridotta diventa
+        /// un quadrato di quel lato, con gli anelli al centro.
+        /// </summary>
+        private void Fit()
+        {
+            host.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double w = Math.Ceiling(host.DesiredSize.Width);
+            double h = Math.Max(Math.Ceiling(host.DesiredSize.Height), Math.Ceiling(SystemParameters.MinimumWindowHeight));
+            if (C.Settings.OverlayCollapsed) w = h = Math.Max(w, h);
+            Width = w;
+            Height = h;
+            Place();
+        }
+
+        public void Place()
+        {
+            var wa = SystemParameters.WorkArea;
+            string c = C.Settings.OverlayCorner ?? "tr";
+            const double m = 12;
+            Left = c.EndsWith("l") ? wa.Left + m : wa.Right - Width - m;
+            Top = c.StartsWith("b") ? wa.Bottom - Height - m : wa.Top + m;
+        }
+    }
+
+    /// <summary>Pannello a comparsa: dall'area di notifica (con focus) o al passaggio sulla pillola (senza).</summary>
+    internal sealed class Flyout : Window
+    {
+        private readonly Controller C;
+        private readonly StackPanel body = new StackPanel();
+        private readonly TextBlock footer;
+        private readonly TranslateTransform slide = new TranslateTransform();
+        public bool HoverMode { get; private set; }
+
+        public Flyout(Controller c)
+        {
+            C = c;
+            Title = "AI Meter - pannello";
+            Width = 344;
+            SizeToContent = SizeToContent.Height;
+            Topmost = true;
+            ShowInTaskbar = false;
+            Ui.MakeFluent(this, 3, false, true, false);
+
+            var root = new DockPanel { Margin = new Thickness(12, 10, 12, 12), RenderTransform = slide };
+            var header = new DockPanel { Height = 36 };
+            var settings = Ui.IconButton("", "Impostazioni", (o, e) => { Hide(); C.OpenSettings(); });
+            var refresh = Ui.IconButton("", "Aggiorna adesso", (o, e) => C.RefreshNow());
+            DockPanel.SetDock(settings, Dock.Right);
+            DockPanel.SetDock(refresh, Dock.Right);
+            header.Children.Add(settings);
+            header.Children.Add(refresh);
+            var title = Ui.Text("AI Meter", 14, "Text", FontWeights.SemiBold);
+            title.FontFamily = Theme.DisplayFont;
+            title.VerticalAlignment = VerticalAlignment.Center;
+            title.Margin = new Thickness(4, 0, 0, 0);
+            header.Children.Add(title);
+            DockPanel.SetDock(header, Dock.Top);
+            root.Children.Add(header);
+
+            footer = Ui.Text("", 11.5, "Text3");
+            footer.Margin = new Thickness(4, 10, 4, 0);
+            footer.TextWrapping = TextWrapping.Wrap;
+            DockPanel.SetDock(footer, Dock.Bottom);
+            root.Children.Add(footer);
+
+            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = body, Focusable = false };
+            root.Children.Add(scroll);
+            Content = root;
+
+            Deactivated += (o, e) => { if (!HoverMode) Hide(); };
+            MouseEnter += (o, e) => C.CancelHideDetails();
+            MouseLeave += (o, e) => { if (HoverMode) C.ScheduleHideDetails(); };
+        }
+
+        public void Render(Snapshot s)
+        {
+            body.Children.Clear();
+            if (s.Providers.Count == 0) body.Children.Add(DesktopWidget.EmptyState());
+            foreach (var p in s.Providers)
+            {
+                var card = Ui.ProviderCard(p, true, null, C.LoginClaude);
+                card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
+                body.Children.Add(card);
+            }
+            var parts = s.Providers.Where(p => p.Usage != null).Select(p =>
+            {
+                string n = p.Id == "claude" ? "Claude" : "Codex";
+                if (p.Usage.Source == "live") return n + ": in tempo reale";
+                if (p.Usage.Source == "cache") return n + ": dato di " + (Ui.Ago(p.Usage.At) == "ora" ? "adesso" : Ui.Ago(p.Usage.At) + " fa");
+                return n + ": dai log locali";
+            });
+            footer.Text = "Aggiornato alle " + s.Taken.ToString("HH:mm") + "  ·  " + string.Join("  ·  ", parts);
+        }
+
+        /// <summary>Apertura dall'area di notifica, sopra la barra delle applicazioni, come i pannelli di sistema.</summary>
+        public void ShowFromTray()
+        {
+            HoverMode = false;
+            MaxHeight = SystemParameters.WorkArea.Height - 24;
+            ShowActivated = true;
+            Show();
+            UpdateLayout();
+            var wa = SystemParameters.WorkArea;
+            int edge = Native.TaskbarEdge();
+            Left = edge == 0 ? wa.Left + 12 : wa.Right - ActualWidth - 12;
+            Top = edge == 1 ? wa.Top + 12 : wa.Bottom - ActualHeight - 12;
+            Activate();
+            Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
+            Animate(edge == 1 ? -16 : 16);
+        }
+
+        /// <summary>Apertura accanto alla pillola, senza prendere il focus.</summary>
+        public void ShowNear(Window anchor)
+        {
+            HoverMode = true;
+            MaxHeight = SystemParameters.WorkArea.Height - 24;
+            ShowActivated = false;
+            Show();
+            UpdateLayout();
+            var wa = SystemParameters.WorkArea;
+            bool below = anchor.Top < wa.Top + wa.Height / 2;
+            Left = Math.Max(wa.Left + 12, Math.Min(anchor.Left + anchor.ActualWidth - ActualWidth, wa.Right - ActualWidth - 12));
+            Top = below ? anchor.Top + anchor.ActualHeight + 8 : anchor.Top - ActualHeight - 8;
+            Animate(below ? -8 : 8);
+        }
+
+        private void Animate(double from)
+        {
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            slide.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(from, 0, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease });
+            ((UIElement)Content).BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
+        }
+    }
+}

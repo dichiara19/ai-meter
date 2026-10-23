@@ -1,0 +1,63 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (C# compiler of .NET Framework 4.8, included in Windows)
+        shell: powershell
+        run: ./build.ps1 -NoInstall
+
+      - name: Upload unsigned build
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIMeter-unsigned
+          path: |
+            bin/AIMeter.exe
+            bin/AIMeter.exe.config
+
+      # Code signing via SignPath Foundation: active once the project is approved and
+      # the repository variable SIGNPATH_ORGANIZATION_ID and the secret SIGNPATH_API_TOKEN are set.
+      - name: Sign with SignPath
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ai-meter
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Package
+        shell: powershell
+        run: |
+          $exe = if (Test-Path signed\AIMeter.exe) { 'signed\AIMeter.exe' } else { 'bin\AIMeter.exe' }
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item $exe, bin\AIMeter.exe.config dist
+          Compress-Archive dist\* AIMeter.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIMeter
+          path: AIMeter.zip
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AIMeter.zip
