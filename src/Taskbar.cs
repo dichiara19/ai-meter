@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Automation;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -22,7 +23,7 @@ namespace AIMeter
         public int TrayLeft;         // bordo sinistro dell'area di notifica, pixel fisici (0 se ignoto)
 
         public bool Horizontal { get { return Edge == 1 || Edge == 3; } }
-        public bool Usable { get { return Horizontal && !AutoHide && Rect.Right > Rect.Left; } }
+        public bool Usable { get { return Horizontal && Rect.Right > Rect.Left; } }
         /// <summary>Lato consigliato: l'angolo sinistro è libero solo con icone al centro e senza pulsante Widget.</summary>
         public string RecommendedSide { get { return Centered && !WidgetsButton ? "left" : "right"; } }
 
@@ -49,7 +50,7 @@ namespace AIMeter
         public string Describe()
         {
             if (!Horizontal) return L.T("Detected: taskbar on the side of the screen. The taskbar pill works only with the taskbar at the bottom or top.");
-            if (AutoHide) return L.T("Detected: the taskbar hides automatically. The pill would float on its own: the overlay is a better fit.");
+
             return L.F("Detected: taskbar {0}, icons {1}, Widgets button {2}. Recommended position: {3}.",
                 L.T(Edge == 3 ? "at the bottom" : "at the top"), L.T(Centered ? "centered" : "on the left"), L.T(WidgetsButton ? "visible" : "hidden"),
                 L.T(RecommendedSide == "left" ? "left corner" : "next to the notification area"));
@@ -57,66 +58,55 @@ namespace AIMeter
     }
 
     /// <summary>
-    /// Pillola agganciata alla barra delle applicazioni. Windows 11 non accetta elementi di terze parti dentro la barra,
-    /// quindi è una finestra trasparente, sempre in primo piano, appoggiata esattamente sopra lo spazio libero.
+    /// Pillola dentro la barra delle applicazioni. Windows 11 non ha più le "deskband", quindi la pillola diventa una
+    /// finestra figlia della barra (Shell_TrayWnd): sale e scende con la barra a scomparsa, sparisce con essa a schermo
+    /// intero e non finisce mai sotto la barra quando la si clicca. Se Esplora risorse si riavvia, viene ricreata.
     /// Usa la modalità colore di Windows (quella della barra), non quella delle app.
     /// </summary>
-    internal sealed class TaskbarPill : Window
+    internal sealed class TaskbarPill
     {
         private readonly Controller C;
+        private readonly Border root = new Border { Background = Brushes.Transparent };
         private readonly Button chip = new Button { Padding = new Thickness(10, 0, 10, 0), Cursor = Cursors.Hand, Focusable = false };
-        private readonly DispatcherTimer keepOnTop = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-        private IntPtr hwnd;
-        private uint taskbarCreated;
+        private readonly DispatcherTimer reconcile = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        private HwndSource source;
+        private IntPtr bar;
+        private Native.RECT lastRect;
+        private bool visible = true;
         public bool Dark { get; private set; }
         public bool OnLeft { get; private set; }
         public bool Usable { get; private set; }
+        public bool IsVisible { get { return visible && source != null && Usable; } }
 
         public TaskbarPill(Controller c)
         {
             C = c;
-            Title = "AI Meter - taskbar";
-            WindowStyle = WindowStyle.None;
-            AllowsTransparency = true;
-            Background = Brushes.Transparent;
-            ResizeMode = ResizeMode.NoResize;
-            SizeToContent = SizeToContent.WidthAndHeight;
-            ShowInTaskbar = false;
-            ShowActivated = false;
-            Topmost = true;
-            // nasce fuori dallo schermo: se apparisse sotto il cursore e poi si spostasse, WPF la crederebbe ancora "sotto il mouse"
-            WindowStartupLocation = WindowStartupLocation.Manual;
-            Left = -10000; Top = -10000;
-            FontFamily = Theme.Font;
-            UseLayoutRounding = true;
-            Cursor = Cursors.Hand;
-            Content = chip;
+            root.Child = chip;
+            TextOptions.SetTextFormattingMode(root, TextFormattingMode.Display);
             ApplySystemTheme();
-
             // un pulsante vero, con l'evidenziazione al passaggio come i pulsanti della barra
             chip.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
-            System.Windows.Automation.AutomationProperties.SetName(chip, L.T("AI Meter: open the panel"));
+            chip.FontFamily = Theme.Font;
+            AutomationProperties.SetName(chip, L.T("AI Meter: open the panel"));
             chip.Click += (o, e) => C.ToggleFlyoutFromTaskbar(this);
-            MouseRightButtonUp += (o, e) => { C.ShowMenu(this); e.Handled = true; };
-
-            SourceInitialized += (o, e) =>
-            {
-                hwnd = new WindowInteropHelper(this).Handle;
-                Native.AddExStyle(hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE, Native.WS_EX_APPWINDOW);
-                taskbarCreated = Native.RegisterWindowMessage("TaskbarCreated");
-                HwndSource.FromHwnd(hwnd).AddHook(WndProc);
-            };
-            SizeChanged += (o, e) => Place();
-            // cliccando la barra Windows la riporta sopra di noi: ci rimettiamo davanti (costo trascurabile)
-            keepOnTop.Tick += (o, e) => BringAboveTaskbar();
-            IsVisibleChanged += (o, e) => { if (IsVisible) keepOnTop.Start(); else keepOnTop.Stop(); };
+            chip.MouseRightButtonUp += (o, e) => { C.ShowMenu(null); e.Handled = true; };
+            // controllo leggero: barra ricreata (Esplora risorse riavviato), spostata o ridimensionata
+            reconcile.Tick += (o, e) => Reconcile();
         }
 
-        private IntPtr WndProc(IntPtr h, int msg, IntPtr w, IntPtr l, ref bool handled)
+        public void Show() { visible = true; Reconcile(); reconcile.Start(); }
+
+        public void Hide()
         {
-            if (taskbarCreated != 0 && msg == (int)taskbarCreated)   // Esplora risorse riavviato: la barra è nuova
-                Dispatcher.BeginInvoke(new Action(Place), DispatcherPriority.Background);
-            return IntPtr.Zero;
+            visible = false;
+            reconcile.Stop();
+            if (source != null) Native.ShowWindow(source.Handle, 0);
+        }
+
+        public void Close()
+        {
+            reconcile.Stop();
+            if (source != null) { source.RootVisual = null; source.Dispose(); source = null; }
         }
 
         public void ApplySystemTheme()
@@ -126,47 +116,69 @@ namespace AIMeter
             var hover = new SolidColorBrush(Dark ? Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x0F, 0, 0, 0));
             hover.Freeze();
             pal["SubtleHover"] = hover;   // stessa evidenziazione dei pulsanti della barra
-            Resources.MergedDictionaries.Clear();
-            Resources.MergedDictionaries.Add(pal);
+            root.Resources.MergedDictionaries.Clear();
+            root.Resources.MergedDictionaries.Add(pal);
         }
 
         public void Render(Snapshot s, string metric)
         {
             chip.Content = Ui.PillRow(s, metric, Dark);
-            ToolTip = Ui.Summary(s) + "\n" + L.T("Click for details · right-click for options");
+            chip.ToolTip = Ui.Summary(s) + "\n" + L.T("Click for details · right-click for options");
+            Place();
+        }
+
+        /// <summary>Crea la finestra figlia dentro la barra attuale (anche dopo un riavvio di Esplora risorse).</summary>
+        private void Attach()
+        {
+            Close();
+            bar = Native.FindTaskbar();
+            if (bar == IntPtr.Zero) return;
+            var prm = new HwndSourceParameters("AI Meter - taskbar")
+            {
+                ParentWindow = bar,
+                WindowStyle = Native.WS_CHILD | Native.WS_VISIBLE | Native.WS_CLIPSIBLINGS,
+                UsesPerPixelTransparency = true,   // finestra figlia "layered": sfondo trasparente sopra la barra
+                PositionX = 0, PositionY = 0,
+            };
+            source = new HwndSource(prm) { SizeToContent = SizeToContent.WidthAndHeight, RootVisual = root };
+            source.CompositionTarget.BackgroundColor = Colors.Transparent;
+            source.SizeToContentChanged += (o, e) => Place();
+            lastRect = default(Native.RECT);
+        }
+
+        private void Reconcile()
+        {
+            if (!visible) return;
+            if (source == null || bar == IntPtr.Zero || !Native.IsWindow(bar) || bar != Native.FindTaskbar()) Attach();
+            Place();
         }
 
         /// <summary>Posiziona la pillola nello spazio libero della barra del monitor principale.</summary>
         public void Place()
         {
-            if (hwnd == IntPtr.Zero) return;
+            if (source == null || !visible) return;
             var info = TaskbarInfo.Read();
             Usable = info.Usable;
-            if (!Usable) return;
-            var src = PresentationSource.FromVisual(this);
-            double scale = src != null && src.CompositionTarget != null ? src.CompositionTarget.TransformToDevice.M11 : 1;
+            if (!Usable) { Native.ShowWindow(source.Handle, 0); return; }
+            double scale = source.CompositionTarget.TransformToDevice.M11;
 
             int barH = info.Rect.Bottom - info.Rect.Top;
             double chipH = Math.Max(24, Math.Floor(barH / scale) - 8);   // come i pulsanti della barra: 40 su 48
-            if (double.IsNaN(chip.Height) || Math.Abs(chip.Height - chipH) > 0.5) { chip.Height = chipH; UpdateLayout(); }
+            if (double.IsNaN(chip.Height) || Math.Abs(chip.Height - chipH) > 0.5) { chip.Height = chipH; root.UpdateLayout(); }
 
-            int w = (int)Math.Round(ActualWidth * scale), h = (int)Math.Round(ActualHeight * scale);
+            int w = (int)Math.Round(root.ActualWidth * scale), h = (int)Math.Round(root.ActualHeight * scale);
             string side = C.Settings.TaskbarSide == "left" || C.Settings.TaskbarSide == "right" ? C.Settings.TaskbarSide : info.RecommendedSide;
             OnLeft = side == "left";
             int gap = (int)Math.Round(8 * scale);
             int x;
-            if (OnLeft) x = info.Rect.Left + (int)Math.Round(12 * scale);
-            else if (info.TrayLeft > info.Rect.Left) x = info.TrayLeft - w - gap;
-            else x = info.Rect.Right - w - (int)Math.Round(320 * scale);   // area di notifica non rilevata: stima prudente
-            int y = info.Rect.Top + (barH - h) / 2;
-            Native.SetWindowPos(hwnd, Native.HWND_TOPMOST, x, y, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
-            Mouse.Synchronize();   // ricalcola subito lo stato "sotto il mouse" dopo lo spostamento
-        }
-
-        public void BringAboveTaskbar()
-        {
-            if (hwnd != IntPtr.Zero && IsVisible)
-                Native.SetWindowPos(hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+            if (OnLeft) x = (int)Math.Round(12 * scale);
+            else if (info.TrayLeft > info.Rect.Left) x = info.TrayLeft - info.Rect.Left - w - gap;
+            else x = info.Rect.Right - info.Rect.Left - w - (int)Math.Round(320 * scale);   // area di notifica non rilevata: stima prudente
+            int y = (barH - h) / 2;
+            // coordinate relative alla barra; in cima alle altre finestre figlie della barra
+            Native.SetWindowPos(source.Handle, IntPtr.Zero, x, y, w, h, Native.SWP_NOACTIVATE);
+            Native.ShowWindow(source.Handle, 4 /* SW_SHOWNOACTIVATE */);
+            lastRect = info.Rect;
         }
 
         /// <summary>Tema o barra cambiati (modalità di Windows, allineamento, pulsante Widget, risoluzione).</summary>
@@ -174,7 +186,7 @@ namespace AIMeter
         {
             ApplySystemTheme();
             if (s != null) Render(s, metric);
-            Place();
+            Reconcile();
         }
     }
 }

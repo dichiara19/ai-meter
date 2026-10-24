@@ -32,6 +32,7 @@ namespace AIMeter
             FontFamily = Theme.Font;
             UseLayoutRounding = true;
             Icon = Controller.AppIconImage();
+            Program.Brand(this);
             WindowChrome.SetWindowChrome(this, new WindowChrome
             {
                 CaptionHeight = 48, GlassFrameThickness = new Thickness(-1), ResizeBorderThickness = new Thickness(6),
@@ -117,6 +118,11 @@ namespace AIMeter
                     gh ? Button(L.T("Disconnect"), () => { C.SignOutGitHub(); Build(); }, false) : Button(L.T("Connect GitHub…"), () => C.LoginGitHub(), true)));
             Group(copilotRows.ToArray());
 
+            Group(
+                Row(Ui.Logo("cursor", 28), "Cursor",
+                    Found(CursorProvider.Detected()) + L.T("Included usage and on-demand spend of your Cursor plan, read with the Cursor app's own sign-in."),
+                    Toggle(S.CursorEnabled, v => { S.CursorEnabled = v; Changed(); Rebuild(); })));
+
             var wslRow = Row(null, L.T("WSL distribution"), L.T("Where to look for Claude Code and Codex installed in Linux. AI Meter never starts WSL: it reads it only if it is already running."),
                 Combo(new[] { S.WslDistro }.Concat(WslDistros()).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => Tuple.Create(x, x)).ToArray(), S.WslDistro,
                       v => { S.WslDistro = v; Changed(); }));
@@ -178,7 +184,7 @@ namespace AIMeter
             Group(
                 Row(Ui.Glyph("\uE946", 20, "Text"), "AI Meter", null, Button(L.T("Open data folder"), () => Process.Start("explorer.exe", "\"" + Settings.Folder + "\""), false), statsText),
                 Row(Ui.Glyph("\uE72E", 20, "Text"), L.T("Privacy"),
-                    L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program) and Copilot (GitHub), and each one can be turned off."),
+                    L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and Cursor (cursor.com), and each one can be turned off."),
                     Button(L.T("Source code"), () => Process.Start("https://github.com/dichiara19/ai-meter#privacy-policy"), false)));
             UpdateStats();
         }

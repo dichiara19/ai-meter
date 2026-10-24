@@ -278,6 +278,7 @@ namespace AIMeter
             FontFamily = Theme.Font;
             UseLayoutRounding = true;
             Icon = Controller.AppIconImage();
+            Program.Brand(this);
             WindowChrome.SetWindowChrome(this, new WindowChrome { CaptionHeight = 32, GlassFrameThickness = new Thickness(-1), UseAeroCaptionButtons = true, ResizeBorderThickness = new Thickness(0) });
             SourceInitialized += (o, e) => Ui.ApplyBackdrop(this, 2, false);
 
