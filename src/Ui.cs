@@ -19,7 +19,7 @@ namespace AIMeter
     internal static class Ui
     {
         private static CultureInfo It { get { return L.Culture; } }
-        private static readonly Dictionary<string, BitmapImage> Logos = new Dictionary<string, BitmapImage>();
+        private static readonly Dictionary<string, BitmapSource> Logos = new Dictionary<string, BitmapSource>();
 
         // ------------------------------------------------------------ testo e icone
         public static TextBlock Text(string text, double size, string brush, FontWeight? weight = null)
@@ -54,21 +54,24 @@ namespace AIMeter
         public static FrameworkElement Logo(string id, double size, bool dark)
         {
             string key = id + (dark ? ":dark" : ":light");
-            BitmapImage bmp;
+            BitmapSource bmp;
             if (!Logos.TryGetValue(key, out bmp))
             {
                 string file = FindInstalledLogo(id, dark);
-                if (file != null)
+                if (file != null && file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    bmp = IconFromExe(file);
+                else if (file != null)
                 {
                     try
                     {
-                        bmp = new BitmapImage();
-                        bmp.BeginInit();
-                        bmp.UriSource = new Uri(file);
-                        bmp.DecodePixelWidth = 64;   // basta per 16-32 px a qualsiasi DPI e tiene bassa la memoria
-                        bmp.CacheOption = BitmapCacheOption.OnLoad;
-                        bmp.EndInit();
-                        bmp.Freeze();
+                        var bi = new BitmapImage();
+                        bi.BeginInit();
+                        bi.UriSource = new Uri(file);
+                        bi.DecodePixelWidth = 64;   // basta per 16-32 px a qualsiasi DPI e tiene bassa la memoria
+                        bi.CacheOption = BitmapCacheOption.OnLoad;
+                        bi.EndInit();
+                        bi.Freeze();
+                        bmp = bi;
                     }
                     catch (Exception) { bmp = null; }
                 }
@@ -78,6 +81,22 @@ namespace AIMeter
             var img = new Image { Source = bmp, Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
             return img;
+        }
+
+        /// <summary>Icona principale di un eseguibile installato (per le app che non hanno un'immagine del logo).</summary>
+        private static BitmapSource IconFromExe(string exe)
+        {
+            try
+            {
+                using (var ico = System.Drawing.Icon.ExtractAssociatedIcon(exe))
+                {
+                    if (ico == null) return null;
+                    var src = Imaging.CreateBitmapSourceFromHIcon(ico.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    src.Freeze();
+                    return src;
+                }
+            }
+            catch (Exception) { return null; }
         }
 
         private static FrameworkElement Monogram(string id, double size)
@@ -96,6 +115,7 @@ namespace AIMeter
         private static string FindInstalledLogo(string id, bool dark)
         {
             if (id == "copilot") return FindCopilotLogo();
+            if (id == "cursor") return CursorProvider.ExePath();
             string[] prefixes = id == "openai" ? new[] { "OpenAI.ChatGPT", "OpenAI.Codex_" } : new[] { "Claude_" };
             string[] names = id == "openai" && !dark
                 ? new[] { "Square44x44Logo.targetsize-256_altform-lightunplated.png", "Square44x44Logo.targetsize-256_altform-unplated.png" }
@@ -143,7 +163,7 @@ namespace AIMeter
             return null;
         }
 
-        public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : id == "copilot" ? "Copilot" : "Claude"; }
+        public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : id == "copilot" ? "Copilot" : id == "cursor" ? "Cursor" : "Claude"; }
 
         /// <summary>Il limite da mostrare in pillola, icona e suggerimenti: la sessione di 5 ore, altrimenti il primo limite in percentuale.</summary>
         public static UsageWindow Primary(Usage u)

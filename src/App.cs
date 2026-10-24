@@ -25,6 +25,7 @@ namespace AIMeter
         {
             // senza il manifest dell'eseguibile: DPI per monitor impostati qui, prima che WPF si inizializzi
             Native.EnablePerMonitorDpi();
+            Native.SetAppId("AIMeter.App");
             AppContext.SetSwitch("Switch.System.Windows.DoNotScaleForDpiChanges", false);
             Program.Run(args);
         }
@@ -49,6 +50,24 @@ namespace AIMeter
         }
 
         /// <summary>Risorsa incorporata nell'eseguibile, oppure il file corrispondente in assets\ (avvio da sorgente).</summary>
+        /// <summary>Icona dell'app come "percorso,indice": l'eseguibile, o assets\app.ico nell'avvio da sorgente.</summary>
+        public static string IconPath
+        {
+            get
+            {
+                string ico = Path.Combine(Home, @"assets\app.ico");
+                if (File.Exists(ico)) return ico + ",0";
+                return System.Reflection.Assembly.GetExecutingAssembly().Location + ",0";
+            }
+        }
+
+        /// <summary>Le finestre con un pulsante nella barra si presentano come AI Meter, con la sua icona.</summary>
+        public static void Brand(Window w)
+        {
+            w.SourceInitialized += (o, e) =>
+                Native.SetWindowAppId(new System.Windows.Interop.WindowInteropHelper(w).Handle, "AIMeter.App", IconPath, "AI Meter", LaunchCommand);
+        }
+
         public static Stream OpenAsset(string name)
         {
             var s = typeof(Program).Assembly.GetManifestResourceStream(name);
@@ -58,7 +77,7 @@ namespace AIMeter
         }
 
         [STAThread]
-        private static void Main(string[] args) { Run(args); }
+        private static void Main(string[] args) { Native.SetAppId("AIMeter.App"); Run(args); }
 
         internal static void Run(string[] args)
         {
@@ -196,7 +215,7 @@ namespace AIMeter
         private void Apply(Snapshot s)
         {
             Last = s;
-            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed;
+            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedCursor + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed;
             UpdateTrayText(s);
             if (sig == lastSignature) return;   // niente è cambiato: nessun ridisegno
             lastSignature = sig;
@@ -277,7 +296,7 @@ namespace AIMeter
 
         public bool IsExpanded(string id)
         {
-            return id == "claude" ? Settings.ExpandedClaude : id == "copilot" ? Settings.ExpandedCopilot : Settings.ExpandedOpenAI;
+            return id == "claude" ? Settings.ExpandedClaude : id == "copilot" ? Settings.ExpandedCopilot : id == "cursor" ? Settings.ExpandedCursor : Settings.ExpandedOpenAI;
         }
 
         public void ToggleExpanded(string id)
@@ -291,6 +310,7 @@ namespace AIMeter
         {
             if (id == "claude") Settings.ExpandedClaude = v;
             else if (id == "copilot") Settings.ExpandedCopilot = v;
+            else if (id == "cursor") Settings.ExpandedCursor = v;
             else Settings.ExpandedOpenAI = v;
         }
 
@@ -421,7 +441,7 @@ namespace AIMeter
 
         private void OnForegroundChanged(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time)
         {
-            if (dock != null && Native.IsTaskbar(hwnd)) dock.BringAboveTaskbar();   // clic sulla barra: torniamo davanti
+
             if (flyout.IsVisible && flyout.TaskbarMode && !Native.IsOwnWindow(hwnd)) flyout.Hide();   // clic altrove
             bool busy = Native.UserIsBusyFullscreen();
             if (busy == fullscreenBusy) return;
@@ -439,10 +459,8 @@ namespace AIMeter
             }
             if (dock != null)
             {
-                // a schermo intero la barra sparisce, e con lei la pillola; idem se la barra non la può ospitare
-                bool hide = fullscreenBusy || !dock.Usable;
-                if (hide && dock.IsVisible) dock.Hide();
-                else if (!hide && !dock.IsVisible) { dock.Show(); dock.Place(); }
+                // la pillola è dentro la barra: a schermo intero o con la barra a scomparsa segue la barra da sola
+                dock.Place();
             }
             UpdateVisibility();
         }

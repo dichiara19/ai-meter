@@ -178,6 +178,73 @@ namespace AIMeter
         }
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowW(string cls, string title);
+        [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+        [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+        public const int WS_CHILD = 0x40000000, WS_VISIBLE = 0x10000000, WS_CLIPSIBLINGS = 0x04000000;
+
+        /// <summary>La barra delle applicazioni del monitor principale.</summary>
+        public static IntPtr FindTaskbar() { return FindWindowW("Shell_TrayWnd", null); }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
+
+        // --- identità della finestra nella barra (proprietà System.AppUserModel.*) ------------------
+        [StructLayout(LayoutKind.Sequential, Pack = 4)]
+        private struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct PROPVARIANT { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr p; [FieldOffset(16)] public IntPtr pad; }
+
+        [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IPropertyStore
+        {
+            void GetCount(out uint c);
+            void GetAt(uint i, out PROPERTYKEY k);
+            void GetValue(ref PROPERTYKEY k, out PROPVARIANT v);
+            void SetValue(ref PROPERTYKEY k, ref PROPVARIANT v);
+            void Commit();
+        }
+
+        [DllImport("shell32.dll")] private static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+
+        /// <summary>
+        /// Dà alla finestra l'identità di AI Meter nella barra: pulsante e icona propri invece di quelli del processo
+        /// che la ospita (PowerShell, nell'avvio da sorgente). icon = "percorso,indice" dell'icona da mostrare.
+        /// </summary>
+        public static void SetWindowAppId(IntPtr hwnd, string id, string icon, string name, string command)
+        {
+            try
+            {
+                var iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+                IPropertyStore store;
+                if (SHGetPropertyStoreForWindow(hwnd, ref iid, out store) != 0 || store == null) return;
+                var fmt = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+                // prima comando, nome e icona di rilancio, l'identità per ultima (come raccomanda la documentazione)
+                SetString(store, fmt, 2, command);
+                SetString(store, fmt, 4, name);
+                SetString(store, fmt, 3, icon);
+                SetString(store, fmt, 5, id);
+                store.Commit();
+                Marshal.ReleaseComObject(store);
+            }
+            catch (COMException) { }
+            catch (EntryPointNotFoundException) { }
+        }
+
+        private static void SetString(IPropertyStore store, Guid fmt, uint pid, string value)
+        {
+            if (value == null) return;
+            var key = new PROPERTYKEY { fmtid = fmt, pid = pid };
+            var v = new PROPVARIANT { vt = 31 /* VT_LPWSTR */, p = Marshal.StringToCoTaskMemUni(value) };
+            try { store.SetValue(ref key, ref v); }
+            finally { Marshal.FreeCoTaskMem(v.p); }
+        }
+
+        /// <summary>Identità dell'app per la barra: le finestre di AI Meter si raggruppano col suo nome e la sua icona, non con PowerShell.</summary>
+        public static void SetAppId(string id)
+        {
+            try { SetCurrentProcessExplicitAppUserModelID(id); }
+            catch (EntryPointNotFoundException) { }
+        }
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string title);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT r);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
