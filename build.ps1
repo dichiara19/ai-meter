@@ -19,7 +19,7 @@ $bin = Join-Path $root 'bin'
 $fw = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319'
 New-Item -ItemType Directory -Force $bin | Out-Null
 
-# --- icona dell'app: due anelli concentrici (Claude fuori, ChatGPT dentro), senza sfondo come le icone di sistema
+# --- icona dell'app: due anelli concentrici sfumati (Claude fuori, ChatGPT dentro), senza sfondo come le icone di sistema
 Add-Type -AssemblyName System.Drawing
 # $size: lato dell'icona; $w x $h: immagine (le tile del menu Start hanno l'icona al centro di un'area più ampia)
 function New-RingPng([int]$size, [int]$w = $size, [int]$h = $size) {
@@ -28,16 +28,26 @@ function New-RingPng([int]$size, [int]$w = $size, [int]$h = $size) {
     $g.SmoothingMode = 'AntiAlias'
     $g.TranslateTransform(($w - $size) / 2.0, ($h - $size) / 2.0)
     $s = $size / 16.0
-    $pw = [Math]::Max(1.6, 2.3 * $s)
-    $track = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(70, 128, 128, 128)), $pw
-    $outer = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 217, 119, 87)), $pw
-    $inner = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 16, 163, 127)), $pw
-    foreach ($p in $outer, $inner) { $p.StartCap = 'Round'; $p.EndCap = 'Round' }
-    $r1 = 6.6 * $s; $r2 = 3.3 * $s; $c = $size / 2.0
-    $g.DrawEllipse($track, $c - $r1, $c - $r1, 2 * $r1, 2 * $r1)
-    $g.DrawEllipse($track, $c - $r2, $c - $r2, 2 * $r2, 2 * $r2)
-    $g.DrawArc($outer, $c - $r1, $c - $r1, 2 * $r1, 2 * $r1, -90, 250)
-    $g.DrawArc($inner, $c - $r2, $c - $r2, 2 * $r2, 2 * $r2, -90, 190)
+    $c = $size / 2.0
+    # anelli spessi con sfumatura diagonale (luce in alto a sinistra): ambra -> corallo -> terracotta fuori,
+    # menta -> smeraldo -> verde petrolio dentro; binari grigi traslucidi, leggibili su sfondi chiari e scuri
+    $ring = {
+        param([double]$r, [double]$width, [int]$sweep, [string[]]$colors)
+        $box = New-Object System.Drawing.RectangleF ([float]($c - $r - $width)), ([float]($c - $r - $width)), ([float](2 * ($r + $width))), ([float](2 * ($r + $width)))
+        $track = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(60, 128, 128, 128)), $width
+        $g.DrawEllipse($track, [float]($c - $r), [float]($c - $r), [float](2 * $r), [float](2 * $r))
+        $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush $box, ([System.Drawing.Color]::Black), ([System.Drawing.Color]::Black), 45.0
+        $blend = New-Object System.Drawing.Drawing2D.ColorBlend 3
+        $blend.Colors = [System.Drawing.Color[]]($colors | ForEach-Object { [System.Drawing.ColorTranslator]::FromHtml($_) })
+        $blend.Positions = [float[]](0, 0.5, 1)
+        $brush.InterpolationColors = $blend
+        $pen = New-Object System.Drawing.Pen $brush, $width
+        $pen.StartCap = 'Round'; $pen.EndCap = 'Round'
+        $g.DrawArc($pen, [float]($c - $r), [float]($c - $r), [float](2 * $r), [float](2 * $r), -90, $sweep)
+        $pen.Dispose(); $brush.Dispose(); $track.Dispose()
+    }
+    & $ring (6.5 * $s) ([Math]::Max(1.6, 2.3 * $s)) 250 @('#F6A062', '#E06A45', '#B8432C')
+    & $ring (3.3 * $s) ([Math]::Max(1.6, 2.4 * $s)) 190 @('#45DFA4', '#14A97E', '#0B6F5C')
     $g.Dispose()
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
