@@ -183,6 +183,12 @@ if ($Package) {
     $cfg = Join-Path $work 'priconfig.xml'
     & "$sdk\makepri.exe" createconfig /cf $cfg /dq en-US /pv 10.0.0 /o | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "makepri createconfig fallito" }
+    # un solo resources.pri con tutte le scale (niente pacchetti di risorse separati, che servono solo nei bundle)
+    # e le sei lingue dell'interfaccia come lingue del pacchetto
+    $x = [IO.File]::ReadAllText($cfg)
+    $x = [regex]::Replace($x, '(?s)<packaging>.*?</packaging>', '')
+    $x = $x.Replace('name="Language" value="en-US"', 'name="Language" value="en-US;it-IT;es-ES;fr-FR;de-DE;pt-PT"')
+    [IO.File]::WriteAllText($cfg, $x)
     & "$sdk\makepri.exe" new /pr $layout /cf $cfg /mn (Join-Path $layout 'AppxManifest.xml') /of (Join-Path $layout 'resources.pri') /o
     if ($LASTEXITCODE -ne 0) { throw "makepri fallito" }
     $msix = Join-Path $bin 'AIMeter.msix'

@@ -60,6 +60,8 @@ From the [latest release](https://github.com/dichiara19/ai-meter/releases/latest
 - **AIMeter.zip**: unzip and run `AIMeter.exe`.
 - **AIMeter-script.zip**: if Smart App Control blocks the unsigned executable, unzip and run `Start AI Meter.cmd`, which starts the same app from source with Windows PowerShell.
 
+A Microsoft Store version, signed by Microsoft and updated automatically, is in preparation: see [docs/STORE.md](docs/STORE.md).
+
 ## Build and install
 
 ```powershell
@@ -72,6 +74,8 @@ Two install modes:
 
 - **`-Mode script` (default).** Installs the source with the `AIMeter.ps1` launcher. Windows PowerShell, which is signed by Microsoft, compiles the C# code in memory at startup (about 2 s) and runs it, without a console window (`conhost --headless`). This works with **Smart App Control on**, at the cost of roughly 45 MB more RAM.
 - **`-Mode exe`.** Installs the compiled `AIMeter.exe`. Lighter, but with Smart App Control on Windows blocks it until releases are signed (see [Code signing policy](#code-signing-policy)).
+
+`-Package` also builds the MSIX package for the Microsoft Store (`bin\AIMeter.msix`, needs the Windows SDK; see [docs/STORE.md](docs/STORE.md)).
 
 Command line: `--settings` opens Settings of the running instance, `--gpu` draws with the GPU.
 
@@ -89,6 +93,7 @@ src/ProviderCodex.cs   ChatGPT / Codex: threads from local logs, limits via code
 src/ProviderCopilot.cs GitHub Copilot: device-code sign-in, quotas API
 src/Model.cs           data model and JSON helpers
 src/Settings.cs        preferences and start with Windows
+src/PackageStartup.cs  start with Windows in the Microsoft Store package (StartupTask)
 src/Theme.cs           Fluent light/dark tokens, Windows accent color, control styles
 src/Ui.cs              cards, bars, session rows, ring icon, logos, Mica windows
 src/Surfaces.cs        desktop widget, overlay pill, panel
