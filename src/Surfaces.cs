@@ -90,6 +90,7 @@ namespace AIMeter
             if (s.Providers.Count == 0) { body.Children.Add(EmptyState()); return; }
             foreach (var p in s.Providers)
             {
+                if (p.Models != null && !p.Running && p.Sessions.Count == 0) continue;   // modelli locali: la scheda solo se c'è qualcosa da mostrare
                 string id = p.Id;
                 var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.Login);
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
@@ -148,7 +149,7 @@ namespace AIMeter
 
         private FrameworkElement Collapsed(Snapshot s)
         {
-            var five = s.Providers.Select(p => Tuple.Create(p, Ui.Primary(p.Usage))).ToList();
+            var five = s.Providers.Where(p => p.Models == null).Select(p => Tuple.Create(p, Ui.Primary(p.Usage))).ToList();
             var icon = Ui.RingIcon(five, 24);
             // un pulsante vero: clic, tastiera e strumenti di accessibilità lo riespandono allo stesso modo
             var b = new Button { Content = icon, Padding = new Thickness(6), Cursor = Cursors.Hand };
@@ -271,6 +272,7 @@ namespace AIMeter
             if (s.Providers.Count == 0) body.Children.Add(DesktopWidget.EmptyState());
             foreach (var p in s.Providers)
             {
+                if (p.Models != null && !p.Running && p.Sessions.Count == 0) continue;   // modelli locali: la scheda solo se c'è qualcosa da mostrare
                 var card = Ui.ProviderCard(p, true, null, C.Login);
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
                 body.Children.Add(card);

@@ -220,7 +220,7 @@ namespace AIMeter
         private void Apply(Snapshot s)
         {
             Last = s;
-            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedCursor + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed;
+            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed;
             UpdateTrayText(s);
             if (sig == lastSignature) return;   // niente è cambiato: nessun ridisegno
             lastSignature = sig;
@@ -301,7 +301,12 @@ namespace AIMeter
 
         public bool IsExpanded(string id)
         {
-            return id == "claude" ? Settings.ExpandedClaude : id == "copilot" ? Settings.ExpandedCopilot : id == "cursor" ? Settings.ExpandedCursor : Settings.ExpandedOpenAI;
+            bool v;
+            if (id == "claude") return Settings.ExpandedClaude;
+            if (id == "copilot") return Settings.ExpandedCopilot;
+            if (id == "openai") return Settings.ExpandedOpenAI;
+            if (id == "local") return Settings.ExpandedLocal;
+            return Settings.ExpandedServices.TryGetValue(id, out v) && v;
         }
 
         public void ToggleExpanded(string id)
@@ -315,15 +320,18 @@ namespace AIMeter
         {
             if (id == "claude") Settings.ExpandedClaude = v;
             else if (id == "copilot") Settings.ExpandedCopilot = v;
-            else if (id == "cursor") Settings.ExpandedCursor = v;
-            else Settings.ExpandedOpenAI = v;
+            else if (id == "openai") Settings.ExpandedOpenAI = v;
+            else if (id == "local") Settings.ExpandedLocal = v;
+            else Settings.ExpandedServices[id] = v;
         }
 
         /// <summary>Accesso del servizio indicato: login di Claude Code nel terminale, o accesso a GitHub per Copilot.</summary>
         public void Login(string id)
         {
+            var def = Definitions.Get(id);
             if (id == "copilot") LoginGitHub();
-            else LoginClaude();
+            else if (id == "claude") LoginClaude();
+            else if (def != null && def.UsesKey) EnterApiKey(def);
         }
 
         private GitHubLoginWindow githubLogin;
@@ -336,6 +344,21 @@ namespace AIMeter
             githubLogin.Closed += (o, e) => githubLogin = null;
             githubLogin.Show();
             githubLogin.Activate();
+        }
+
+        /// <summary>Chiave API di un servizio descritto da una definizione: finestra per incollarla.</summary>
+        public void EnterApiKey(ServiceDefinition d)
+        {
+            var w = new ApiKeyWindow(d);
+            w.Saved += () => { RefreshNow(); if (settingsWindow != null) settingsWindow.Build(); };
+            w.Show();
+            w.Activate();
+        }
+
+        public void RemoveApiKey(ServiceDefinition d)
+        {
+            ApiKeys.Remove(d.Id);
+            RefreshNow();
         }
 
         public void SignOutGitHub()
@@ -526,7 +549,7 @@ namespace AIMeter
 
         private void UpdateTrayText(Snapshot s)
         {
-            var parts = s.Providers.Select(p =>
+            var parts = s.Providers.Where(p => p.Models == null).Select(p =>
             {
                 var w = Ui.Primary(p.Usage);
                 return w == null ? p.Name + " –" : p.Name + " " + Math.Round(w.Remaining) + "%";

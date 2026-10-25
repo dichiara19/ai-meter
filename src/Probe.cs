@@ -244,7 +244,9 @@ namespace AIMeter
         public Collector(Settings settings)
         {
             probe = new Probe(settings);
-            providers = new List<Provider> { new ClaudeProvider(settings), new CodexProvider(settings), new CopilotProvider(settings), new CursorProvider(settings) };
+            providers = new List<Provider> { new ClaudeProvider(settings), new CodexProvider(settings), new CopilotProvider(settings) };
+            foreach (var d in Definitions.All) providers.Add(new DefinedProvider(d));
+            providers.Add(new LocalProvider(settings));
         }
 
         public bool WslUp { get { return probe.WslUp; } }

@@ -48,7 +48,7 @@ namespace AIMeter
 
         public override ProviderState Collect(Probe p)
         {
-            var st = new ProviderState { Id = "copilot", Name = "Copilot" };
+            var st = new ProviderState { Id = "copilot", Name = "Copilot", CanSignIn = true };
             if (p.IsRunning("code.exe")) st.Sessions.Add(new Session { Kind = "VS Code", Title = "VS Code open", Status = "app" });
             st.Running = st.Sessions.Count > 0 || p.IsRunning("copilot.exe");
 

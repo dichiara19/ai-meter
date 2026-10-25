@@ -18,6 +18,7 @@ namespace AIMeter
         public Money Spent;       // per i crediti in denaro: speso e limite
         public string RightText;  // chiave inglese al posto della percentuale (es. "unlimited")
         public Func<string> Detail; // dettaglio per il suggerimento, calcolato nella lingua attiva
+        public bool NoBar;        // solo un valore (es. un saldo), senza barra né percentuale
         public double Remaining { get { return Math.Max(0, Math.Min(100, 100 - Used)); } }
     }
 
@@ -30,7 +31,7 @@ namespace AIMeter
 
         public string Format(double v)
         {
-            string sym = Currency == "EUR" ? "€" : Currency == "USD" ? "$" : Currency == "GBP" ? "£" : Currency;
+            string sym = Currency == "EUR" ? "€" : Currency == "USD" ? "$" : Currency == "GBP" ? "£" : Currency == "CNY" ? "¥" : Currency;
             // formato valuta della lingua attiva (es. $226.72 in inglese, 226,72 $ in italiano), con il simbolo del servizio
             var nf = (NumberFormatInfo)L.Culture.NumberFormat.Clone();
             nf.CurrencySymbol = sym;
@@ -62,6 +63,7 @@ namespace AIMeter
         public string Status;     // "busy", "idle", "app"
         public string Model;
         public DateTime Updated;
+        public string Note;       // dettaglio aggiuntivo nella riga (es. contesto occupato)
     }
 
     internal sealed class ProviderState
@@ -74,9 +76,27 @@ namespace AIMeter
         public Usage Usage;
         public string Notice;     // messaggio di stato del collegamento, se serve
         public bool NeedsLogin;
+        public bool CanSignIn;    // l'avviso offre il collegamento "Accedi" (accesso gestito da AI Meter)
+        public List<LocalModel> Models;   // solo per i modelli locali: i modelli caricati in memoria
 
         public int Active { get { int n = 0; foreach (var s in Sessions) if (s.Status != "app") n++; return n; } }
         public int Busy { get { int n = 0; foreach (var s in Sessions) if (s.Status == "busy") n++; return n; } }
+    }
+
+    /// <summary>Un modello caricato da un server locale (Ollama, LM Studio, llama.cpp…), su Windows o in WSL.</summary>
+    internal sealed class LocalModel
+    {
+        public string Name;
+        public string Server;      // "Ollama", "LM Studio", "llama.cpp"…
+        public string Where;       // "Windows" o "WSL"
+        public string Detail;      // parametri e quantizzazione, se noti
+        public long Vram, Ram;     // byte in memoria video e di sistema, 0 = sconosciuto
+        public int Context;        // finestra di contesto caricata (token), 0 = sconosciuta
+        public int ContextUsed;    // token nella richiesta più lunga in corso, 0 = sconosciuto
+        public int Busy, Slots;    // richieste in corso e posti disponibili (0 = sconosciuti)
+        public List<Session> Sessions = new List<Session>();   // sessioni delle CLI che lo usano
+
+        public string Key { get { return Server + "|" + Where + "|" + Name; } }
     }
 
     internal sealed class Snapshot
@@ -97,7 +117,13 @@ namespace AIMeter
                     sb.Append(p.Usage.Source);
                     foreach (var w in p.Usage.Windows) sb.Append(w.Label).Append((int)w.Used).Append(w.ResetsAt);
                 }
-                foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model);
+                foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
+                if (p.Models != null)
+                    foreach (var m in p.Models)
+                    {
+                        sb.Append(m.Key).Append(m.Vram >> 26).Append(m.Ram >> 26).Append(m.Context).Append(m.ContextUsed >> 10).Append(m.Busy);
+                        foreach (var s in m.Sessions) sb.Append(s.Title).Append(s.Status);
+                    }
             }
             return sb.ToString();
         }
@@ -122,6 +148,14 @@ namespace AIMeter
             try { string text = File.ReadAllText(path, Encoding.UTF8); BytesRead += text.Length; return Parse(text); }
             catch (IOException) { return null; }
             catch (UnauthorizedAccessException) { return null; }
+        }
+
+        /// <summary>Qualsiasi valore JSON (oggetto, elenco, numero…), null se non valido.</summary>
+        public static object ParseAny(string text)
+        {
+            try { return Ser.DeserializeObject(text); }
+            catch (ArgumentException) { return null; }
+            catch (InvalidOperationException) { return null; }
         }
 
         public static string Serialize(object o) { return Ser.Serialize(o); }

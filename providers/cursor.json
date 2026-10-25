@@ -1,0 +1,36 @@
+﻿{
+  "id": "cursor",
+  "name": "Cursor",
+  "description": "Included usage and on-demand spend of your Cursor plan, read with the Cursor app's own sign-in.",
+  "color": { "light": "#3E5A86", "dark": "#9FB4D8" },
+  "detect": { "paths": ["%APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb", "%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe"] },
+  "logo": { "exe": ["%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe"] },
+  "processes": [{ "name": "cursor.exe", "title": "Cursor app open" }],
+  "auth": {
+    "type": "sqlite",
+    "path": "%APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb",
+    "query": "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'",
+    "jwt": true,
+    "notice": "Sign in to the Cursor app to see your usage"
+  },
+  "request": {
+    "url": "https://cursor.com/api/usage-summary",
+    "headers": { "Cookie": "WorkosCursorSessionToken={jwt.sub|afterLast:|}%3A%3A{token}" },
+    "interval": 5
+  },
+  "plan": "membershipType",
+  "limits": [
+    { "label": "Included usage", "short": "mese", "when": "isUnlimited", "unlimited": "isUnlimited",
+      "starts": "billingCycleStart", "resets": "billingCycleEnd" },
+    { "label": "Included usage", "short": "mese", "unless": "isUnlimited",
+      "percent": "individualUsage.plan.totalPercentUsed", "used": "individualUsage.plan.used", "limit": "individualUsage.plan.limit",
+      "scale": 0.01, "currency": "USD", "starts": "billingCycleStart", "resets": "billingCycleEnd" }
+  ],
+  "notes": [
+    { "when": ["individualUsage.onDemand.enabled", "individualUsage.onDemand.limit"], "text": "On-demand usage: {0} of {1}",
+      "values": [{ "path": "individualUsage.onDemand.used", "scale": 0.01, "currency": "USD" },
+                 { "path": "individualUsage.onDemand.limit", "scale": 0.01, "currency": "USD" }] },
+    { "when": "individualUsage.onDemand.enabled", "unless": "individualUsage.onDemand.limit", "text": "On-demand usage: {0}",
+      "values": [{ "path": "individualUsage.onDemand.used", "scale": 0.01, "currency": "USD" }] }
+  ]
+}

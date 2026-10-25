@@ -1,0 +1,24 @@
+﻿{
+  "id": "moonshot",
+  "name": "Kimi (Moonshot)",
+  "monogram": "K",
+  "description": "Remaining balance of your Kimi API account (platform.kimi.ai).",
+  "color": { "light": "#1F1F1F", "dark": "#E8E8E8" },
+  "detect": { "env": ["MOONSHOT_API_KEY"] },
+  "auth": { "type": "key", "env": ["MOONSHOT_API_KEY"], "page": "https://platform.kimi.ai/console/api-keys" },
+  "request": { "url": "https://api.moonshot.ai/v1/users/me/balance", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
+  "limits": [
+    { "label": "Balance", "balance": "data.available_balance", "currency": "USD" }
+  ],
+  "notes": [
+    { "when": "data.voucher_balance", "text": "Including {0} in vouchers",
+      "values": [{ "path": "data.voucher_balance", "currency": "USD" }] }
+  ],
+  "i18n": {
+    "it": { "Remaining balance of your Kimi API account (platform.kimi.ai).": "Saldo residuo del tuo account API di Kimi (platform.kimi.ai).", "Including {0} in vouchers": "Di cui {0} in buoni" },
+    "es": { "Remaining balance of your Kimi API account (platform.kimi.ai).": "Saldo restante de tu cuenta API de Kimi (platform.kimi.ai).", "Including {0} in vouchers": "Incluye {0} en cupones" },
+    "fr": { "Remaining balance of your Kimi API account (platform.kimi.ai).": "Solde restant de votre compte API Kimi (platform.kimi.ai).", "Including {0} in vouchers": "Dont {0} en bons" },
+    "de": { "Remaining balance of your Kimi API account (platform.kimi.ai).": "Restguthaben deines Kimi-API-Kontos (platform.kimi.ai).", "Including {0} in vouchers": "Davon {0} in Gutscheinen" },
+    "pt": { "Remaining balance of your Kimi API account (platform.kimi.ai).": "Saldo restante da sua conta de API do Kimi (platform.kimi.ai).", "Including {0} in vouchers": "Inclui {0} em vouchers" }
+  }
+}

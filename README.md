@@ -1,6 +1,8 @@
 # AI Meter
 
-A native, lightweight Windows 11 widget that shows which AI sessions are running on your PC and how much of your usage limits is left: **Claude** (Claude Code, Cowork, desktop app), **ChatGPT / Codex**, **GitHub Copilot** and **Cursor**. Each service can be turned on or off in Settings; on first run AI Meter enables the ones it finds on your PC.
+A native, lightweight Windows 11 widget that shows which AI sessions are running on your PC and how much of your usage limits is left: **Claude** (Claude Code, Cowork, desktop app), **ChatGPT / Codex**, **GitHub Copilot**, **Cursor**, **OpenRouter**, **DeepSeek** and **Kimi**. It also shows the **models running locally** (Ollama, LM Studio, llama.cpp, llama-swap, vLLM and more, on Windows and in WSL) with their video memory and context, and the open sessions of **terminal coding agents** (OpenCode, Pi, Gemini CLI, Qwen Code, Goose, Crush, Cline, Kilo) with the model each one uses.
+
+Each service can be turned on or off in Settings; on first run AI Meter enables the ones it finds on your PC. New services can be added with a [small JSON file](docs/PROVIDERS.md), no code needed.
 
 > Available in English, Italian, Spanish, French, German and Portuguese. It follows the Windows display language, or you can pick one in Settings. Translations live in `src/StringsTable.cs`: new languages are welcome.
 
@@ -11,7 +13,7 @@ A native, lightweight Windows 11 widget that shows which AI sessions are running
 | Surface | What it does |
 |---|---|
 | **Notification area icon** | Click: full panel (Acrylic, like Windows' own flyouts). Right click: menu. Never shows up in the taskbar. |
-| **Taskbar pill** | A compact pill inside the taskbar of the main monitor, placed in its free space (left corner or next to the notification area, based on how your taskbar is set up). It is a child window of the taskbar, so it hides with an auto-hiding taskbar and with full-screen apps. Click: full panel. |
+| **Taskbar pill** | A compact pill inside the taskbar of the main monitor, placed in its free space (left corner or next to the notification area, based on how your taskbar is set up). It is a child window of the taskbar, so it hides with an auto-hiding taskbar and with full-screen apps. Local models get their own area at the end: video memory in use, with a dot while a model is working. Click: full panel. |
 | **Desktop widget** | Always stays *below* your windows, like part of the wallpaper. Compact cards; click a card header to show its sessions. Drag it by its header. |
 | **Compact overlay** | A tiny always-on-top pill (off by default) with two micro buttons: collapse to a live ring icon, or close. Never steals focus, hides itself during full-screen games, videos and presentations, shows details on hover. |
 | **Settings** | Built like Windows 11 Settings: connected services, what to show, where, start with Windows, theme, refresh rate, live resource usage. |
@@ -29,9 +31,14 @@ Everything is read locally from files the official apps already write. Nothing i
   The panel shows the 5-hour session with its start and end time, weekly and per-model weekly limits, cloud session credits, extra usage credits and how the week splits between Claude Code, chats and Cowork.
 - **ChatGPT / Codex**: active Codex threads (app, CLI, VS Code) from Codex's local logs. Limits **in real time** by asking the installed `codex` program (`codex app-server`, JSON-RPC `account/rateLimits/read`): Codex uses its own login, AI Meter never reads or refreshes its tokens. Includes credits and free limit resets. If Codex is not available, the last value in its logs is used.
 - **GitHub Copilot** (off by default): premium requests and monthly quotas from GitHub's Copilot usage API. You sign in to GitHub from AI Meter with a device code; the token is encrypted with Windows Data Protection (DPAPI) for your user only. GitHub shows the request as "Visual Studio Code", the official Copilot app that can read quotas.
-- **Cursor**: included usage and on-demand spend for the billing cycle, from cursor.com, using the sign-in the Cursor app already keeps on your PC (read from its local database with the SQLite library built into Windows). AI Meter never refreshes or stores that token and never reads browser cookies. *Cursor support is new and has not been tested with a real account yet: reports are welcome.*
+- **Services described by a definition file** ([`providers/`](providers), format in [docs/PROVIDERS.md](docs/PROVIDERS.md)):
+  - **Cursor**: included usage and on-demand spend for the billing cycle, from cursor.com, using the sign-in the Cursor app already keeps on your PC (read from its local database with the SQLite library built into Windows). AI Meter never refreshes or stores that token and never reads browser cookies.
+  - **OpenRouter**: spending and limit of your API key. **DeepSeek** and **Kimi (Moonshot)**: account balance. You paste an API key in Settings (or set the usual environment variable); it is encrypted with Windows Data Protection.
+  - *These have been tested against recorded API responses, not yet with real accounts: reports are welcome.*
+- **Local models**: AI Meter looks for model servers listening on this PC and recognises them from their own API: Ollama, LM Studio, llama.cpp `llama-server` (also in router mode), llama-swap, vLLM, KoboldCpp, LocalAI and text-generation-webui. For each loaded model it shows video and system memory, the context window, requests in progress and how much context the current request uses, when the server tells. Servers inside WSL are found only while WSL is already running (`ss` inside the distribution, at most once a minute); video memory comes from the Windows GPU counters (in WSL it is all charged to the WSL virtual machine). Only `127.0.0.1` is contacted, and only with read requests that never load a model.
+- **Coding agents**: sessions active in the last 30 minutes of OpenCode, Kilo, Pi, Gemini CLI, Qwen Code, Goose, Crush and Cline CLI, read from their local session files and databases (Windows and WSL), with title, model, context in use and whether the agent is working. A session that uses a model loaded locally is shown under that model.
 - Individual claude.ai / ChatGPT chats leave no trace on disk, so for those you only see whether the app is open.
-- Service logos are read at runtime from the Claude and ChatGPT apps installed on your PC; they are trademarks of their owners and are not part of this repository.
+- Service logos are read at runtime from the apps installed on your PC; they are trademarks of their owners and are not part of this repository.
 
 ## Resource usage
 
@@ -92,6 +99,11 @@ src/ProviderClaude.cs  Claude: Claude Code and Cowork sessions, usage API
 src/ProviderCodex.cs   ChatGPT / Codex: threads from local logs, limits via codex app-server
 src/ProviderCopilot.cs GitHub Copilot: device-code sign-in, quotas API
 src/Model.cs           data model and JSON helpers
+src/ProviderDefined.cs services described by JSON definitions, API keys, SQLite reader
+src/ProviderLocal.cs   local model servers: discovery on Windows and WSL, loaded models, memory, context
+src/CodingAgents.cs    sessions of terminal coding agents (OpenCode, Pi, Gemini CLI, Qwen Code, …)
+src/GpuMemory.cs       video memory per process from the Windows GPU counters
+providers/*.json       built-in service definitions
 src/Settings.cs        preferences and start with Windows
 src/PackageStartup.cs  start with Windows in the Microsoft Store package (StartupTask)
 src/Theme.cs           Fluent light/dark tokens, Windows accent color, control styles
@@ -118,7 +130,7 @@ assets/app.ico         app icon (generated by build.ps1)
 
 AI Meter does not collect, store or send any data to its authors, and contains no telemetry, analytics or update checks.
 
-It reads local files written by the Claude and ChatGPT/Codex apps and keeps its own settings in `%APPDATA%\AIMeter`, on your PC only.
+It reads local files written by the AI apps and coding agents on your PC and keeps its own settings in `%APPDATA%\AIMeter`, on your PC only.
 
 Network connections are limited to reading your own usage:
 
@@ -126,6 +138,9 @@ Network connections are limited to reading your own usage:
 - **Codex limits**: requested by the installed `codex` program with its own login; AI Meter never handles that token.
 - **GitHub Copilot quotas** (off by default): a request to `api.github.com`, only if you enable Copilot and sign in to GitHub.
 - **Cursor usage**: a request to `cursor.com` with the Cursor app's own sign-in, only if Cursor is enabled.
+- **OpenRouter, DeepSeek, Kimi**: a request to `openrouter.ai`, `api.deepseek.com` or `api.moonshot.ai` with your API key, only if you turn the service on and add a key.
+- **Definitions you add**: a request to the address named in the file.
+- **Local models**: requests to `127.0.0.1` only, which never leave the PC.
 
 With these off, AI Meter makes no network connections at all.
 

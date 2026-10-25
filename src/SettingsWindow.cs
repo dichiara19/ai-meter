@@ -118,10 +118,40 @@ namespace AIMeter
                     gh ? Button(L.T("Disconnect"), () => { C.SignOutGitHub(); Build(); }, false) : Button(L.T("Connect GitHub…"), () => C.LoginGitHub(), true)));
             Group(copilotRows.ToArray());
 
-            Group(
-                Row(Ui.Logo("cursor", 28), "Cursor",
-                    Found(CursorProvider.Detected()) + L.T("Included usage and on-demand spend of your Cursor plan, read with the Cursor app's own sign-in."),
-                    Toggle(S.CursorEnabled, v => { S.CursorEnabled = v; Changed(); Rebuild(); })));
+            // servizi descritti dai file di definizione (inclusi e aggiunti dall'utente)
+            foreach (var def in Definitions.All)
+            {
+                var d = def;
+                bool on = S.ServiceOn(d);
+                var rows = new List<FrameworkElement>
+                {
+                    Row(Ui.Logo(d.Id, 28), d.Name,
+                        (d.UsesKey ? "" : Found(d.Detected())) + (d.Description != null ? L.T(d.Description) : "")
+                        + (d.Origin != "built-in" ? " " + L.T("Added by you.") : ""),
+                        Toggle(on, v => { S.Services[d.Id] = v; Changed(); Rebuild(); })),
+                };
+                if (on && d.UsesKey)
+                    rows.Add(Row(null, L.T("API key"),
+                        ApiKeys.Has(d.Id) ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.") : L.T("Add an API key to read your usage."),
+                        ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false) : Button(L.T("Add key…"), () => C.EnterApiKey(d), true)));
+                Group(rows.ToArray());
+            }
+            var localRows = new List<FrameworkElement>
+            {
+                Row(Ui.Glyph(Ui.LocalGlyph, 22, "Text"), L.T("Local models"),
+                    L.T("Models loaded by Ollama, LM Studio, llama.cpp, llama-swap and vLLM, on Windows and in WSL: video memory, context and requests in progress. Only servers on this PC are contacted."),
+                    Toggle(S.LocalEnabled, v => { S.LocalEnabled = v; Changed(); Rebuild(); })),
+            };
+            if (S.LocalEnabled)
+                localRows.Add(Row(null, L.T("Coding agent sessions"), L.T("OpenCode, Pi and other terminal agents: open sessions and the model each one uses, read from their local files."),
+                    Toggle(S.LocalAgents, v => { S.LocalAgents = v; Changed(); })));
+            Group(localRows.ToArray());
+
+            Hint(L.T("More services can be added with a small definition file, without updating AI Meter."));
+            Group(Row(Ui.Glyph("", 20, "Text"), L.T("Add a service"),
+                L.T("Put definition files in this folder and restart AI Meter. The format is described in the project documentation."),
+                Pair(Button(L.T("Format"), () => Process.Start("https://github.com/dichiara19/ai-meter/blob/main/docs/PROVIDERS.md"), false),
+                     Button(L.T("Open folder"), () => { System.IO.Directory.CreateDirectory(Definitions.UserFolder); Process.Start("explorer.exe", "\"" + Definitions.UserFolder + "\""); }, false))));
 
             var wslRow = Row(null, L.T("WSL distribution"), L.T("Where to look for Claude Code and Codex installed in Linux. AI Meter never starts WSL: it reads it only if it is already running."),
                 Combo(new[] { S.WslDistro }.Concat(WslDistros()).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => Tuple.Create(x, x)).ToArray(), S.WslDistro,
@@ -184,7 +214,7 @@ namespace AIMeter
             Group(
                 Row(Ui.Glyph("\uE946", 20, "Text"), "AI Meter", null, Button(L.T("Open data folder"), () => Process.Start("explorer.exe", "\"" + Settings.Folder + "\""), false), statsText),
                 Row(Ui.Glyph("\uE72E", 20, "Text"), L.T("Privacy"),
-                    L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and Cursor (cursor.com), and each one can be turned off."),
+                    L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off."),
                     Button(L.T("Source code"), () => Process.Start("https://github.com/dichiara19/ai-meter#privacy-policy"), false)));
             UpdateStats();
         }

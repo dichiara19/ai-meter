@@ -38,7 +38,7 @@ namespace AIMeter
 
         public override ProviderState Collect(Probe p)
         {
-            var st = new ProviderState { Id = "claude", Name = "Claude" };
+            var st = new ProviderState { Id = "claude", Name = "Claude", CanSignIn = true };
             bool app = false;
             foreach (var kv in p.Procs)
             {

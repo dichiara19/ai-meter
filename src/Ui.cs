@@ -105,7 +105,7 @@ namespace AIMeter
             b.SetResourceReference(Border.BackgroundProperty, BrandBrush(id));
             b.Child = new TextBlock
             {
-                Text = id == "openai" ? "G" : "C", Foreground = Brushes.White, FontWeight = FontWeights.Bold, FontSize = size * 0.58,
+                Text = id == "openai" ? "G" : id == "claude" ? "C" : Definitions.Get(id) != null ? Definitions.Get(id).Monogram : "?", Foreground = Brushes.White, FontWeight = FontWeights.Bold, FontSize = size * 0.58,
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             };
             return b;
@@ -115,7 +115,8 @@ namespace AIMeter
         private static string FindInstalledLogo(string id, bool dark)
         {
             if (id == "copilot") return FindCopilotLogo();
-            if (id == "cursor") return CursorProvider.ExePath();
+            var def = Definitions.Get(id);
+            if (def != null) return def.LogoFile();
             string[] prefixes = id == "openai" ? new[] { "OpenAI.ChatGPT", "OpenAI.Codex_" } : new[] { "Claude_" };
             string[] names = id == "openai" && !dark
                 ? new[] { "Square44x44Logo.targetsize-256_altform-lightunplated.png", "Square44x44Logo.targetsize-256_altform-unplated.png" }
@@ -163,13 +164,13 @@ namespace AIMeter
             return null;
         }
 
-        public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : id == "copilot" ? "Copilot" : id == "cursor" ? "Cursor" : "Claude"; }
+        public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : id == "copilot" ? "Copilot" : id == "claude" ? "Claude" : "Brand." + id; }
 
         /// <summary>Il limite da mostrare in pillola, icona e suggerimenti: la sessione di 5 ore, altrimenti il primo limite in percentuale.</summary>
         public static UsageWindow Primary(Usage u)
         {
             if (u == null) return null;
-            return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null);
+            return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null && !w.NoBar && w.RightText == null);
         }
 
         public static string LevelBrush(double remaining, string brand)
@@ -222,7 +223,7 @@ namespace AIMeter
                 if ((r - DateTime.Now).TotalHours < 24) return L.F("resets tomorrow {0}", r.ToString("HH:mm", It));
                 return L.F("resets {0}", r.ToString("ddd HH:mm", It));
             }
-            if (u.Source == "cache") return L.F("updated {0}", AgoPhrase(u.At));
+            if (u != null && u.Source == "cache") return L.F("updated {0}", AgoPhrase(u.At));
             return "";
         }
 
@@ -309,7 +310,7 @@ namespace AIMeter
         public static StackPanel PillRow(Snapshot s, string metric, bool? dark)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            foreach (var p in s.Providers)
+            foreach (var p in s.Providers.Where(x => x.Models == null))
             {
                 if (row.Children.Count > 0)
                 {
@@ -347,11 +348,86 @@ namespace AIMeter
                     item.Children.Add(stack);
                     any = true;
                 }
+                // servizi con un saldo senza limite: l'importo al posto della percentuale
+                var balance = windows.FirstOrDefault(w => w.NoBar && w.RightText != null);
+                if (!any && balance != null) { var t = Text(balance.RightText, 12, "Text", FontWeights.SemiBold); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); any = true; }
                 if (!any) { var t = Text("–", 12, "Text3"); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); }
                 row.Children.Add(item);
             }
-            if (s.Providers.Count == 0) row.Children.Add(Text("AI Meter", 12, "Text2"));
+            var local = s.Providers.FirstOrDefault(x => x.Models != null);
+            if (local != null && local.Running) row.Children.Add(LocalPill(local, row.Children.Count > 0));
+            if (row.Children.Count == 0) row.Children.Add(Text("AI Meter", 12, "Text2"));
             return row;
+        }
+
+        /// <summary>
+        /// Area dei modelli locali nella pillola, staccata dai servizi cloud: memoria video occupata (barra sulla
+        /// capienza della scheda) o, se non nota, il numero di modelli caricati; un punto se stanno lavorando.
+        /// </summary>
+        private static FrameworkElement LocalPill(ProviderState p, bool afterCloud)
+        {
+            var chip = new Border { CornerRadius = new CornerRadius(5), Padding = new Thickness(6, 2, 7, 2), Margin = new Thickness(afterCloud ? 12 : 0, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            chip.SetResourceReference(Border.BackgroundProperty, "SubtleHover");
+            var item = new StackPanel { Orientation = Orientation.Horizontal };
+            var iconHost = new Grid { Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center };
+            iconHost.Children.Add(Glyph(LocalGlyph, 14, "Text"));
+            if (p.Models.Any(m => m.Busy > 0))
+            {
+                var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -2, -3, 0), BorderThickness = new Thickness(1.2) };
+                dot.SetResourceReference(Border.BackgroundProperty, "Success");
+                dot.SetResourceReference(Border.BorderBrushProperty, "Fallback");
+                iconHost.Children.Add(dot);
+            }
+            item.Children.Add(iconHost);
+            long vram = p.Models.Sum(m => m.Vram), total = GpuMemory.Total;
+            var stack = new StackPanel { Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            string text = vram > 0 ? GpuMemory.Format(vram) : p.Models.Count.ToString(It);
+            var t = Text(text, 12, "Text", FontWeights.SemiBold);
+            t.HorizontalAlignment = HorizontalAlignment.Center;
+            stack.Children.Add(t);
+            if (vram > 0 && total > 0)
+            {
+                double free = 100 - Math.Min(100, GpuMemory.Used * 100.0 / total);
+                var bar = Bar(free, LevelBrush(free, "Info"), 2);
+                bar.Width = 26;
+                bar.Margin = new Thickness(0, 1, 0, 0);
+                stack.Children.Add(bar);
+            }
+            item.Children.Add(stack);
+            chip.Child = item;
+            chip.ToolTip = LocalSummary(p);
+            return chip;
+        }
+
+        public const string LocalGlyph = "";
+
+        /// <summary>Riepilogo dei modelli locali, per i suggerimenti.</summary>
+        public static string LocalSummary(ProviderState p)
+        {
+            if (p.Models == null || p.Models.Count == 0) return L.T("Local models: none loaded");
+            var lines = new List<string> { L.N(p.Models.Count, "{0} local model loaded", "{0} local models loaded") };
+            foreach (var m in p.Models) lines.Add("• " + m.Name + " · " + string.Join(" · ", LocalFacts(m)));
+            if (GpuMemory.Total > 0) lines.Add(L.F("Video memory: {0} of {1} in use", GpuMemory.Format(GpuMemory.Used), GpuMemory.Format(GpuMemory.Total)));
+            return string.Join("\n", lines);
+        }
+
+        /// <summary>Server, dove gira, memoria e contesto di un modello locale, nei testi brevi della scheda.</summary>
+        public static List<string> LocalFacts(LocalModel m)
+        {
+            var f = new List<string> { m.Where == "WSL" ? m.Server + " (WSL)" : m.Server };
+            if (m.Vram > 0) f.Add(L.F("{0} VRAM", GpuMemory.Format(m.Vram)));
+            if (m.Ram > 0) f.Add(L.F("{0} RAM", GpuMemory.Format(m.Ram)));
+            if (m.Context > 0) f.Add(L.F("{0} context", Tokens(m.Context)));
+            if (m.Busy > 0) f.Add(L.T("working"));
+            return f;
+        }
+
+        /// <summary>Token in forma breve: 32768 → 32K, 40000 → 40K.</summary>
+        public static string Tokens(int n)
+        {
+            if (n < 1000) return n.ToString(It);
+            double k = n % 1024 == 0 ? n / 1024.0 : n / 1000.0;
+            return (k >= 10 ? Math.Round(k).ToString(It) : k.ToString("0.#", It)) + "K";
         }
 
         /// <summary>Riepilogo testuale dei limiti a 5 ore, per i suggerimenti.</summary>
@@ -359,6 +435,7 @@ namespace AIMeter
         {
             return string.Join("\n", s.Providers.Select(p =>
             {
+                if (p.Models != null) return LocalSummary(p);
                 var w = Primary(p.Usage);
                 string n = p.Name;
                 return w == null ? L.F("{0}: no data", n) : L.F("{0}: {1}% left ({2})", n, Math.Round(w.Remaining), LabelOf(w)) +
@@ -406,6 +483,7 @@ namespace AIMeter
             }
             top.Children.Add(left);
             root.Children.Add(top);
+            if (w.NoBar) { root.ToolTip = LabelOf(w) + ": " + right; return root; }
             var bar = Bar(w.Remaining, LevelBrush(w.Remaining, brand), 4);
             bar.Margin = new Thickness(0, 5, 0, 0);
             root.Children.Add(bar);
@@ -451,6 +529,7 @@ namespace AIMeter
             var meta = new List<string> { L.T(s.Kind) };
             string model = PrettyModel(s.Model);
             if (model != null) meta.Add(model);
+            if (s.Note != null) meta.Add(s.Note);
             if (s.Status == "busy") meta.Add(L.T("working"));
             texts.Children.Add(Text(string.Join(" · ", meta), 11.5, "Text3"));
             Grid.SetColumn(texts, 1);
@@ -471,6 +550,7 @@ namespace AIMeter
         /// <summary>Scheda di un servizio: intestazione, limiti, avviso, elenco sessioni (se espansa).</summary>
         public static Border ProviderCard(ProviderState p, bool expanded, Action toggle, Action<string> login)
         {
+            if (p.Models != null) return LocalCard(p, expanded, toggle);
             string brand = BrandBrush(p.Id);
             var stack = new StackPanel();
 
@@ -566,7 +646,7 @@ namespace AIMeter
                 ic.Margin = new Thickness(0, 0, 6, 0);
                 DockPanel.SetDock(ic, Dock.Left);
                 note.Children.Add(ic);
-                if (p.NeedsLogin && login != null)
+                if (p.NeedsLogin && p.CanSignIn && login != null)
                 {
                     var link = new Button { Content = L.T("Sign in"), Padding = new Thickness(4, 0, 4, 1), FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
                     link.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
@@ -597,6 +677,115 @@ namespace AIMeter
                     more.Margin = new Thickness(18, 2, 0, 0);
                     stack.Children.Add(more);
                 }
+            }
+            return Card(stack, new Thickness(14, 12, 14, 12));
+        }
+
+        /// <summary>
+        /// Scheda dei modelli locali: memoria video della scheda, poi ogni modello caricato con server, memoria e contesto,
+        /// e sotto le sessioni delle CLI che lo usano. Le altre sessioni delle CLI compaiono in fondo.
+        /// </summary>
+        public static Border LocalCard(ProviderState p, bool expanded, Action toggle)
+        {
+            var stack = new StackPanel();
+            var head = new DockPanel { Background = Brushes.Transparent, Cursor = toggle != null ? Cursors.Hand : null };
+            var icon = Glyph(LocalGlyph, 18, "Text");
+            icon.Width = 20;
+            icon.Margin = new Thickness(0, 0, 10, 0);
+            DockPanel.SetDock(icon, Dock.Left);
+            head.Children.Add(icon);
+            if (toggle != null)
+            {
+                var chev = Glyph(expanded ? "" : "", 10, "Text3");
+                chev.Margin = new Thickness(10, 0, 2, 0);
+                DockPanel.SetDock(chev, Dock.Right);
+                head.Children.Add(chev);
+                head.MouseLeftButtonUp += (o, e) => { toggle(); e.Handled = true; };
+            }
+            var count = Text(!p.Running ? L.T("no server running") : p.Models.Count == 0 ? L.T("none loaded") : L.N(p.Models.Count, "{0} loaded", "{0} loaded"), 12, p.Models.Count > 0 ? "Text2" : "Text3");
+            count.VerticalAlignment = VerticalAlignment.Center;
+            DockPanel.SetDock(count, Dock.Right);
+            head.Children.Add(count);
+            var name = Text(p.Name, 14, "Text", FontWeights.SemiBold);
+            name.FontFamily = Theme.DisplayFont;
+            name.VerticalAlignment = VerticalAlignment.Center;
+            head.Children.Add(name);
+            stack.Children.Add(head);
+
+            // memoria video della scheda: è il vero limite dei modelli locali
+            if (p.Running && GpuMemory.Total > 0)
+            {
+                double free = 100 - Math.Min(100, GpuMemory.Used * 100.0 / GpuMemory.Total);
+                var w = new UsageWindow { Label = "Video memory", Used = 100 - free, RightText = L.F("{0} free", GpuMemory.Format(Math.Max(0, GpuMemory.Total - GpuMemory.Used))) };
+                var row = UsageRow(w, null, "Info");
+                row.ToolTip = L.F("Video memory: {0} of {1} in use", GpuMemory.Format(GpuMemory.Used), GpuMemory.Format(GpuMemory.Total));
+                stack.Children.Add(row);
+            }
+
+            foreach (var m in p.Models)
+            {
+                var block = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+                var top = new DockPanel();
+                string mem = m.Vram > 0 ? GpuMemory.Format(m.Vram) : m.Ram > 0 ? GpuMemory.Format(m.Ram) : null;
+                if (mem != null)
+                {
+                    var r = Text(mem, 13, "Text", FontWeights.SemiBold);
+                    r.Margin = new Thickness(8, 0, 0, 0);
+                    DockPanel.SetDock(r, Dock.Right);
+                    top.Children.Add(r);
+                }
+                var dot = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Margin = new Thickness(1, 0, 9, 0), VerticalAlignment = VerticalAlignment.Center };
+                dot.SetResourceReference(Border.BackgroundProperty, m.Busy > 0 ? "Success" : "Track");
+                DockPanel.SetDock(dot, Dock.Left);
+                top.Children.Add(dot);
+                var title = Text(m.Name, 13, "Text", FontWeights.SemiBold);
+                title.TextTrimming = TextTrimming.CharacterEllipsis;
+                top.Children.Add(title);
+                block.Children.Add(top);
+
+                var facts = LocalFacts(m).Where(f => !f.Contains("VRAM") || mem == null).ToList();
+                if (m.Detail != null) facts.Insert(1, m.Detail);
+                var meta = Text(string.Join(" · ", facts), 11.5, "Text3");
+                meta.Margin = new Thickness(18, 1, 0, 0);
+                meta.TextTrimming = TextTrimming.CharacterEllipsis;
+                block.Children.Add(meta);
+
+                // contesto occupato dalla richiesta in corso, se il server lo dice
+                if (m.Context > 0 && m.ContextUsed > 0)
+                {
+                    double left = 100 - Math.Min(100, m.ContextUsed * 100.0 / m.Context);
+                    var bar = Bar(left, LevelBrush(left, "Info"), 3);
+                    bar.Margin = new Thickness(18, 5, 0, 0);
+                    bar.ToolTip = L.F("Context in use: {0} of {1} tokens", Tokens(m.ContextUsed), Tokens(m.Context));
+                    block.Children.Add(bar);
+                }
+                block.ToolTip = m.Name + "\n" + string.Join(" · ", LocalFacts(m)) + (m.Slots > 0 ? "\n" + L.F("Requests in progress: {0} of {1}", m.Busy, m.Slots) : "");
+                foreach (var s in m.Sessions.Take(4))
+                {
+                    var sr = SessionRow(s, "Info");
+                    sr.Margin = new Thickness(18, 2, 0, 0);
+                    block.Children.Add(sr);
+                }
+                stack.Children.Add(block);
+            }
+
+            // sessioni delle CLI che non usano un modello caricato qui (cloud o server non raggiungibile)
+            if (expanded && p.Sessions.Count > 0)
+            {
+                var div = new Border { Height = 1, Margin = new Thickness(-14, 12, -14, 6) };
+                div.SetResourceReference(Border.BackgroundProperty, "Divider");
+                stack.Children.Add(div);
+                var sub = Text(L.T("Coding agents"), 11.5, "Text3", FontWeights.SemiBold);
+                sub.Margin = new Thickness(0, 0, 0, 2);
+                stack.Children.Add(sub);
+                foreach (var s in p.Sessions.OrderByDescending(x => x.Status == "busy").ThenByDescending(x => x.Updated).Take(6)) stack.Children.Add(SessionRow(s, "Info"));
+            }
+            if (!p.Running && p.Sessions.Count == 0)
+            {
+                var none = Text(L.T("Ollama, LM Studio, llama.cpp and other local servers appear here while they run, on Windows or in WSL."), 12, "Text3");
+                none.TextWrapping = TextWrapping.Wrap;
+                none.Margin = new Thickness(0, 6, 0, 0);
+                stack.Children.Add(none);
             }
             return Card(stack, new Thickness(14, 12, 14, 12));
         }

@@ -47,6 +47,54 @@ namespace AIMeter
             return map;
         }
 
+        // --- porte TCP in ascolto, con il processo che le possiede (IPv4 e IPv6) -------------------
+        [DllImport("iphlpapi.dll")] private static extern uint GetExtendedTcpTable(IntPtr table, ref int size, bool sort, int af, int tableClass, uint reserved);
+
+        /// <summary>Porte TCP in ascolto su questo PC: porta → PID del processo.</summary>
+        public static Dictionary<int, uint> ListeningPorts()
+        {
+            var map = new Dictionary<int, uint>();
+            foreach (int af in new[] { 2, 23 })   // AF_INET, AF_INET6
+            {
+                int rowSize = af == 2 ? 24 : 56, portOffset = af == 2 ? 8 : 20, pidOffset = af == 2 ? 20 : 52;
+                int size = 0;
+                GetExtendedTcpTable(IntPtr.Zero, ref size, false, af, 3 /* TCP_TABLE_OWNER_PID_LISTENER */, 0);
+                if (size <= 0) continue;
+                IntPtr buf = Marshal.AllocHGlobal(size);
+                try
+                {
+                    if (GetExtendedTcpTable(buf, ref size, false, af, 3, 0) != 0) continue;
+                    int n = Marshal.ReadInt32(buf);
+                    for (int i = 0; i < n; i++)
+                    {
+                        IntPtr row = buf + 4 + i * rowSize;
+                        int raw = Marshal.ReadInt32(row, portOffset);
+                        int port = ((raw & 0xFF) << 8) | ((raw >> 8) & 0xFF);   // ordine di rete
+                        if (!map.ContainsKey(port)) map[port] = (uint)Marshal.ReadInt32(row, pidOffset);
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buf); }
+            }
+            return map;
+        }
+
+        /// <summary>Processo padre di ogni processo: PID → PID del padre.</summary>
+        public static Dictionary<uint, uint> ProcessParents()
+        {
+            var map = new Dictionary<uint, uint>();
+            IntPtr snap = CreateToolhelp32Snapshot(0x2, 0);
+            if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return map;
+            try
+            {
+                var e = new PROCESSENTRY32();
+                e.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+                bool ok = Process32FirstW(snap, ref e);
+                while (ok) { map[e.th32ProcessID] = e.th32ParentProcessID; ok = Process32NextW(snap, ref e); }
+            }
+            finally { CloseHandle(snap); }
+            return map;
+        }
+
         public static string ProcessPath(uint pid)
         {
             IntPtr h = OpenProcess(0x1000, false, pid); // PROCESS_QUERY_LIMITED_INFORMATION

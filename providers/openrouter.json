@@ -1,0 +1,20 @@
+﻿{
+  "id": "openrouter",
+  "name": "OpenRouter",
+  "description": "Spending and limit of your OpenRouter API key.",
+  "color": { "light": "#5A5FD6", "dark": "#A6A9F7" },
+  "detect": { "env": ["OPENROUTER_API_KEY"] },
+  "auth": { "type": "key", "env": ["OPENROUTER_API_KEY"], "page": "https://openrouter.ai/settings/keys" },
+  "request": { "url": "https://openrouter.ai/api/v1/key", "headers": { "Authorization": "Bearer {token}" }, "interval": 5 },
+  "limits": [
+    { "label": "Key limit", "short": "$", "when": "data.limit", "used": "data.usage", "limit": "data.limit", "currency": "USD" },
+    { "label": "Spent with this key", "unless": "data.limit", "balance": "data.usage", "currency": "USD" }
+  ],
+  "i18n": {
+    "it": { "Spending and limit of your OpenRouter API key.": "Spesa e limite della tua chiave API di OpenRouter.", "Key limit": "Limite della chiave", "Spent with this key": "Speso con questa chiave" },
+    "es": { "Spending and limit of your OpenRouter API key.": "Gasto y límite de tu clave API de OpenRouter.", "Key limit": "Límite de la clave", "Spent with this key": "Gastado con esta clave" },
+    "fr": { "Spending and limit of your OpenRouter API key.": "Dépenses et limite de votre clé API OpenRouter.", "Key limit": "Limite de la clé", "Spent with this key": "Dépensé avec cette clé" },
+    "de": { "Spending and limit of your OpenRouter API key.": "Ausgaben und Limit deines OpenRouter-API-Schlüssels.", "Key limit": "Schlüssellimit", "Spent with this key": "Mit diesem Schlüssel ausgegeben" },
+    "pt": { "Spending and limit of your OpenRouter API key.": "Gastos e limite da sua chave de API do OpenRouter.", "Key limit": "Limite da chave", "Spent with this key": "Gasto com esta chave" }
+  }
+}

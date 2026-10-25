@@ -17,7 +17,10 @@ namespace AIMeter
         public bool OpenAIEnabled { get; set; }
         public bool OpenAIShowChat { get; set; }
         public bool CopilotEnabled { get; set; }
-        public bool CursorEnabled { get; set; }
+        /// <summary>Servizi descritti dai file di definizione: id → attivo. Assente = attivo se trovato sul PC.</summary>
+        public System.Collections.Generic.Dictionary<string, bool> Services { get; set; }
+        public bool LocalEnabled { get; set; }      // modelli locali (Ollama, LM Studio, llama.cpp…)
+        public bool LocalAgents { get; set; }       // sessioni delle CLI (OpenCode, Pi…)
         public string WslDistro { get; set; }
         public string WslUser { get; set; }
 
@@ -28,7 +31,9 @@ namespace AIMeter
         public bool ExpandedClaude { get; set; }
         public bool ExpandedOpenAI { get; set; }
         public bool ExpandedCopilot { get; set; }
-        public bool ExpandedCursor { get; set; }
+        public bool ExpandedLocal { get; set; }
+
+        public System.Collections.Generic.Dictionary<string, bool> ExpandedServices { get; set; }
 
         // sovrimpressione
         public bool Overlay { get; set; }
@@ -50,12 +55,20 @@ namespace AIMeter
         public Settings()
         {
             ClaudeEnabled = ClaudeProvider.Detected(); ClaudeLiveUsage = true; ClaudeShowChat = true; ClaudeShowCode = true; ClaudeShowCowork = true;
-            OpenAIEnabled = CodexProvider.Detected(); OpenAIShowChat = true; CopilotEnabled = false; CursorEnabled = CursorProvider.Detected();
+            OpenAIEnabled = CodexProvider.Detected(); OpenAIShowChat = true; CopilotEnabled = false; LocalEnabled = true; LocalAgents = true; ExpandedLocal = true;
             WslDistro = DefaultWslDistro(); WslUser = Environment.UserName;
+            Services = new System.Collections.Generic.Dictionary<string, bool>(); ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
             DesktopWidget = true; DesktopX = double.MinValue; DesktopY = double.MinValue;
             TaskbarDock = false; TaskbarSide = "auto";
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
             Theme = "system"; Language = "system"; Refresh = "auto";
+        }
+
+        internal bool ServiceOn(ServiceDefinition d)
+        {
+            bool on;
+            if (Services.TryGetValue(d.Id, out on)) return on;
+            return d.Detected();
         }
 
         public static string Folder
@@ -76,6 +89,8 @@ namespace AIMeter
                     {
                         if (string.IsNullOrEmpty(s.WslDistro)) s.WslDistro = DefaultWslDistro();
                         if (string.IsNullOrEmpty(s.WslUser)) s.WslUser = Environment.UserName;
+                        if (s.Services == null) s.Services = new System.Collections.Generic.Dictionary<string, bool>();
+                        if (s.ExpandedServices == null) s.ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
                         return s;
                     }
                 }

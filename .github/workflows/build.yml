@@ -51,9 +51,10 @@ jobs:
           Copy-Item $exe, bin\AIMeter.exe.config dist
           Compress-Archive dist\* AIMeter.zip
           # stessa app, avviata dal sorgente con PowerShell: per i PC con Smart App Control attivo
-          New-Item -ItemType Directory script, script\src, script\assets | Out-Null
+          New-Item -ItemType Directory script, script\src, script\assets, script\providers | Out-Null
           Copy-Item src\*.cs script\src
           Copy-Item assets\app.ico script\assets
+          Copy-Item providers\*.json script\providers
           Copy-Item AIMeter.ps1, 'Start AI Meter.cmd', LICENSE script
           Compress-Archive script\* AIMeter-script.zip
 

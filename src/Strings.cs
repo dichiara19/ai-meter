@@ -51,7 +51,20 @@ namespace AIMeter
         public static string T(string en)
         {
             string s;
-            return table != null && en != null && table.TryGetValue(en, out s) ? s : en;
+            if (en == null) return null;
+            if (table != null && table.TryGetValue(en, out s)) return s;
+            Dictionary<string, string> more;
+            return Extra.TryGetValue(Lang, out more) && more.TryGetValue(en, out s) ? s : en;
+        }
+
+        /// <summary>Traduzioni portate dai file di definizione dei servizi (campo "i18n").</summary>
+        private static readonly Dictionary<string, Dictionary<string, string>> Extra = new Dictionary<string, Dictionary<string, string>>();
+
+        public static void Register(string lang, string en, string text)
+        {
+            Dictionary<string, string> more;
+            if (!Extra.TryGetValue(lang, out more)) Extra[lang] = more = new Dictionary<string, string>();
+            if (!more.ContainsKey(en)) more[en] = text;
         }
 
         public static string F(string en, params object[] args) { return string.Format(Culture, T(en), args); }

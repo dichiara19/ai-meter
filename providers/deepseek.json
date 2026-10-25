@@ -1,0 +1,23 @@
+﻿{
+  "id": "deepseek",
+  "name": "DeepSeek",
+  "description": "Remaining balance of your DeepSeek API account.",
+  "color": { "light": "#4D6BFE", "dark": "#8EA2FF" },
+  "detect": { "env": ["DEEPSEEK_API_KEY"] },
+  "auth": { "type": "key", "env": ["DEEPSEEK_API_KEY"], "page": "https://platform.deepseek.com/api_keys" },
+  "request": { "url": "https://api.deepseek.com/user/balance", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
+  "limits": [
+    { "label": "Balance", "balance": "balance_infos[0].total_balance", "currencyPath": "balance_infos[0].currency" }
+  ],
+  "notes": [
+    { "when": "balance_infos[0].granted_balance", "text": "Including {0} of granted credit",
+      "values": [{ "path": "balance_infos[0].granted_balance", "currencyPath": "balance_infos[0].currency" }] }
+  ],
+  "i18n": {
+    "it": { "Remaining balance of your DeepSeek API account.": "Saldo residuo del tuo account API di DeepSeek.", "Including {0} of granted credit": "Di cui {0} di credito omaggio" },
+    "es": { "Remaining balance of your DeepSeek API account.": "Saldo restante de tu cuenta API de DeepSeek.", "Including {0} of granted credit": "Incluye {0} de crédito de regalo" },
+    "fr": { "Remaining balance of your DeepSeek API account.": "Solde restant de votre compte API DeepSeek.", "Including {0} of granted credit": "Dont {0} de crédit offert" },
+    "de": { "Remaining balance of your DeepSeek API account.": "Restguthaben deines DeepSeek-API-Kontos.", "Including {0} of granted credit": "Davon {0} geschenktes Guthaben" },
+    "pt": { "Remaining balance of your DeepSeek API account.": "Saldo restante da sua conta de API do DeepSeek.", "Including {0} of granted credit": "Inclui {0} de crédito concedido" }
+  }
+}
