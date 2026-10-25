@@ -38,7 +38,7 @@ namespace AIMeter
 
         public List<Session> Collect(Probe p)
         {
-            if ((DateTime.Now - scannedAt).TotalSeconds < 15) return last;
+            if ((DateTime.Now - scannedAt).TotalSeconds < (p.SavingPower ? 120 : 30)) return last;
             scannedAt = DateTime.Now;
             var places = new List<Place> { new Place { Home = Probe.Home, Where = "Windows" } };
             if (p.WslUp) places.Add(new Place { Home = p.WslHome, Where = "WSL" });

@@ -46,17 +46,19 @@ Measured on a Windows 11 laptop:
 
 | | |
 |---|---|
-| RAM | ~100 MB as executable, ~145 MB with the PowerShell launcher |
-| CPU at rest | ~0.02% |
+| RAM | ~100 MB as executable, ~125 MB private with the PowerShell launcher |
+| CPU at rest | ~0.016% of the machine (0.26% of one core) with the taskbar pill, Claude, Codex and a local model server in WSL |
 | GPU | 0% (software drawing; Mica/Acrylic composed by Windows) |
 
 How:
 - WPF on .NET Framework 4.8, already part of Windows: no runtime to install, no browser engine.
 - Software drawing: no Direct3D device on the GPU.
 - No continuous animations: the window is redrawn only when something changes.
-- Data collection runs on a low-priority thread with **EcoQoS** (efficiency cores). Refresh every 10 s, 30 s on battery or Energy Saver, 120 s when nothing is visible, and **stopped** while the PC is locked or asleep.
+- Data collection runs on a low-priority thread with **EcoQoS** (efficiency cores). Refresh every 10 s while the panel or Settings are open, every 30 s when only the pill, widget or overlay are visible, twice as slow on battery or Energy Saver, 120 s when nothing is visible, and **stopped** while the PC is locked or asleep. A refresh takes about 50 ms.
+- The taskbar pill checks every 2 s, with two window-position reads, whether the taskbar moved; it repositions itself only when something changed.
 - Files are read only when they change, large logs only from their tail, and only the needed fields are cached.
-- **WSL is never started**: it is read only if its VM is already running.
+- **WSL is never started**: it is read only if its VM is already running, and no process is ever launched inside it (listening ports are read from the kernel's TCP table as a file). AI Meter asks Windows which distributions are running at most once a minute.
+- Local model servers are contacted only on `127.0.0.1`; a port that does not answer HTTP is dropped after one short request. GPU memory is read with PDH only while a local server runs.
 - The Claude limit is fetched over the network every 5 minutes (15 on battery), only while something is visible.
 - Full-screen detection is event-driven, not polled.
 

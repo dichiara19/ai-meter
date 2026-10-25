@@ -20,7 +20,7 @@ namespace AIMeter
     {
         private readonly Settings S;
         private readonly Dictionary<string, Server> servers = new Dictionary<string, Server>();
-        private readonly HashSet<string> notModels = new HashSet<string>();   // porte già provate che non sono server di modelli
+        private readonly Dictionary<string, DateTime> notModels = new Dictionary<string, DateTime>();   // porte provate che non sono server di modelli
         private DateTime winScanAt = DateTime.MinValue, wslScanAt = DateTime.MinValue;
         private List<Tuple<int, string>> wslPorts = new List<Tuple<int, string>>();
         private Dictionary<int, uint> winPorts = new Dictionary<int, uint>();
@@ -77,6 +77,8 @@ namespace AIMeter
             ShareWslMemory(p, models);
 
             var st = new ProviderState { Id = "local", Name = L.T("Local models"), Models = models, Running = running };
+            // i contatori della GPU si leggono qui, nel thread di raccolta, e solo se c'è un server attivo
+            if (running) { st.GpuTotal = GpuMemory.Total; st.GpuUsed = st.GpuTotal > 0 ? GpuMemory.Used : 0; }
             if (S.LocalAgents)
             {
                 // le sessioni delle CLI vanno sotto il modello che usano, se è caricato qui
@@ -145,13 +147,13 @@ namespace AIMeter
                     if (Known(bare, kv.Key)) candidates.Add(Tuple.Create(kv.Key, "Windows", kv.Value, bare));
                 }
             }
-            // WSL acceso: le sue porte si leggono con ss (in rete "mirrored" non compaiono tra quelle di Windows).
-            // Ogni chiamata a wsl.exe tiene sveglia la macchina virtuale: una al minuto se qualcosa è visibile, altrimenti ogni 10.
-            double every = p.AllowNetwork ? 60 : 600;
+            // WSL acceso: le sue porte (in rete "mirrored" non compaiono tra quelle di Windows) si leggono dalla tabella TCP
+            // del kernel Linux come file, senza avviare processi in WSL: non la tiene sveglia. Una volta al minuto, ogni 5 a batteria.
+            double every = p.SavingPower ? 300 : 60;
             if (p.WslUp && (DateTime.Now - wslScanAt).TotalSeconds >= every)
             {
                 wslScanAt = DateTime.Now;
-                wslPorts = WslListeners(p.S.WslDistro);
+                wslPorts = WslListeners(p.WslRoot);
             }
             if (!p.WslUp) wslPorts.Clear();
             foreach (var w in wslPorts) if (!winPorts.ContainsKey(w.Item1)) candidates.Add(Tuple.Create(w.Item1, "WSL", 0u, w.Item2));
@@ -159,9 +161,11 @@ namespace AIMeter
             foreach (var c in candidates)
             {
                 string key = Key(c.Item2, c.Item1);
-                if (servers.ContainsKey(key) || notModels.Contains(key + "|" + c.Item3)) continue;
+                DateTime triedAt;
+                // una porta che non era un server si riprova dopo 30 minuti: lo stesso numero può passare a un altro programma
+                if (servers.ContainsKey(key) || (notModels.TryGetValue(key + "|" + c.Item3, out triedAt) && (DateTime.Now - triedAt).TotalMinutes < 30)) continue;
                 string kind = Identify(c.Item1);
-                if (kind == null) { notModels.Add(key + "|" + c.Item3); continue; }
+                if (kind == null) { notModels[key + "|" + c.Item3] = DateTime.Now; continue; }
                 servers[key] = new Server { Kind = kind, Port = c.Item1, Where = c.Item2, Pid = c.Item3, Proc = c.Item4 };
             }
         }
@@ -185,33 +189,48 @@ namespace AIMeter
             return KnownPorts.Contains(port) && (proc.StartsWith("python") || proc == "node" || proc == "docker" || proc == "com.docker.backend");
         }
 
-        private static List<Tuple<int, string>> WslListeners(string distro)
+        /// <summary>
+        /// Porte in ascolto in WSL, da /proc/1/net/tcp e tcp6 (lo stesso spazio di rete delle app Linux). Solo quelle
+        /// raggiungibili da Windows (tutte le interfacce o localhost) e non di sistema; il nome del programma non c'è,
+        /// lo dice la prova di riconoscimento.
+        /// </summary>
+        private static List<Tuple<int, string>> WslListeners(string root)
         {
             var list = new List<Tuple<int, string>>();
-            if (string.IsNullOrEmpty(distro)) return list;
-            string output = Probe.Run("wsl.exe", "-d " + distro + " -e sh -c \"ss -ltnpH 2>/dev/null\"", 8000, Encoding.UTF8);
-            if (output == null) return list;
-            var rx = new Regex(@"^LISTEN\s+\d+\s+\d+\s+(\S+):(\d+)\s+\S+(?:\s+users:\(\(""([^""]+)"")?", RegexOptions.Multiline);
-            foreach (Match m in rx.Matches(output))
+            foreach (var file in new[] { @"\proc\1\net\tcp", @"\proc\1\net\tcp6" })
             {
-                int port = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
-                string addr = m.Groups[1].Value, name = m.Groups[3].Success ? m.Groups[3].Value : "";
-                // raggiungibili da Windows solo se in ascolto su tutte le interfacce o su localhost
-                if (!(addr == "*" || addr == "0.0.0.0" || addr == "[::]" || addr.StartsWith("127.0.0.1") || addr == "[::1]" || addr == "[::ffff:127.0.0.1]")) continue;
-                // il nome del processo si vede solo per quelli dell'utente (Ollama come servizio gira come utente "ollama")
-                bool known = KnownProcesses.Any(k => name.StartsWith(k)) || (name.Length == 0 && KnownPorts.Contains(port)) || (name.StartsWith("python") && KnownPorts.Contains(port));
-                // i llama-server di Ollama e llama-swap ascoltano su porte casuali: si leggono passando dal loro server
-                if (known && !list.Any(x => x.Item1 == port)) list.Add(Tuple.Create(port, name));
+                string text;
+                try
+                {
+                    using (var fs = new FileStream(root + file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var sr = new StreamReader(fs, Encoding.ASCII)) text = sr.ReadToEnd();
+                }
+                catch (IOException) { continue; }
+                catch (UnauthorizedAccessException) { continue; }
+                foreach (var line in text.Split('\n'))
+                {
+                    var f = line.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (f.Length < 4 || f[3] != "0A") continue;   // 0A = LISTEN
+                    int colon = f[1].LastIndexOf(':');
+                    if (colon < 0) continue;
+                    string addr = f[1].Substring(0, colon);
+                    int port = int.Parse(f[1].Substring(colon + 1), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                    bool reachable = addr == "00000000" || addr == "0100007F" || addr.Trim('0').Length == 0
+                                     || addr == "00000000000000000000000001000000" || addr == "0000000000000000FFFF00000100007F";
+                    if (!reachable || port < 1024 || list.Any(x => x.Item1 == port)) continue;
+                    list.Add(Tuple.Create(port, ""));
+                }
             }
             return list;
         }
-
         /// <summary>
         /// Che server è in ascolto sulla porta, da una richiesta che solo lui sa servire. L'ordine conta:
         /// KoboldCpp imita llama-server e Ollama, llama-swap ha un /api/version come Ollama.
         /// </summary>
         private static string Identify(int port)
         {
+            // prima una sola richiesta breve: se la porta non parla HTTP (adb, database…) ci si ferma subito
+            if (!SpeaksHttp(port)) return null;
             if (JPath.Str(JPath.Get(Get(port, "/api/extra/version"), "result")) == "KoboldCpp") return "kobold";
             if (JPath.Truthy(JPath.Get(Get(port, "/lmstudio-greeting"), "lmstudio"))) return "lmstudio";
             string root = GetText(port, "/");
@@ -534,6 +553,22 @@ namespace AIMeter
         {
             string text = GetText(port, path);
             return text == null ? null : Json.ParseAny(text);
+        }
+
+        /// <summary>La porta risponde con HTTP (qualsiasi codice), entro 800 ms.</summary>
+        private static bool SpeaksHttp(int port)
+        {
+            try
+            {
+                var r = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture) + "/");
+                r.Timeout = r.ReadWriteTimeout = 800;
+                r.Proxy = null;
+                r.AllowAutoRedirect = false;
+                r.Method = "GET";
+                using (r.GetResponse()) return true;
+            }
+            catch (WebException e) { return e.Response != null; }
+            catch (IOException) { return false; }
         }
 
         private static string GetText(int port, string path)

@@ -22,7 +22,7 @@ namespace AIMeter
         public bool SavingPower;
         private readonly Dictionary<uint, string> pathByPid = new Dictionary<uint, string>();
         private readonly Dictionary<string, CacheEntry> cache = new Dictionary<string, CacheEntry>(StringComparer.OrdinalIgnoreCase);
-        private bool wslUp;
+        private bool wslUp, vmSeen;
         private DateTime wslCheckedAt = DateTime.MinValue;
 
         public static readonly string Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -60,8 +60,12 @@ namespace AIMeter
         private void RefreshWslState()
         {
             bool vm = Procs.ContainsValue("vmmemwsl") || Procs.ContainsValue("vmmem");
-            if (!vm || string.IsNullOrEmpty(S.WslDistro)) { wslUp = false; return; }
-            if ((DateTime.Now - wslCheckedAt).TotalSeconds < 120) return;
+            if (!vm || string.IsNullOrEmpty(S.WslDistro)) { wslUp = false; vmSeen = false; return; }
+            // la VM appena comparsa si controlla subito, poi ogni minuto se la distribuzione è attiva e ogni 5 se non lo è.
+            // Non si allunga di più: aprire \\wsl.localhost di una distribuzione appena fermata la riavvierebbe.
+            // wsl.exe -l interroga solo il servizio di Windows, non avvia processi in Linux.
+            if (vmSeen && (DateTime.Now - wslCheckedAt).TotalSeconds < (wslUp ? 60 : 300)) return;
+            vmSeen = true;
             wslCheckedAt = DateTime.Now;
             // la VM può essere accesa per un'altra distribuzione: chiediamo quali sono attive, senza avviarne nessuna
             string output = Run("wsl.exe", "-l --running -q", 8000, Encoding.Unicode);

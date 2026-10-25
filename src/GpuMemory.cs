@@ -3,17 +3,18 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace AIMeter
 {
     /// <summary>
-    /// Memoria della GPU: quanta ne usa ogni processo e quanta ne ha la scheda video, dai contatori di Windows
+    /// Memoria della GPU: quanta ne usa ogni processo e quanta ne ha la scheda video, dai contatori di Windows (PDH)
     /// (gli stessi di Gestione attività). I modelli in WSL risultano a carico del processo vmmemWSL.
     /// </summary>
     internal static class GpuMemory
     {
-        private static PerformanceCounterCategory processCat;
+        private static IntPtr query, counter;
         private static DateTime readAt = DateTime.MinValue;
         private static Dictionary<uint, long> byPid = new Dictionary<uint, long>();
         private static long used;
@@ -35,6 +36,21 @@ namespace AIMeter
             }
         }
 
+        [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhOpenQuery(string source, IntPtr user, out IntPtr q);
+        [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhAddEnglishCounter(IntPtr q, string path, IntPtr user, out IntPtr c);
+        [DllImport("pdh.dll")] private static extern uint PdhCollectQueryData(IntPtr q);
+        [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhGetRawCounterArray(IntPtr c, ref uint size, out uint count, IntPtr buffer);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RawCounter { public uint Status; public uint TimeLow, TimeHigh; public long First, Second; public uint MultiCount; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RawItem { public IntPtr Name; public RawCounter Raw; }
+
+        /// <summary>
+        /// Contatore "Dedicated Usage" di "GPU Process Memory" (la VRAM, come in Gestione attività), con PDH: nomi inglesi
+        /// su ogni lingua di Windows e un costo di avvio molto minore della lettura dell'intera categoria.
+        /// </summary>
         private static void Refresh()
         {
             if ((DateTime.Now - readAt).TotalSeconds < 15) return;
@@ -42,30 +58,40 @@ namespace AIMeter
             var map = new Dictionary<uint, long>();
             try
             {
-                if (processCat == null) processCat = new PerformanceCounterCategory("GPU Process Memory");
-                var data = processCat.ReadCategory();
-                // "dedicated usage" = VRAM della scheda dedicata (sulla scheda integrata vale ~0: la sua memoria è condivisa)
-                var dedicated = data["dedicated usage"];
-                if (dedicated != null)
-                    foreach (InstanceData d in dedicated.Values)
+                if (query == IntPtr.Zero)
+                {
+                    if (PdhOpenQuery(null, IntPtr.Zero, out query) != 0) { query = IntPtr.Zero; return; }
+                    if (PdhAddEnglishCounter(query, @"\GPU Process Memory(*)\Dedicated Usage", IntPtr.Zero, out counter) != 0) return;
+                }
+                if (PdhCollectQueryData(query) != 0) return;
+                uint size = 0, count;
+                PdhGetRawCounterArray(counter, ref size, out count, IntPtr.Zero);
+                if (size == 0) return;
+                IntPtr buf = Marshal.AllocHGlobal((int)size);
+                try
+                {
+                    if (PdhGetRawCounterArray(counter, ref size, out count, buf) != 0) return;
+                    int step = Marshal.SizeOf(typeof(RawItem));
+                    for (int k = 0; k < count; k++)
                     {
-                        uint pid;
-                        string name = d.InstanceName;   // pid_1234_luid_0x…_phys_0
+                        var item = (RawItem)Marshal.PtrToStructure(buf + k * step, typeof(RawItem));
+                        string name = Marshal.PtrToStringUni(item.Name) ?? "";   // pid_1234_luid_0x…_phys_0[#n]
                         int us = name.IndexOf('_', 4);
+                        uint pid;
                         if (!name.StartsWith("pid_", StringComparison.OrdinalIgnoreCase) || us < 0 || !uint.TryParse(name.Substring(4, us - 4), out pid)) continue;
                         long v;
                         map.TryGetValue(pid, out v);
-                        map[pid] = v + d.RawValue;
+                        map[pid] = v + item.Raw.First;
                     }
+                }
+                finally { Marshal.FreeHGlobal(buf); }
                 // occupazione della scheda: la somma dei processi (approssima per eccesso la memoria condivisa tra processi)
                 used = Math.Min(map.Values.Sum(), Total > 0 ? Total : long.MaxValue);
             }
-            catch (InvalidOperationException) { }
-            catch (UnauthorizedAccessException) { }
-            catch (System.ComponentModel.Win32Exception) { }
-            byPid = map;
+            catch (DllNotFoundException) { }
+            catch (EntryPointNotFoundException) { }
+            finally { if (map.Count > 0) byPid = map; }
         }
-
         /// <summary>Dalla configurazione del driver video (la stessa fonte delle informazioni di sistema).</summary>
         private static long ReadTotal()
         {

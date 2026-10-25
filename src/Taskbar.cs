@@ -72,6 +72,8 @@ namespace AIMeter
         private HwndSource source;
         private IntPtr bar;
         private Native.RECT lastRect;
+        private string placedKey;      // barra, area di notifica e lato all'ultimo posizionamento
+        private int px, py, pw, ph;    // ultima posizione applicata
         private bool visible = true;
         public bool Dark { get; private set; }
         public bool OnLeft { get; private set; }
@@ -149,9 +151,12 @@ namespace AIMeter
         private void Reconcile()
         {
             if (!visible) return;
-            if (source == null || bar == IntPtr.Zero || !Native.IsWindow(bar) || bar != Native.FindTaskbar()) Attach();
-            Place();
+            if (source == null || bar == IntPtr.Zero || !Native.IsWindow(bar) || bar != Native.FindTaskbar()) { Attach(); placedKey = null; }
+            // controllo da pochi microsecondi: la pillola si riposiziona solo se barra o area di notifica sono cambiate
+            if (Key() != placedKey) Place();
         }
+
+        private string Key() { return Native.RectKey(bar) + "|" + Native.TrayLeft() + "|" + C.Settings.TaskbarSide; }
 
         /// <summary>Posiziona la pillola nello spazio libero della barra del monitor principale.</summary>
         public void Place()
@@ -159,7 +164,7 @@ namespace AIMeter
             if (source == null || !visible) return;
             var info = TaskbarInfo.Read();
             Usable = info.Usable;
-            if (!Usable) { Native.ShowWindow(source.Handle, 0); return; }
+            if (!Usable) { Native.ShowWindow(source.Handle, 0); placedKey = null; return; }
             double scale = source.CompositionTarget.TransformToDevice.M11;
 
             int barH = info.Rect.Bottom - info.Rect.Top;
@@ -176,15 +181,21 @@ namespace AIMeter
             else x = info.Rect.Right - info.Rect.Left - w - (int)Math.Round(320 * scale);   // area di notifica non rilevata: stima prudente
             int y = (barH - h) / 2;
             // coordinate relative alla barra; in cima alle altre finestre figlie della barra
-            Native.SetWindowPos(source.Handle, IntPtr.Zero, x, y, w, h, Native.SWP_NOACTIVATE);
-            Native.ShowWindow(source.Handle, 4 /* SW_SHOWNOACTIVATE */);
+            if (x != px || y != py || w != pw || h != ph || placedKey == null)
+            {
+                Native.SetWindowPos(source.Handle, IntPtr.Zero, x, y, w, h, Native.SWP_NOACTIVATE);
+                Native.ShowWindow(source.Handle, 4 /* SW_SHOWNOACTIVATE */);
+                px = x; py = y; pw = w; ph = h;
+            }
             lastRect = info.Rect;
+            placedKey = Key();
         }
 
         /// <summary>Tema o barra cambiati (modalità di Windows, allineamento, pulsante Widget, risoluzione).</summary>
         public void Refresh(Snapshot s, string metric)
         {
             ApplySystemTheme();
+            placedKey = null;
             if (s != null) Render(s, metric);
             Reconcile();
         }

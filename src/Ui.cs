@@ -379,7 +379,7 @@ namespace AIMeter
                 iconHost.Children.Add(dot);
             }
             item.Children.Add(iconHost);
-            long vram = p.Models.Sum(m => m.Vram), total = GpuMemory.Total;
+            long vram = p.Models.Sum(m => m.Vram), total = p.GpuTotal;
             var stack = new StackPanel { Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             string text = vram > 0 ? GpuMemory.Format(vram) : p.Models.Count.ToString(It);
             var t = Text(text, 12, "Text", FontWeights.SemiBold);
@@ -387,7 +387,7 @@ namespace AIMeter
             stack.Children.Add(t);
             if (vram > 0 && total > 0)
             {
-                double free = 100 - Math.Min(100, GpuMemory.Used * 100.0 / total);
+                double free = 100 - Math.Min(100, p.GpuUsed * 100.0 / total);
                 var bar = Bar(free, LevelBrush(free, "Info"), 2);
                 bar.Width = 26;
                 bar.Margin = new Thickness(0, 1, 0, 0);
@@ -407,7 +407,7 @@ namespace AIMeter
             if (p.Models == null || p.Models.Count == 0) return L.T("Local models: none loaded");
             var lines = new List<string> { L.N(p.Models.Count, "{0} local model loaded", "{0} local models loaded") };
             foreach (var m in p.Models) lines.Add("• " + m.Name + " · " + string.Join(" · ", LocalFacts(m)));
-            if (GpuMemory.Total > 0) lines.Add(L.F("Video memory: {0} of {1} in use", GpuMemory.Format(GpuMemory.Used), GpuMemory.Format(GpuMemory.Total)));
+            if (p.GpuTotal > 0) lines.Add(L.F("Video memory: {0} of {1} in use", GpuMemory.Format(p.GpuUsed), GpuMemory.Format(p.GpuTotal)));
             return string.Join("\n", lines);
         }
 
@@ -713,12 +713,12 @@ namespace AIMeter
             stack.Children.Add(head);
 
             // memoria video della scheda: è il vero limite dei modelli locali
-            if (p.Running && GpuMemory.Total > 0)
+            if (p.Running && p.GpuTotal > 0)
             {
-                double free = 100 - Math.Min(100, GpuMemory.Used * 100.0 / GpuMemory.Total);
-                var w = new UsageWindow { Label = "Video memory", Used = 100 - free, RightText = L.F("{0} free", GpuMemory.Format(Math.Max(0, GpuMemory.Total - GpuMemory.Used))) };
+                double free = 100 - Math.Min(100, p.GpuUsed * 100.0 / p.GpuTotal);
+                var w = new UsageWindow { Label = "Video memory", Used = 100 - free, RightText = L.F("{0} free", GpuMemory.Format(Math.Max(0, p.GpuTotal - p.GpuUsed))) };
                 var row = UsageRow(w, null, "Info");
-                row.ToolTip = L.F("Video memory: {0} of {1} in use", GpuMemory.Format(GpuMemory.Used), GpuMemory.Format(GpuMemory.Total));
+                row.ToolTip = L.F("Video memory: {0} of {1} in use", GpuMemory.Format(p.GpuUsed), GpuMemory.Format(p.GpuTotal));
                 stack.Children.Add(row);
             }
 

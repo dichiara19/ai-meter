@@ -78,6 +78,7 @@ namespace AIMeter
         public bool NeedsLogin;
         public bool CanSignIn;    // l'avviso offre il collegamento "Accedi" (accesso gestito da AI Meter)
         public List<LocalModel> Models;   // solo per i modelli locali: i modelli caricati in memoria
+        public long GpuUsed, GpuTotal;    // solo per i modelli locali: memoria video della scheda (byte), letta nella raccolta
 
         public int Active { get { int n = 0; foreach (var s in Sessions) if (s.Status != "app") n++; return n; } }
         public int Busy { get { int n = 0; foreach (var s in Sessions) if (s.Status == "busy") n++; return n; } }
@@ -118,6 +119,7 @@ namespace AIMeter
                     foreach (var w in p.Usage.Windows) sb.Append(w.Label).Append((int)w.Used).Append(w.ResetsAt);
                 }
                 foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
+                if (p.Models != null) sb.Append(p.GpuUsed >> 28);
                 if (p.Models != null)
                     foreach (var m in p.Models)
                     {

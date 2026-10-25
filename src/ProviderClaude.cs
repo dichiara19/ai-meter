@@ -68,6 +68,7 @@ namespace AIMeter
             if (p.WslUp) folders.Add(new KeyValuePair<string, bool>(p.WslHome + @"\.claude\sessions", true));
 
             var list = new List<Session>();
+            HashSet<uint> wslPids = null;
             foreach (var f in folders)
             {
                 foreach (var file in Probe.SafeFiles(f.Key, "*.json"))
@@ -76,7 +77,9 @@ namespace AIMeter
                     var pidN = Json.Num(d, "pid");
                     if (pidN == null) continue;
                     uint pid = (uint)pidN.Value;
-                    bool alive = f.Value ? Directory.Exists(p.WslRoot + @"\proc\" + pid) : p.Procs.ContainsKey(pid);
+                    // processi di WSL: un solo elenco di /proc per giro, invece di un controllo per file sulla condivisione
+                    if (f.Value && wslPids == null) wslPids = WslPids(p);
+                    bool alive = f.Value ? wslPids.Contains(pid) : p.Procs.ContainsKey(pid);
                     if (!alive) continue;
 
                     Dictionary<string, object> m;
@@ -97,6 +100,17 @@ namespace AIMeter
                 }
             }
             return list;
+        }
+
+        private static HashSet<uint> WslPids(Probe p)
+        {
+            var set = new HashSet<uint>();
+            foreach (var d in Probe.SafeDirs(p.WslRoot + @"\proc"))
+            {
+                uint pid;
+                if (uint.TryParse(Path.GetFileName(d), out pid)) set.Add(pid);
+            }
+            return set;
         }
 
         /// <summary>cliSessionId → metadati (titolo, modello) delle sessioni Code aperte dall'app desktop.</summary>

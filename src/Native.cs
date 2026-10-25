@@ -317,6 +317,13 @@ namespace AIMeter
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT r);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
 
+        /// <summary>Posizione e dimensione di una finestra in forma di testo, per accorgersi se è cambiata.</summary>
+        public static string RectKey(IntPtr h)
+        {
+            RECT r;
+            return GetWindowRect(h, out r) ? r.Left + "," + r.Top + "," + r.Right + "," + r.Bottom : "";
+        }
+
         /// <summary>Bordo sinistro dell'area di notifica della barra principale (pixel fisici), 0 se non rilevabile.</summary>
         public static int TrayLeft()
         {

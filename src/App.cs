@@ -139,6 +139,7 @@ namespace AIMeter
         private readonly AutoResetEvent wake = new AutoResetEvent(false);
         private volatile bool paused;
         private volatile bool anyVisible = true;
+        private volatile bool detailsVisible;   // pannello o impostazioni aperti: dati più freschi
         private volatile bool stopping;
 
         public Controller(bool startup, EventWaitHandle showSignal, EventWaitHandle settingsSignal)
@@ -210,7 +211,10 @@ namespace AIMeter
                 int interval;
                 if (!anyVisible) interval = 120;
                 else if (Settings.Refresh == "low") interval = saving ? 60 : 30;
-                else interval = saving ? 30 : 10;
+                // pannello aperto: ogni 10 s; solo pillola, widget o sovrimpressione: ogni 30 s (bastano per percentuali
+                // che cambiano lentamente, e un terzo dei risvegli). A batteria il doppio.
+                else if (detailsVisible) interval = saving ? 30 : 10;
+                else interval = saving ? 60 : 30;
                 CurrentInterval = interval;
                 SavingPower = saving;
                 wake.WaitOne(interval * 1000);
@@ -465,6 +469,9 @@ namespace AIMeter
         {
             anyVisible = (desktop != null && desktop.IsVisible) || (pill != null && pill.IsVisible) || (dock != null && dock.IsVisible) || flyout.IsVisible
                          || settingsWindow != null;
+            bool details = flyout.IsVisible || settingsWindow != null;
+            if (details && !detailsVisible) wake.Set();   // all'apertura del pannello si aggiorna subito
+            detailsVisible = details;
         }
 
         private void OnForegroundChanged(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time)
