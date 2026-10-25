@@ -242,8 +242,28 @@ namespace AIMeter
         /// <summary>Identità dell'app per la barra: le finestre di AI Meter si raggruppano col suo nome e la sua icona, non con PowerShell.</summary>
         public static void SetAppId(string id)
         {
+            if (IsPackaged) return;   // nel pacchetto MSIX l'identità è già quella del pacchetto
             try { SetCurrentProcessExplicitAppUserModelID(id); }
             catch (EntryPointNotFoundException) { }
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetCurrentPackageFullName(ref int length, StringBuilder name);
+
+        private static int packaged = -1;
+
+        /// <summary>Vero se l'app gira dal pacchetto MSIX (Microsoft Store): ha un'identità di pacchetto.</summary>
+        public static bool IsPackaged
+        {
+            get
+            {
+                if (packaged < 0)
+                {
+                    int n = 0;
+                    try { packaged = GetCurrentPackageFullName(ref n, null) == 15700 /* APPMODEL_ERROR_NO_PACKAGE */ ? 0 : 1; }
+                    catch (EntryPointNotFoundException) { packaged = 0; }
+                }
+                return packaged == 1;
+            }
         }
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string title);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT r);

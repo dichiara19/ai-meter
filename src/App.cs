@@ -64,6 +64,7 @@ namespace AIMeter
         /// <summary>Le finestre con un pulsante nella barra si presentano come AI Meter, con la sua icona.</summary>
         public static void Brand(Window w)
         {
+            if (Native.IsPackaged) return;   // il pacchetto MSIX dà già nome e icona alle finestre
             w.SourceInitialized += (o, e) =>
                 Native.SetWindowAppId(new System.Windows.Interop.WindowInteropHelper(w).Handle, "AIMeter.App", IconPath, "AI Meter", LaunchCommand);
         }
@@ -98,7 +99,11 @@ namespace AIMeter
                 // La composizione (Mica, Acrilico, ombre) resta a carico di Windows. --gpu per il disegno in hardware.
                 if (!args.Contains("--gpu")) System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-                var controller = new Controller(args.Contains("--startup"), showSignal, settingsSignal);
+                bool atLogin = args.Contains("--startup");
+#if MSIX
+                atLogin = atLogin || (Native.IsPackaged && PackageStartup.LaunchedAtLogin);
+#endif
+                var controller = new Controller(atLogin, showSignal, settingsSignal);
                 app.Startup += (o, e) => controller.Start();
                 app.Run();
                 GC.KeepAlive(mutex);

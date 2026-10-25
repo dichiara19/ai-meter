@@ -120,11 +120,17 @@ namespace AIMeter
         {
             get
             {
+#if MSIX
+                if (Native.IsPackaged) return PackageStartup.Enabled;
+#endif
                 using (var k = Registry.CurrentUser.OpenSubKey(RunKey))
                     return k != null && k.GetValue("AI Meter") != null;
             }
             set
             {
+#if MSIX
+                if (Native.IsPackaged) { PackageStartup.Enabled = value; return; }
+#endif
                 using (var k = Registry.CurrentUser.CreateSubKey(RunKey))
                 {
                     if (value) k.SetValue("AI Meter", Program.LaunchCommand + " --startup");

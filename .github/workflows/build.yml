@@ -57,12 +57,26 @@ jobs:
           Copy-Item AIMeter.ps1, 'Start AI Meter.cmd', LICENSE script
           Compress-Archive script\* AIMeter-script.zip
 
+      # pacchetto per il Microsoft Store: lo Store lo firma (identità da Partner Center nelle variabili del repository)
+      - name: Build MSIX for the Microsoft Store
+        shell: powershell
+        env:
+          STORE_IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
+          STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}
+          STORE_PUBLISHER_NAME: ${{ vars.STORE_PUBLISHER_NAME }}
+        run: ./build.ps1 -NoInstall -Package
+
       - uses: actions/upload-artifact@v4
         with:
           name: AIMeter
           path: |
             AIMeter.zip
             AIMeter-script.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIMeter-msix
+          path: bin/AIMeter.msix
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')

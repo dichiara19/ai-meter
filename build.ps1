@@ -3,7 +3,16 @@
 #   powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstall compila soltanto (in .\bin)
 #   -Mode exe     installa l'eseguibile compilato (serve un eseguibile firmato se Smart App Control è attivo)
 #   -Mode script  installa il sorgente con il launcher AIMeter.ps1 (predefinito: funziona con Smart App Control)
-param([switch]$NoInstall, [ValidateSet('script', 'exe')][string]$Mode = 'script')
+#   -Package      crea anche il pacchetto MSIX per il Microsoft Store (bin\AIMeter.msix; serve il Windows SDK)
+#                 identità del pacchetto da Partner Center: -IdentityName, -Publisher, -PublisherName
+#                 (o le variabili d'ambiente STORE_IDENTITY_NAME, STORE_PUBLISHER, STORE_PUBLISHER_NAME)
+param(
+    [switch]$NoInstall, [ValidateSet('script', 'exe')][string]$Mode = 'script',
+    [switch]$Package,
+    [string]$IdentityName = $(if ($env:STORE_IDENTITY_NAME) { $env:STORE_IDENTITY_NAME } else { 'dichiara19.AIMeter' }),
+    [string]$Publisher = $(if ($env:STORE_PUBLISHER) { $env:STORE_PUBLISHER } else { 'CN=dichiara19' }),
+    [string]$PublisherName = $(if ($env:STORE_PUBLISHER_NAME) { $env:STORE_PUBLISHER_NAME } else { 'dichiara19' })
+)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $bin = Join-Path $root 'bin'
@@ -12,15 +21,17 @@ New-Item -ItemType Directory -Force $bin | Out-Null
 
 # --- icona dell'app: due anelli concentrici (Claude fuori, ChatGPT dentro), senza sfondo come le icone di sistema
 Add-Type -AssemblyName System.Drawing
-function New-RingPng([int]$size) {
-    $bmp = New-Object System.Drawing.Bitmap $size, $size
+# $size: lato dell'icona; $w x $h: immagine (le tile del menu Start hanno l'icona al centro di un'area più ampia)
+function New-RingPng([int]$size, [int]$w = $size, [int]$h = $size) {
+    $bmp = New-Object System.Drawing.Bitmap $w, $h
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = 'AntiAlias'
+    $g.TranslateTransform(($w - $size) / 2.0, ($h - $size) / 2.0)
     $s = $size / 16.0
-    $w = [Math]::Max(1.6, 2.3 * $s)
-    $track = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(70, 128, 128, 128)), $w
-    $outer = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 217, 119, 87)), $w
-    $inner = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 16, 163, 127)), $w
+    $pw = [Math]::Max(1.6, 2.3 * $s)
+    $track = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(70, 128, 128, 128)), $pw
+    $outer = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 217, 119, 87)), $pw
+    $inner = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 16, 163, 127)), $pw
     foreach ($p in $outer, $inner) { $p.StartCap = 'Round'; $p.EndCap = 'Round' }
     $r1 = 6.6 * $s; $r2 = 3.3 * $s; $c = $size / 2.0
     $g.DrawEllipse($track, $c - $r1, $c - $r1, 2 * $r1, 2 * $r1)
@@ -75,18 +86,111 @@ $bw.Flush()
 '@ | Set-Content (Join-Path $bin 'AIMeter.exe.config') -Encoding UTF8
 
 # --- compilazione
-$refs = @(
-    "$fw\WPF\PresentationCore.dll", "$fw\WPF\PresentationFramework.dll", "$fw\WPF\WindowsBase.dll",
-    "$fw\System.Xaml.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll",
-    "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
-) | ForEach-Object { "/r:$_" }
-$res = @('app.ico' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
-$src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
-& "$fw\csc.exe" /nologo /target:winexe /optimize+ /platform:anycpu /langversion:5 `
-    "/out:$(Join-Path $bin 'AIMeter.exe')" "/win32icon:$(Join-Path $root 'assets\app.ico')" "/win32manifest:$(Join-Path $bin 'app.manifest')" `
-    @refs @res @src
-if ($LASTEXITCODE -ne 0) { throw "Compilazione fallita" }
-Write-Host "Compilato: $bin\AIMeter.exe"
+function Invoke-Csc([string]$out, [string[]]$extra = @()) {
+    $refs = @(
+        "$fw\WPF\PresentationCore.dll", "$fw\WPF\PresentationFramework.dll", "$fw\WPF\WindowsBase.dll",
+        "$fw\System.Xaml.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll",
+        "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
+    ) | ForEach-Object { "/r:$_" }
+    $res = @('app.ico' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
+    $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
+    & "$fw\csc.exe" /nologo /target:winexe /optimize+ /platform:anycpu /langversion:5 `
+        "/out:$out" "/win32icon:$(Join-Path $root 'assets\app.ico')" "/win32manifest:$(Join-Path $bin 'app.manifest')" `
+        @refs @res @extra @src
+    if ($LASTEXITCODE -ne 0) { throw "Compilazione fallita" }
+    Write-Host "Compilato: $out"
+}
+Invoke-Csc (Join-Path $bin 'AIMeter.exe')
+
+# --- pacchetto MSIX per il Microsoft Store (lo Store lo firma: niente blocchi di SmartScreen e Smart App Control)
+if ($Package) {
+    $layout = Join-Path $bin 'msix'
+    $work = Join-Path $bin 'msix-work'
+    foreach ($d in $layout, $work) { if (Test-Path $d) { Remove-Item $d -Recurse -Force }; New-Item -ItemType Directory $d | Out-Null }
+    New-Item -ItemType Directory (Join-Path $layout 'Assets'), (Join-Path $layout 'assets') -Force | Out-Null
+
+    # stesso sorgente con l'avvio automatico del pacchetto (API StartupTask di Windows)
+    $wm = Join-Path $env:WINDIR 'System32\WinMetadata'
+    Invoke-Csc (Join-Path $layout 'AIMeter.exe') @('/define:MSIX', "/r:$fw\System.Runtime.dll",
+        "/r:$wm\Windows.ApplicationModel.winmd", "/r:$wm\Windows.Foundation.winmd")
+    Copy-Item (Join-Path $bin 'AIMeter.exe.config') $layout
+    Copy-Item (Join-Path $root 'assets\app.ico') (Join-Path $layout 'assets')
+
+    # immagini del pacchetto: icona della barra e dell'elenco app in più dimensioni, tile, logo dello Store
+    $img = Join-Path $layout 'Assets'
+    function Save-Png([string]$name, [byte[]]$png) { [IO.File]::WriteAllBytes((Join-Path $img $name), $png) }
+    foreach ($t in 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256) {
+        $png = New-RingPng $t
+        Save-Png "Square44x44Logo.targetsize-$t.png" $png
+        Save-Png "Square44x44Logo.targetsize-${t}_altform-unplated.png" $png
+        Save-Png "Square44x44Logo.targetsize-${t}_altform-lightunplated.png" $png
+    }
+    foreach ($sc in 100, 125, 150, 200, 400) {
+        $f = $sc / 100.0
+        Save-Png "Square44x44Logo.scale-$sc.png" (New-RingPng ([int](36 * $f)) ([int](44 * $f)) ([int](44 * $f)))
+        Save-Png "Square150x150Logo.scale-$sc.png" (New-RingPng ([int](72 * $f)) ([int](150 * $f)) ([int](150 * $f)))
+        Save-Png "Wide310x150Logo.scale-$sc.png" (New-RingPng ([int](72 * $f)) ([int](310 * $f)) ([int](150 * $f)))
+        Save-Png "StoreLogo.scale-$sc.png" (New-RingPng ([int](50 * $f)))
+    }
+
+    $version = ([regex]::Match((Get-Content (Join-Path $root 'src\AssemblyInfo.cs') -Raw), 'AssemblyVersion\("(\d+\.\d+\.\d+)')).Groups[1].Value + '.0'
+    $esc = { param($s) [Security.SecurityElement]::Escape($s) }
+    @"
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap desktop rescap">
+  <Identity Name="$(& $esc $IdentityName)" Publisher="$(& $esc $Publisher)" Version="$version" ProcessorArchitecture="neutral"/>
+  <Properties>
+    <DisplayName>AI Meter</DisplayName>
+    <PublisherDisplayName>$(& $esc $PublisherName)</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0"/>
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us"/><Resource Language="it-it"/><Resource Language="es-es"/>
+    <Resource Language="fr-fr"/><Resource Language="de-de"/><Resource Language="pt-pt"/>
+  </Resources>
+  <Applications>
+    <Application Id="App" Executable="AIMeter.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="AI Meter" Description="Sessions and usage limits of your AI services"
+                          BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png"/>
+      </uap:VisualElements>
+      <Extensions>
+        <desktop:Extension Category="windows.startupTask" Executable="AIMeter.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="AIMeterStartup" Enabled="false" DisplayName="AI Meter"/>
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <Capability Name="internetClient"/>
+    <rescap:Capability Name="runFullTrust"/>
+  </Capabilities>
+</Package>
+"@ | Set-Content (Join-Path $layout 'AppxManifest.xml') -Encoding UTF8
+
+    # makepri e makeappx dal Windows SDK (presente sui runner di GitHub Actions)
+    $kit = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
+        Sort-Object FullName | Select-Object -Last 1
+    if (-not $kit) { Write-Warning "Windows SDK non trovato: contenuto del pacchetto pronto in $layout, MSIX non creato"; return }
+    $sdk = $kit.DirectoryName
+    $cfg = Join-Path $work 'priconfig.xml'
+    & "$sdk\makepri.exe" createconfig /cf $cfg /dq en-US /pv 10.0.0 /o | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "makepri createconfig fallito" }
+    & "$sdk\makepri.exe" new /pr $layout /cf $cfg /mn (Join-Path $layout 'AppxManifest.xml') /of (Join-Path $layout 'resources.pri') /o
+    if ($LASTEXITCODE -ne 0) { throw "makepri fallito" }
+    $msix = Join-Path $bin 'AIMeter.msix'
+    & "$sdk\makeappx.exe" pack /d $layout /p $msix /o
+    if ($LASTEXITCODE -ne 0) { throw "makeappx fallito" }
+    Write-Host "Pacchetto: $msix (versione $version, non firmato: lo firma il Microsoft Store)"
+    return
+}
 if ($NoInstall) { return }
 
 # --- installazione per l'utente corrente (nessun permesso di amministratore)
