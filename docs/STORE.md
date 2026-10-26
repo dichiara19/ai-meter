@@ -35,6 +35,6 @@ Tip: publish the first submission with **Visibility → Private audience** to in
 
 ## Packaged mode differences
 
-- Start with Windows uses the package's startup task instead of the `Run` registry key (writes to the registry are virtualized in a package).
+- Start with Windows uses the package's startup task instead of the "AI Meter" shortcut in the Startup folder used by the other builds.
 - The taskbar identity comes from the package, so the per-window AppUserModel properties are not set.
 - `%APPDATA%\AIMeter` is redirected by Windows to the package's private folder; settings and diagnostic files live there and are removed when the app is uninstalled.

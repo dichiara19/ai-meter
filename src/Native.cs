@@ -388,6 +388,28 @@ namespace AIMeter
             catch (InvalidCastException) { }
         }
 
+        /// <summary>Scrive da capo un collegamento semplice, senza identità (Esecuzione automatica).</summary>
+        public static void SaveShortcut(string lnk, string target, string args, string workDir, string icon, int iconIndex)
+        {
+            if (IsPackaged) return;
+            try
+            {
+                var link = (IShellLinkW)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046")));
+                link.SetPath(target);
+                link.SetArguments(args ?? "");
+                link.SetWorkingDirectory(workDir ?? "");
+                link.SetIconLocation(icon, iconIndex);
+                link.SetDescription("AI Meter");
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(lnk));
+                ((IPersistFileW)link).Save(lnk, true);
+                Marshal.ReleaseComObject(link);
+            }
+            catch (COMException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (System.IO.IOException) { }
+            catch (InvalidCastException) { }
+        }
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetCurrentPackageFullName(ref int length, StringBuilder name);
 
         private static int packaged = -1;

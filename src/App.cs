@@ -49,6 +49,15 @@ namespace AIMeter
             }
         }
 
+        /// <summary>LaunchCommand diviso in programma (percorso completo) e argomenti, per i collegamenti.</summary>
+        public static void SplitLaunch(out string target, out string args)
+        {
+            string cmd = LaunchCommand.Trim();
+            if (cmd.StartsWith("\"")) { int q = cmd.IndexOf('"', 1); target = cmd.Substring(1, q - 1); args = cmd.Substring(q + 1).Trim(); }
+            else { int sp = cmd.IndexOf(' '); target = sp < 0 ? cmd : cmd.Substring(0, sp); args = sp < 0 ? "" : cmd.Substring(sp + 1); }
+            if (!Path.IsPathRooted(target)) target = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), target);
+        }
+
         /// <summary>Risorsa incorporata nell'eseguibile, oppure il file corrispondente in assets\ (avvio da sorgente).</summary>
         /// <summary>Icona dell'app come "percorso,indice": l'eseguibile, o assets\app.ico nell'avvio da sorgente.</summary>
         public static string IconPath
@@ -168,6 +177,7 @@ namespace AIMeter
                 Settings.Save();
                 try { Settings.StartsWithWindows = true; } catch (Exception) { }
             }
+            else try { Settings.RefreshStartup(); } catch (Exception) { }
             L.Init(Settings.Language);
             collector = new Collector(Settings);
             Theme.Apply(Settings);
@@ -575,11 +585,8 @@ namespace AIMeter
         private static void EnsureShortcut()
         {
             string lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "AI Meter.lnk");
-            string cmd = Program.LaunchCommand.Trim();
             string target, args;
-            if (cmd.StartsWith("\"")) { int q = cmd.IndexOf('"', 1); target = cmd.Substring(1, q - 1); args = cmd.Substring(q + 1).Trim(); }
-            else { int sp = cmd.IndexOf(' '); target = sp < 0 ? cmd : cmd.Substring(0, sp); args = sp < 0 ? "" : cmd.Substring(sp + 1); }
-            if (!Path.IsPathRooted(target)) target = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), target);
+            Program.SplitLaunch(out target, out args);
             string icon = Program.IconPath;
             int comma = icon.LastIndexOf(',');
             Native.EnsureStartShortcut(lnk, target, args, Program.Home, icon.Substring(0, comma), 0, "AIMeter.App");

@@ -132,8 +132,17 @@ namespace AIMeter
             catch (Exception) { return ""; }
         }
 
-        // --- avvio automatico (chiave Run dell'utente, come le app di Windows) -------------
+        // --- avvio automatico: collegamento "AI Meter" in Esecuzione automatica -------------
+        // Windows lo elenca con il nome e l'icona dell'app (Impostazioni > App > Avvio) e lo apre all'accesso.
+        // Prima era un valore nella chiave Run: con conhost.exe come programma Windows lo mostrava come
+        // "Host finestra console" e all'accesso poteva saltarlo. Il valore vecchio si sposta da solo.
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const string ApprovedKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder";
+
+        private static string StartupLink
+        {
+            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "AI Meter.lnk"); }
+        }
 
         public static bool StartsWithWindows
         {
@@ -142,6 +151,15 @@ namespace AIMeter
 #if MSIX
                 if (Native.IsPackaged) return PackageStartup.Enabled;
 #endif
+                if (File.Exists(StartupLink))
+                {
+                    // spento da Impostazioni > App > Avvio o da Gestione attività: primo byte dispari
+                    using (var k = Registry.CurrentUser.OpenSubKey(ApprovedKey))
+                    {
+                        var v = k == null ? null : k.GetValue("AI Meter.lnk") as byte[];
+                        return v == null || v.Length == 0 || (v[0] & 1) == 0;
+                    }
+                }
                 using (var k = Registry.CurrentUser.OpenSubKey(RunKey))
                     return k != null && k.GetValue("AI Meter") != null;
             }
@@ -150,12 +168,35 @@ namespace AIMeter
 #if MSIX
                 if (Native.IsPackaged) { PackageStartup.Enabled = value; return; }
 #endif
-                using (var k = Registry.CurrentUser.CreateSubKey(RunKey))
+                using (var k = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                    if (k != null) k.DeleteValue("AI Meter", false);
+                if (value)
                 {
-                    if (value) k.SetValue("AI Meter", Program.LaunchCommand + " --startup");
-                    else k.DeleteValue("AI Meter", false);
+                    WriteStartupLink();
+                    // riacceso dall'app: toglie lo stato "disattivato" lasciato da Windows
+                    using (var k = Registry.CurrentUser.OpenSubKey(ApprovedKey, true))
+                        if (k != null) k.DeleteValue("AI Meter.lnk", false);
                 }
+                else if (File.Exists(StartupLink)) File.Delete(StartupLink);
             }
+        }
+
+        /// <summary>A ogni avvio: sposta la vecchia voce Run nel collegamento e lo allinea all'installazione attuale.</summary>
+        public static void RefreshStartup()
+        {
+            if (Native.IsPackaged) return;
+            bool legacy;
+            using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) legacy = k != null && k.GetValue("AI Meter") != null;
+            if (legacy) StartsWithWindows = true;
+            else if (File.Exists(StartupLink)) WriteStartupLink();
+        }
+
+        private static void WriteStartupLink()
+        {
+            string target, args;
+            Program.SplitLaunch(out target, out args);
+            string icon = Program.IconPath;
+            Native.SaveShortcut(StartupLink, target, (args + " --startup").Trim(), Program.Home, icon.Substring(0, icon.LastIndexOf(',')), 0);
         }
     }
 }
