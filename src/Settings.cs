@@ -62,8 +62,8 @@ namespace AIMeter
             OpenAIEnabled = CodexProvider.Detected(); OpenAIShowChat = true; CopilotEnabled = false; LocalEnabled = true; LocalAgents = true; ExpandedLocal = true;
             WslDistro = DefaultWslDistro(); WslUser = Environment.UserName;
             Services = new System.Collections.Generic.Dictionary<string, bool>(); ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
-            DesktopWidget = true; DesktopX = double.MinValue; DesktopY = double.MinValue;
-            TaskbarDock = false; TaskbarSide = "auto";
+            DesktopWidget = false; DesktopX = double.MinValue; DesktopY = double.MinValue;   // la pillola nella barra è il modo principale; il widget si attiva nelle impostazioni
+            TaskbarDock = true; TaskbarSide = "auto";
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
             Theme = "system"; Language = "system"; Refresh = "auto"; NotifyLow = true; NotifyReset = true;
         }

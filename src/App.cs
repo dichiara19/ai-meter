@@ -179,6 +179,13 @@ namespace AIMeter
             Native.RegisterAppIdentity("AIMeter.App", "AI Meter", NotificationIcon());
             EnsureShortcut();
             ApplySettings();
+            // primo avvio con una barra dove la pillola non può stare (es. verticale): si mostra il widget sul desktop
+            if (firstRun && Settings.TaskbarDock && (dock == null || !dock.Usable))
+            {
+                Settings.DesktopWidget = true;
+                Settings.Save();
+                ApplySettings();
+            }
             if (firstRun) ShowPrivacyNotice();
 
             SystemEvents.SessionSwitch += OnSessionSwitch;

@@ -446,7 +446,7 @@ namespace AIMeter
                 var w = Primary(p.Usage);
                 string n = p.Name;
                 return w == null ? L.F("{0}: no data", n) : L.F("{0}: {1}% left ({2})", n, Math.Round(w.Remaining), LabelOf(w)) +
-                       (w.ResetsAt.HasValue ? L.F(", resets at {0}", w.ResetsAt.Value.ToString("HH:mm", It)) : "") +
+                       (w.ResetsAt.HasValue ? L.F(", resets {0}", Alerts.When(w.ResetsAt.Value)) : "") +
                        (w.RunsOutAt.HasValue ? " · " + L.F("runs out {0}", Alerts.When(w.RunsOutAt.Value)) : "");
             }));
         }
