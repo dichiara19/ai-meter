@@ -4,10 +4,7 @@
 
 # AI Meter
 
-**Every AI limit and session on your PC, right in the Windows 11 taskbar.**
-
-Claude · ChatGPT / Codex · GitHub Copilot · Cursor · OpenRouter · DeepSeek · Kimi<br>
-Ollama · LM Studio · llama.cpp · llama-swap · vLLM · OpenCode · Pi · Gemini CLI · Qwen Code
+**AI limits, local models and coding agents, quietly in the Windows 11 taskbar.**
 
 [![Latest release](https://img.shields.io/github/v/release/dichiara19/ai-meter?label=download&color=2563eb)](https://github.com/dichiara19/ai-meter/releases/latest)
 [![Windows 11](https://img.shields.io/badge/Windows-11-0078d4)](#install)
@@ -16,24 +13,24 @@ Ollama · LM Studio · llama.cpp · llama-swap · vLLM · OpenCode · Pi · Gemi
 
 </div>
 
-<p align="center"><img src="docs/media/demo.gif" alt="The AI Meter pill in the taskbar: a notification warns that the Claude session is running low, then a click opens the panel with every service" width="480"></p>
+<p align="center"><img src="docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip: Claude, ChatGPT and Copilot limits and a local model loaded in Ollama"></p>
 
-You hit your Claude limit in the middle of a task. Codex still had plenty. Your local model was eating all the VRAM. **AI Meter shows all of it at a glance**: a small pill in the taskbar, a panel that looks like it ships with Windows, and a heads-up *before* you run out.
+That's all of it, most of the time: a pill **inside** the taskbar. No widget to arrange, no window stuck on top of your work. Hover for the summary, click for everything.
 
-- **All your AI subscriptions in one place.** Remaining 5-hour and weekly limits, credits and resets for Claude (Claude Code, Cowork, desktop), ChatGPT / Codex, Copilot and Cursor, read in real time with the sign-in those apps already have.
-- **It warns you before the wall.** "At this pace it runs out at 15:40", and a Windows notification at 20% and 5% that tells you which other service still has room.
-- **Local models, too.** Ollama, LM Studio, llama.cpp, llama-swap and vLLM, on Windows or inside WSL: video memory, context window, how much context the current request uses, and which coding agent is talking to them.
-- **Coding agents.** Open sessions of Claude Code, Codex, OpenCode, Pi, Gemini CLI, Qwen Code, Goose, Crush and Cline, with the model each one uses.
-- **Feels native, costs nothing.** Fluent design, Mica and Acrylic, light and dark, six languages. About 0.02% CPU, no browser engine, no runtime to install, no telemetry.
-- **Open and extensible.** Add a service with a [20-line JSON file](docs/PROVIDERS.md), no code and no rebuild.
+- **Lives in the taskbar.** The pill is part of the taskbar, not a window floating on it: it hides with an auto-hiding taskbar and with full-screen apps, follows the taskbar's light or dark mode and finds the free space for your layout. A desktop widget and a compact overlay are there if you want them.
+- **Looks like Windows made it.** Fluent design, Mica and Acrylic, your accent color, Windows fonts and notifications, a Settings page built like Windows 11 Settings. Six languages.
+- **Practically free to run.** About 0.02% CPU and 120 MB at rest. No Electron, no WebView, no runtime to install: WPF on the .NET Framework already in Windows. Efficiency cores, slower refresh on battery and when nothing is visible, nothing at all while the PC is locked.
+- **Windows and WSL, one view.** Claude Code, Codex and other coding agents running in WSL, model servers inside WSL (NAT or mirrored networking), the video memory of the WSL VM: shown next to their Windows counterparts. WSL is never started, and nothing is launched inside it.
+- **Local models are first-class.** Ollama, LM Studio, llama.cpp, llama-swap, vLLM and more: video memory, context window, how much context the current request uses, requests in flight, and which coding agent (OpenCode, Pi, Gemini CLI, Qwen Code…) is talking to which model.
+- **Your subscriptions, before the wall.** Claude, ChatGPT / Codex, GitHub Copilot, Cursor, OpenRouter, DeepSeek, Kimi: 5-hour and weekly limits, a forecast ("at this pace it runs out at 15:40") and a notification at 20% and 5% that tells you which service still has room.
+- **Private and open.** No telemetry; the only network requests are each service's own usage endpoint. MIT licensed, and a new service is a [20-line JSON file](docs/PROVIDERS.md).
+
+<p align="center"><img src="docs/media/demo.gif" alt="A notification warns that the Claude session is running low, then a click on the pill opens the panel with every service, local models and agents" width="440"></p>
 
 <table>
 <tr>
 <td width="50%"><img src="docs/media/panel-dark.png" alt="The panel in dark mode"></td>
 <td width="50%"><img src="docs/media/panel-light.png" alt="The panel in light mode"></td>
-</tr>
-<tr>
-<td colspan="2"><img src="docs/media/taskbar.png" alt="The pill inside the taskbar, with Claude, ChatGPT, Copilot and a local model"></td>
 </tr>
 <tr>
 <td colspan="2" align="center"><img src="docs/media/notification.png" alt="A Windows notification: Claude session 18% left, runs out at this pace before it resets, ChatGPT still has 77%" width="60%"></td>
@@ -44,18 +41,19 @@ You hit your Claude limit in the middle of a task. Codex still had plenty. Your 
 
 1. Download **AIMeter-script.zip** from the [latest release](https://github.com/dichiara19/ai-meter/releases/latest) and unzip it anywhere.
 2. Run **`Start AI Meter.cmd`**. It works with Smart App Control on: Windows PowerShell, signed by Microsoft, compiles and runs the source you can read.
-3. AI Meter finds the services on your PC and starts with Windows. Open Settings from the panel to choose where to see it: taskbar pill, desktop widget or compact overlay.
+3. The pill appears in your taskbar: AI Meter finds the services on your PC and starts with Windows. In Settings you can add a desktop widget or a compact overlay.
 
 Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now, see [Code signing policy](#code-signing-policy)). A Microsoft Store version is on the way.
 
 <a id="languages"></a>Available in English, Italian, Spanish, French, German and Portuguese. It follows the Windows display language, or you can pick one in Settings. Translations live in `src/StringsTable.cs`: new languages are welcome.
+
 ## What you get
 
 | Surface | What it does |
 |---|---|
+| **Taskbar pill** (default) | A compact pill inside the taskbar of the main monitor, placed in its free space (left corner or next to the notification area, based on how your taskbar is set up). It is a child window of the taskbar, so it hides with an auto-hiding taskbar and with full-screen apps. Local models get their own area at the end: video memory in use, with a dot while a model is working. Hover: summary. Click: full panel. |
 | **Notification area icon** | Click: full panel (Acrylic, like Windows' own flyouts). Right click: menu. Never shows up in the taskbar. |
-| **Taskbar pill** | A compact pill inside the taskbar of the main monitor, placed in its free space (left corner or next to the notification area, based on how your taskbar is set up). It is a child window of the taskbar, so it hides with an auto-hiding taskbar and with full-screen apps. Local models get their own area at the end: video memory in use, with a dot while a model is working. Click: full panel. |
-| **Desktop widget** | Always stays *below* your windows, like part of the wallpaper. Compact cards; click a card header to show its sessions. Drag it by its header. |
+| **Desktop widget** | Off by default. Always stays *below* your windows, like part of the wallpaper. Compact cards; click a card header to show its sessions. Drag it by its header. |
 | **Compact overlay** | A tiny always-on-top pill (off by default) with two micro buttons: collapse to a live ring icon, or close. Never steals focus, hides itself during full-screen games, videos and presentations, shows details on hover. |
 | **Settings** | Built like Windows 11 Settings: connected services, what to show, where, start with Windows, theme, refresh rate, live resource usage. |
 

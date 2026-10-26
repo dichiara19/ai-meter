@@ -43,6 +43,7 @@ namespace AIMeter
             }
             SetTheme(true);
             Save(TaskbarShot(snap), IOPath.Combine(outDir, "taskbar.png"), 2);
+            Save(HeroTaskbar(snap, 900, 300, true), IOPath.Combine(outDir, "hero-taskbar.png"), 2);
             Save(ToastShot(snap), IOPath.Combine(outDir, "notification.png"), 2);
             Save(SocialPreview(snap), IOPath.Combine(outDir, "social-preview.png"), 1);
             int frames = GifFrames(snap, framesDir);
@@ -297,28 +298,70 @@ namespace AIMeter
             return c;
         }
 
-        /// <summary>Anteprima per i link (GitHub, social): 1280×640, nome, frase e il pannello.</summary>
+        /// <summary>Il suggerimento della pillola (il testo vero di TaskbarPill), nello stile dei suggerimenti di Windows 11.</summary>
+        private static FrameworkElement Tooltip(Snapshot s)
+        {
+            var text = Plain(Ui.Summary(s) + "\n" + L.T("Click for details · right-click for options"), 12);
+            text.LineHeight = 18;
+            var b = new Border
+            {
+                Child = text, Padding = new Thickness(10, 7, 10, 8), CornerRadius = new CornerRadius(7), BorderThickness = new Thickness(1),
+                Background = new SolidColorBrush(Color.FromArgb(0xF5, 0x2B, 0x2B, 0x2B)), BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0x00, 0x00, 0x00)),
+                Effect = new DropShadowEffect { BlurRadius = 16, ShadowDepth = 4, Direction = 270, Opacity = 0.35 },
+            };
+            b.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            return b;
+        }
+
+        /// <summary>
+        /// La pillola chiusa nella barra, come si vede tutto il giorno: angolo della barra con il puntatore sopra
+        /// e il suo suggerimento. È la prima immagine del README e il fondo dell'anteprima per i social.
+        /// </summary>
+        private static FrameworkElement HeroTaskbar(Snapshot s, double w, double h, bool tooltip)
+        {
+            var c = new Canvas { Width = w, Height = h, ClipToBounds = true };
+            c.Children.Add(Crop(wallpaper, new Rect(DeskW - w, DeskH - h, w, h)));
+            var bar = Taskbar(s, w, true);
+            bar.Measure(new Size(w, BarH)); bar.Arrange(new Rect(0, 0, w, BarH)); bar.UpdateLayout();
+            var pill = ((DockPanel)((Grid)bar).Children[0]).Children.OfType<Border>().First();
+            var pos = pill.TranslatePoint(new Point(0, 0), bar);
+            Canvas.SetTop(bar, h - BarH);
+            c.Children.Add(bar);
+            if (tooltip)
+            {
+                var tip = Tooltip(s);
+                double x = Math.Min(pos.X, w - tip.DesiredSize.Width - 12);
+                Canvas.SetLeft(tip, x);
+                Canvas.SetTop(tip, h - BarH - 10 - tip.DesiredSize.Height);
+                c.Children.Add(tip);
+            }
+            var cur = Cursor();
+            Canvas.SetLeft(cur, pos.X + 6);
+            Canvas.SetTop(cur, h - BarH + pos.Y + pill.ActualHeight * 0.5);
+            c.Children.Add(cur);
+            return c;
+        }
+
+        /// <summary>Anteprima per i link (GitHub, social): 1280×640, la pillola nella barra e la frase.</summary>
         private static FrameworkElement SocialPreview(Snapshot s)
         {
             var c = new Canvas { Width = 1280, Height = 640, ClipToBounds = true };
-            c.Children.Add(Crop(wallpaper, new Rect(DeskW - 1280, 120, 1280, 640)));
-            var left = new StackPanel { Width = 640 };
+            // la scena della barra, ingrandita, fa da fondo
+            var hero = HeroTaskbar(s, 800, 400, true);
+            hero.RenderTransform = new ScaleTransform(1.6, 1.6);
+            c.Children.Add(hero);
+            var left = new StackPanel { Width = 700 };
             var logoRow = new StackPanel { Orientation = Orientation.Horizontal };
-            logoRow.Children.Add(new Image { Source = AppIcon(), Width = 84, Height = 84, Margin = new Thickness(0, 0, 22, 0) });
-            var name = Plain("AI Meter", 76); name.FontWeight = FontWeights.SemiBold; name.FontFamily = Theme.DisplayFont; name.VerticalAlignment = VerticalAlignment.Center;
+            logoRow.Children.Add(new Image { Source = AppIcon(), Width = 72, Height = 72, Margin = new Thickness(0, 0, 18, 0) });
+            var name = Plain("AI Meter", 66); name.FontWeight = FontWeights.SemiBold; name.FontFamily = Theme.DisplayFont; name.VerticalAlignment = VerticalAlignment.Center;
             logoRow.Children.Add(name);
             left.Children.Add(logoRow);
-            var tag = Plain("Every AI limit and session on your PC,\nright in the Windows 11 taskbar.", 34); tag.Margin = new Thickness(0, 28, 0, 0); tag.Opacity = 0.95;
+            var tag = Plain("AI limits, local models and agents,\nquietly in the Windows 11 taskbar.", 30); tag.Margin = new Thickness(0, 18, 0, 0); tag.Opacity = 0.95;
             left.Children.Add(tag);
-            var list = Plain("Claude · ChatGPT / Codex · Copilot · Cursor · OpenRouter\nOllama · LM Studio · llama.cpp · OpenCode · Pi", 21); list.Margin = new Thickness(0, 30, 0, 0); list.Opacity = 0.7; list.LineHeight = 32;
+            var list = Plain("Native Fluent design · ~0.02% CPU · Windows + WSL", 21); list.Margin = new Thickness(0, 14, 0, 0); list.Opacity = 0.72;
             left.Children.Add(list);
-            Canvas.SetLeft(left, 72); Canvas.SetTop(left, 150);
+            Canvas.SetLeft(left, 64); Canvas.SetTop(left, 44);
             c.Children.Add(left);
-            // pannello a destra, tagliato in basso come se continuasse
-            var panel = Panel(s, true, new Rect(DeskW - 1280 + 820, 160, 344, 0));
-            panel.LayoutTransform = new ScaleTransform(1.05, 1.05);
-            Canvas.SetLeft(panel, 820); Canvas.SetTop(panel, 56);
-            c.Children.Add(panel);
             return c;
         }
 
