@@ -1,0 +1,39 @@
+name: New service
+description: Ask for a service to monitor (or say you'll add it)
+labels: ["new service"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Many services can be added with a small JSON file, see [docs/PROVIDERS.md](https://github.com/dichiara19/ai-meter/blob/main/docs/PROVIDERS.md). If you can write it, a pull request is the fastest way!
+  - type: input
+    id: service
+    attributes:
+      label: Service
+      placeholder: "Gemini CLI, Windsurf, Mistral, ..."
+    validations:
+      required: true
+  - type: textarea
+    id: usage
+    attributes:
+      label: Where its usage can be read
+      description: An official endpoint or file with your usage or limits, with a link to its documentation if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: auth
+    attributes:
+      label: How it signs in
+      description: For example an API key, or a token its app keeps in a local file or database. Describe where, but never paste the token.
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample response
+      description: A response of the usage endpoint with personal values replaced.
+      render: json
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd like to write the definition file myself

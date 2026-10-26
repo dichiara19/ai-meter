@@ -1,0 +1,5 @@
+# The maintainer reviews every change; build, release and security files first of all.
+*                       @dichiara19
+/.github/               @dichiara19
+/build.ps1              @dichiara19
+/AIMeter.ps1            @dichiara19

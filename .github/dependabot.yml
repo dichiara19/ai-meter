@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # actions used by the build and release workflow
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "CI"

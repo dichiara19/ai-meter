@@ -194,6 +194,10 @@ Network connections are limited to reading your own usage:
 With these off, AI Meter makes no network connections at all.
 
 
+## Contributing
+
+Bug reports, translations, new services and code are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Questions and ideas go to [Discussions](https://github.com/dichiara19/ai-meter/discussions), security issues to a [private report](SECURITY.md). Everyone is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 MIT. Not affiliated with Anthropic or OpenAI. Claude is a trademark of Anthropic; ChatGPT and Codex are trademarks of OpenAI.

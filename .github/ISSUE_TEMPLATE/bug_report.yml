@@ -1,0 +1,77 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please **never paste tokens or API keys**. If you attach files from `%APPDATA%\AIMeter`, check them first and remove anything personal (session titles, project names).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Turn on the taskbar pill
+        2. Move the taskbar to the left
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: AI Meter version
+      description: Settings → About.
+      placeholder: "0.3.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Press Win+R, type `winver`.
+      placeholder: "Windows 11 24H2, build 26100"
+    validations:
+      required: true
+  - type: dropdown
+    id: package
+    attributes:
+      label: How do you run it
+      options:
+        - AIMeter-script.zip (Start AI Meter.cmd)
+        - AIMeter.zip (AIMeter.exe)
+        - Built from source (build.ps1)
+        - Microsoft Store
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Taskbar pill
+        - Panel
+        - Desktop widget
+        - Overlay
+        - Settings
+        - Notifications
+        - Claude
+        - ChatGPT / Codex
+        - GitHub Copilot
+        - Cursor or another service from a definition file
+        - Local models
+        - Coding agents
+        - WSL
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Screenshots and logs
+      description: A screenshot helps a lot. If the app doesn't start, attach `%APPDATA%\AIMeter\launcher.log`.
