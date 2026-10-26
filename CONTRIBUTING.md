@@ -59,4 +59,4 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstall
 
 ## License
 
-AI Meter is MIT licensed. By contributing you agree that your contribution is licensed under the same license. There is no CLA.
+AI Meter is licensed under the [Apache License 2.0](LICENSE). As stated in its section 5, contributions you submit are licensed under the same terms; there is no CLA. The project name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md).

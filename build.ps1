@@ -126,7 +126,7 @@ if ($Package) {
     $wm = Join-Path $env:WINDIR 'System32\WinMetadata'
     Invoke-Csc (Join-Path $layout 'AIMeter.exe') @('/define:MSIX', "/r:$fw\System.Runtime.dll",
         "/r:$wm\Windows.ApplicationModel.winmd", "/r:$wm\Windows.Foundation.winmd")
-    Copy-Item (Join-Path $bin 'AIMeter.exe.config') $layout
+    Copy-Item (Join-Path $bin 'AIMeter.exe.config'), (Join-Path $root 'LICENSE'), (Join-Path $root 'NOTICE') $layout
     Copy-Item (Join-Path $root 'assets\app.ico') (Join-Path $layout 'assets')
 
     # immagini del pacchetto: icona della barra e dell'elenco app in più dimensioni, tile, logo dello Store

@@ -8,7 +8,7 @@
 
 [![Latest release](https://img.shields.io/github/v/release/dichiara19/ai-meter?label=download&color=2563eb)](https://github.com/dichiara19/ai-meter/releases/latest)
 [![Windows 11](https://img.shields.io/badge/Windows-11-0078d4)](#install)
-[![License: MIT](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-16a34a)](LICENSE)
 [![Languages](https://img.shields.io/badge/languages-6-7c3aed)](#languages)
 
 </div>
@@ -23,7 +23,7 @@ That's all of it, most of the time: a pill **inside** the taskbar. No widget to 
 - **Windows and WSL, one view.** Claude Code, Codex and other coding agents running in WSL, model servers inside WSL (NAT or mirrored networking), the video memory of the WSL VM: shown next to their Windows counterparts. WSL is never started, and nothing is launched inside it.
 - **Local models are first-class.** Ollama, LM Studio, llama.cpp, llama-swap, vLLM and more: video memory, context window, how much context the current request uses, requests in flight, and which coding agent (OpenCode, Pi, Gemini CLI, Qwen Code…) is talking to which model.
 - **Your subscriptions, before the wall.** Claude, ChatGPT / Codex, GitHub Copilot, Cursor, OpenRouter, DeepSeek, Kimi: 5-hour and weekly limits, a forecast ("at this pace it runs out at 15:40") and a notification at 20% and 5% that tells you which service still has room.
-- **Private and open.** No telemetry; the only network requests are each service's own usage endpoint. MIT licensed, and a new service is a [20-line JSON file](docs/PROVIDERS.md).
+- **Private and open.** No telemetry; the only network requests are each service's own usage endpoint. Apache 2.0 licensed, and a new service is a [20-line JSON file](docs/PROVIDERS.md).
 
 <p align="center"><img src="docs/media/demo.gif" alt="A notification warns that the Claude session is running low, then a click on the pill opens the panel with every service, local models and agents" width="440"></p>
 
@@ -194,6 +194,14 @@ With these off, AI Meter makes no network connections at all.
 
 Bug reports, translations, new services and code are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Questions and ideas go to [Discussions](https://github.com/dichiara19/ai-meter/discussions), security issues to a [private report](SECURITY.md). Everyone is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
+## Third-party services
+
+AI Meter is an independent project, not affiliated with, endorsed or sponsored by Anthropic, OpenAI, GitHub, Microsoft, Anysphere (Cursor) or any other service it shows. Names and logos belong to their owners (see [NOTICE](NOTICE)); logos are read at runtime from apps installed on your PC, and screenshots show them only to identify the services.
+
+Some of the usage data comes from endpoints that the services use in their own apps but do not document publicly. They can change or stop working at any time, and AI Meter reads them only for your own account, with the sign-in those apps already have. You are responsible for using each service according to its terms.
+
 ## License
 
-MIT. Not affiliated with Anthropic or OpenAI. Claude is a trademark of Anthropic; ChatGPT and Codex are trademarks of OpenAI.
+Copyright 2026 Giuseppe Gabriele Di Chiara. Licensed under the [Apache License 2.0](LICENSE); versions up to 0.3.1 were released under the MIT License.
+
+The name "AI Meter" and its logo are trademarks and are not covered by the license: forks and modified builds need their own name and icon, see [TRADEMARKS.md](TRADEMARKS.md).
