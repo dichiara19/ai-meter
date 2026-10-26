@@ -173,6 +173,13 @@ namespace AIMeter
             return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null && !w.NoBar && w.RightText == null);
         }
 
+        /// <summary>Colore della barra: avviso anche con margine se, a questo ritmo, finisce prima dell'azzeramento.</summary>
+        public static string LevelBrush(UsageWindow w, string brand)
+        {
+            string level = LevelBrush(w.Remaining, brand);
+            return level == brand && w.RunsOutAt.HasValue ? "Caution" : level;
+        }
+
         public static string LevelBrush(double remaining, string brand)
         {
             if (remaining <= 15) return "Critical";
@@ -341,7 +348,7 @@ namespace AIMeter
                     var t = Text(Math.Round(w.Remaining).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
                     t.HorizontalAlignment = HorizontalAlignment.Center;
                     stack.Children.Add(t);
-                    var bar = Bar(w.Remaining, LevelBrush(w.Remaining, BrandBrush(p.Id)), 2);
+                    var bar = Bar(w.Remaining, LevelBrush(w, BrandBrush(p.Id)), 2);
                     bar.Width = 26;
                     bar.Margin = new Thickness(0, 1, 0, 0);
                     stack.Children.Add(bar);
@@ -439,7 +446,8 @@ namespace AIMeter
                 var w = Primary(p.Usage);
                 string n = p.Name;
                 return w == null ? L.F("{0}: no data", n) : L.F("{0}: {1}% left ({2})", n, Math.Round(w.Remaining), LabelOf(w)) +
-                       (w.ResetsAt.HasValue ? L.F(", resets at {0}", w.ResetsAt.Value.ToString("HH:mm", It)) : "");
+                       (w.ResetsAt.HasValue ? L.F(", resets at {0}", w.ResetsAt.Value.ToString("HH:mm", It)) : "") +
+                       (w.RunsOutAt.HasValue ? " · " + L.F("runs out {0}", Alerts.When(w.RunsOutAt.Value)) : "");
             }));
         }
 
@@ -481,17 +489,26 @@ namespace AIMeter
                 r.SetResourceReference(TextElement_Foreground, "Text3");
                 left.Inlines.Add(r);
             }
+
             top.Children.Add(left);
             root.Children.Add(top);
             if (w.NoBar) { root.ToolTip = LabelOf(w) + ": " + right; return root; }
-            var bar = Bar(w.Remaining, LevelBrush(w.Remaining, brand), 4);
+            var bar = Bar(w.Remaining, LevelBrush(w, brand), 4);
             bar.Margin = new Thickness(0, 5, 0, 0);
             root.Children.Add(bar);
+            // previsione: a questo ritmo finisce prima dell'azzeramento
+            if (w.RunsOutAt.HasValue)
+            {
+                var f = Text(L.F("At this pace it runs out {0}.", Alerts.When(w.RunsOutAt.Value)).TrimEnd('.'), 11.5, "Caution");
+                f.Margin = new Thickness(0, 4, 0, 0);
+                root.Children.Add(f);
+            }
             string when = "dddd d MMMM, HH:mm";
             root.ToolTip = (w.Spent != null
                     ? L.F("{0}: {1} used of {2}", LabelOf(w), w.Spent.Format(w.Spent.Used), w.Spent.Format(w.Spent.Limit))
                     : L.F("{0}: {1:0}% used, {2:0}% left", LabelOf(w), w.Used, w.Remaining))
                 + (w.Detail != null ? "\n" + w.Detail() : "")
+                + (w.RunsOutAt.HasValue ? "\n" + L.F("At this pace it runs out {0}.", Alerts.When(w.RunsOutAt.Value)) : "")
                 + (w.StartedAt.HasValue ? "\n" + L.F("Started {0}", w.StartedAt.Value.ToString(when, It)) : "")
                 + (w.ResetsAt.HasValue ? "\n" + L.F(w.Spent != null ? "Renews {0}" : "Resets {0}", w.ResetsAt.Value.ToString(when, It)) : "");
             return root;

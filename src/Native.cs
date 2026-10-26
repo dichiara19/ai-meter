@@ -295,6 +295,99 @@ namespace AIMeter
             catch (EntryPointNotFoundException) { }
         }
 
+        /// <summary>
+        /// Nome e icona con cui Windows mostra le notifiche dell'app (registro dell'utente, come per le app non pacchettizzate):
+        /// senza, le notifiche avviate da PowerShell comparirebbero come "Windows PowerShell".
+        /// </summary>
+        public static void RegisterAppIdentity(string id, string name, string iconPath)
+        {
+            if (IsPackaged) return;
+            try
+            {
+                using (var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\AppUserModelId\" + id))
+                {
+                    if (k == null) return;
+                    k.SetValue("DisplayName", name);
+                    if (iconPath != null) k.SetValue("IconUri", iconPath);
+                }
+            }
+            catch (UnauthorizedAccessException) { }
+            catch (System.Security.SecurityException) { }
+        }
+
+        // --- collegamento nel menu Start con l'identità dell'app (nome e icona delle notifiche) -----------
+        [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IShellLinkW
+        {
+            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder file, int max, IntPtr fd, uint flags);
+            void GetIDList(out IntPtr pidl);
+            void SetIDList(IntPtr pidl);
+            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder name, int max);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string name);
+            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder dir, int max);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string dir);
+            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder args, int max);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
+            void GetHotkey(out short key);
+            void SetHotkey(short key);
+            void GetShowCmd(out int cmd);
+            void SetShowCmd(int cmd);
+            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int max, out int index);
+            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+            void Resolve(IntPtr hwnd, uint flags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
+        }
+
+        [ComImport, Guid("0000010B-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IPersistFileW
+        {
+            void GetClassID(out Guid clsid);
+            [PreserveSig] int IsDirty();
+            void Load([MarshalAs(UnmanagedType.LPWStr)] string file, uint mode);
+            void Save([MarshalAs(UnmanagedType.LPWStr)] string file, bool remember);
+            void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string file);
+            void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string file);
+        }
+
+        /// <summary>
+        /// Crea (o aggiorna) il collegamento nel menu Start con l'identità dell'app: Windows ne prende nome e icona per le
+        /// notifiche e per la barra. Senza, le notifiche compaiono con l'identificativo tecnico e senza icona.
+        /// </summary>
+        public static void EnsureStartShortcut(string lnk, string target, string args, string workDir, string icon, int iconIndex, string appId)
+        {
+            if (IsPackaged) return;
+            try
+            {
+                var link = (IShellLinkW)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046")));
+                bool exists = System.IO.File.Exists(lnk);
+                if (exists) ((IPersistFileW)link).Load(lnk, 2 /* STGM_READWRITE */);
+                else
+                {
+                    link.SetPath(target);
+                    link.SetArguments(args ?? "");
+                    link.SetWorkingDirectory(workDir ?? "");
+                    link.SetIconLocation(icon, iconIndex);
+                    link.SetDescription("AI Meter");
+                }
+                var store = (IPropertyStore)link;
+                var key = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
+                PROPVARIANT current;
+                store.GetValue(ref key, out current);
+                string have = current.vt == 31 ? Marshal.PtrToStringUni(current.p) : null;
+                if (exists && have == appId) { Marshal.ReleaseComObject(link); return; }
+                SetString(store, key.fmtid, 5, appId);
+                store.Commit();
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(lnk));
+                ((IPersistFileW)link).Save(lnk, true);
+                Marshal.ReleaseComObject(link);
+            }
+            catch (COMException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (System.IO.IOException) { }
+            catch (InvalidCastException) { }
+        }
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetCurrentPackageFullName(ref int length, StringBuilder name);
 
         private static int packaged = -1;

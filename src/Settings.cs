@@ -46,6 +46,10 @@ namespace AIMeter
         public bool TaskbarDock { get; set; }
         public string TaskbarSide { get; set; }     // "auto", "left", "right"
 
+        // notifiche
+        public bool NotifyLow { get; set; }         // limite sotto il 20% e il 5%
+        public bool NotifyReset { get; set; }       // limite di nuovo disponibile
+
         // generale
         public string Theme { get; set; }           // "system", "light", "dark"
         public string Language { get; set; }        // "system" o un codice di L.Languages
@@ -61,7 +65,7 @@ namespace AIMeter
             DesktopWidget = true; DesktopX = double.MinValue; DesktopY = double.MinValue;
             TaskbarDock = false; TaskbarSide = "auto";
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
-            Theme = "system"; Language = "system"; Refresh = "auto";
+            Theme = "system"; Language = "system"; Refresh = "auto"; NotifyLow = true; NotifyReset = true;
         }
 
         internal bool ServiceOn(ServiceDefinition d)

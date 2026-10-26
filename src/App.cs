@@ -121,6 +121,9 @@ namespace AIMeter
         private readonly bool startup;
         private readonly EventWaitHandle showSignal, settingsSignal;
         private Collector collector;
+        private readonly Forecaster forecaster = new Forecaster();
+        private Alerts alerts;
+        private Action balloonAction;   // cosa fa il clic sulla notifica mostrata
         private Dispatcher ui;
         private DesktopWidget desktop;
         private OverlayPill pill;
@@ -169,6 +172,8 @@ namespace AIMeter
             hideDetails.Tick += (o, e) => { hideDetails.Stop(); if (flyout.HoverMode && !flyout.IsMouseOver && (pill == null || !pill.IsMouseOver)) flyout.Hide(); };
 
             CreateTray();
+            Native.RegisterAppIdentity("AIMeter.App", "AI Meter", NotificationIcon());
+            EnsureShortcut();
             ApplySettings();
             if (firstRun) ShowPrivacyNotice();
 
@@ -196,7 +201,7 @@ namespace AIMeter
                 if (paused) { wake.WaitOne(); continue; }
                 bool saving = Native.SavingPower();
                 Snapshot snap = null;
-                try { snap = collector.Collect(anyVisible || ticks == 0, saving); }
+                try { snap = collector.Collect(anyVisible || ticks == 0, saving); forecaster.Apply(snap); }
                 catch (Exception ex) { Trace.WriteLine(ex); }
                 if (snap != null) ui.BeginInvoke(DispatcherPriority.Background, new Action(() => Apply(snap)));
                 if (Json.BytesRead > 8 << 20)
@@ -224,6 +229,7 @@ namespace AIMeter
         private void Apply(Snapshot s)
         {
             Last = s;
+            Notify(s);
             string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed;
             UpdateTrayText(s);
             if (sig == lastSignature) return;   // niente è cambiato: nessun ridisegno
@@ -530,15 +536,63 @@ namespace AIMeter
                 if (e.Button == Forms.MouseButtons.Left) ToggleFlyout();
                 else if (e.Button == Forms.MouseButtons.Right) ShowMenu(null);
             };
+            tray.BalloonTipClicked += (o, e) => { var a = balloonAction; balloonAction = null; if (a != null) a(); };
         }
 
         /// <summary>
         /// Al primo avvio dice chiaramente quale dato esce dal PC e come spegnerlo
         /// (unico accesso alla rete: i limiti Claude in tempo reale).
         /// </summary>
+        /// <summary>Notifiche dei limiti (una alla volta: Windows mostra comunque solo l'ultima). Il clic apre il pannello.</summary>
+        private void Notify(Snapshot s)
+        {
+            if (alerts == null) alerts = new Alerts();
+            var list = alerts.Check(s, Settings);
+            if (list.Count == 0) return;
+            var n = list[list.Count - 1];
+            string text = list.Count > 1 ? n.Item2 + "\n" + L.N(list.Count - 1, "+{0} other notice", "+{0} other notices") : n.Item2;
+            balloonAction = () => { if (!flyout.IsVisible) ToggleFlyout(); };
+            tray.ShowBalloonTip(15000, n.Item1, text, Forms.ToolTipIcon.None);
+        }
+
+        /// <summary>Collegamento "AI Meter" nel menu Start, con l'identità dell'app: senza, le notifiche non hanno nome né icona.</summary>
+        private static void EnsureShortcut()
+        {
+            string lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "AI Meter.lnk");
+            string cmd = Program.LaunchCommand.Trim();
+            string target, args;
+            if (cmd.StartsWith("\"")) { int q = cmd.IndexOf('"', 1); target = cmd.Substring(1, q - 1); args = cmd.Substring(q + 1).Trim(); }
+            else { int sp = cmd.IndexOf(' '); target = sp < 0 ? cmd : cmd.Substring(0, sp); args = sp < 0 ? "" : cmd.Substring(sp + 1); }
+            if (!Path.IsPathRooted(target)) target = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), target);
+            string icon = Program.IconPath;
+            int comma = icon.LastIndexOf(',');
+            Native.EnsureStartShortcut(lnk, target, args, Program.Home, icon.Substring(0, comma), 0, "AIMeter.App");
+        }
+
+        /// <summary>L'icona dell'app come file, per le notifiche: quella in assets\ o una copia di quella incorporata.</summary>
+        private static string NotificationIcon()
+        {
+            try
+            {
+                string f = Path.Combine(Program.Home, @"assets\app.ico");
+                if (File.Exists(f)) return f;
+                f = Path.Combine(Settings.Folder, "app.ico");
+                if (!File.Exists(f))
+                    using (var s = Program.OpenAsset("app.ico"))
+                    {
+                        if (s == null) return null;
+                        Directory.CreateDirectory(Settings.Folder);
+                        using (var o = File.Create(f)) s.CopyTo(o);
+                    }
+                return f;
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+        }
+
         private void ShowPrivacyNotice()
         {
-            tray.BalloonTipClicked += (o, e) => OpenSettings();
+            balloonAction = OpenSettings;
             tray.ShowBalloonTip(20000, L.T("AI Meter is running"),
                 L.T("It reads sessions and limits from local files. Only real-time Claude limits contact Anthropic with your Claude Code login: you can turn them off in Settings."),
                 Forms.ToolTipIcon.Info);

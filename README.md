@@ -20,6 +20,8 @@ Each service can be turned on or off in Settings; on first run AI Meter enables 
 
 For each service: remaining share of the **5-hour** and **weekly** limits with reset times, plus the active sessions with title, model and status.
 
+**Forecast and notifications.** At the current pace, AI Meter tells you when a limit will run out if that happens before it resets ("At this pace it runs out at 15:40"), in the panel, in tooltips and with a yellow bar in the pill. The pace is the trend of the last hour and a half of readings, or the average since the window started. Windows notifications arrive when a limit drops below 20% and 5%, with the forecast and the other service that still has room ("ChatGPT still has 80% left"), and when a limit you had almost used up is available again. Each one comes once per window, follows Do not disturb, and can be turned off in Settings.
+
 ## Where the data comes from
 
 Everything is read locally from files the official apps already write. Nothing is sent anywhere, with one exception you can turn off.
@@ -90,7 +92,7 @@ Command line: `--settings` opens Settings of the running instance, `--gpu` draws
 
 ## Uninstall
 
-Settings → turn off *Start with Windows*, choose *Exit* from the menu, then delete `%LOCALAPPDATA%\Programs\AI Meter`, `%APPDATA%\AIMeter` and the *AI Meter* Start menu shortcut.
+Settings → turn off *Start with Windows*, choose *Exit* from the menu, then delete `%LOCALAPPDATA%\Programs\AI Meter`, `%APPDATA%\AIMeter`, the *AI Meter* Start menu shortcut and the registry key `HKCU\Software\Classes\AppUserModelId\AIMeter.App` (name and icon of its notifications).
 
 ## Project layout
 
@@ -105,6 +107,7 @@ src/ProviderDefined.cs services described by JSON definitions, API keys, SQLite 
 src/ProviderLocal.cs   local model servers: discovery on Windows and WSL, loaded models, memory, context
 src/CodingAgents.cs    sessions of terminal coding agents (OpenCode, Pi, Gemini CLI, Qwen Code, …)
 src/GpuMemory.cs       video memory per process from the Windows GPU counters
+src/Forecast.cs        when each limit runs out at the current pace; low-limit and reset notifications
 providers/*.json       built-in service definitions
 src/Settings.cs        preferences and start with Windows
 src/PackageStartup.cs  start with Windows in the Microsoft Store package (StartupTask)

@@ -192,6 +192,17 @@ namespace AIMeter
             Hint(L.T("The full panel is always one click away from the AI Meter icon in the notification area."));
 
             // ------------------------------------------------ generale
+            // ------------------------------------------------ notifiche
+            Section(L.T("Notifications"));
+            Group(
+                Row(Ui.Glyph("", 20, "Text"), L.T("When a limit runs low"),
+                    L.T("A Windows notification when less than 20% and 5% is left, with when it runs out at this pace and which other service still has room."),
+                    Toggle(S.NotifyLow, v => { S.NotifyLow = v; S.Save(); })),
+                Row(Ui.Glyph("", 20, "Text"), L.T("When a limit is available again"),
+                    L.T("After a limit you had almost used up resets."),
+                    Toggle(S.NotifyReset, v => { S.NotifyReset = v; S.Save(); })));
+            Hint(L.T("Do not disturb and Focus in Windows hold these notifications like any other."));
+
             Section(L.T("General"));
             var langs = new[] { Tuple.Create("system", L.T("Use the Windows language")) }
                 .Concat(L.Languages.Select(l => Tuple.Create(l.Key, l.Value))).ToArray();

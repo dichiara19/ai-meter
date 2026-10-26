@@ -19,6 +19,7 @@ namespace AIMeter
         public string RightText;  // chiave inglese al posto della percentuale (es. "unlimited")
         public Func<string> Detail; // dettaglio per il suggerimento, calcolato nella lingua attiva
         public bool NoBar;        // solo un valore (es. un saldo), senza barra né percentuale
+        public DateTime? RunsOutAt; // previsione: a questo ritmo il limite finisce prima dell'azzeramento
         public double Remaining { get { return Math.Max(0, Math.Min(100, 100 - Used)); } }
     }
 
@@ -116,7 +117,7 @@ namespace AIMeter
                 if (p.Usage != null)
                 {
                     sb.Append(p.Usage.Source);
-                    foreach (var w in p.Usage.Windows) sb.Append(w.Label).Append((int)w.Used).Append(w.ResetsAt);
+                    foreach (var w in p.Usage.Windows) sb.Append(w.Label).Append((int)w.Used).Append(w.ResetsAt).Append(w.RunsOutAt.HasValue ? w.RunsOutAt.Value.Ticks / TimeSpan.TicksPerMinute / 5 : 0);
                 }
                 foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
                 if (p.Models != null) sb.Append(p.GpuUsed >> 28);
