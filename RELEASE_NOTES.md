@@ -1,11 +1,10 @@
-<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.3.1/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.3.2/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
 
-## What's new in 0.3.1
+## What's new in 0.3.2
 
-- **The taskbar pill is the default view.** On a new install, AI Meter shows its pill inside the taskbar instead of the desktop widget. If the taskbar can't host it (for example a vertical taskbar), the desktop widget appears instead. Existing settings are kept, and the widget and the overlay are still one switch away in Settings.
-- **Reset dates in the pill's tooltip.** Limits that reset on another day now say when ("resets on Sunday at 00:00"), not just the time.
-
-Everything else new since 0.2.0 (local models, coding agents, forecast and notifications, services from JSON files) is in the [0.3.0 notes](https://github.com/dichiara19/ai-meter/releases/tag/v0.3.0).
+- **Reliable start with Windows.** AI Meter now starts at sign-in from an "AI Meter" shortcut in the Startup folder. The previous registry entry could be skipped by Windows and showed up in Settings → Apps → Startup as "Console Window Host". Existing installs move over by themselves on the next launch, and turning it off in Windows Settings is respected.
+- **Right-click menu with more than one monitor.** The menu opens at the right size and position when your monitors use different scaling.
+- **Apache License 2.0.** The downloads now include LICENSE and NOTICE. AI Meter is licensed under Apache 2.0 from this release; the name and logo are covered by [TRADEMARKS.md](https://github.com/dichiara19/ai-meter/blob/v0.3.2/TRADEMARKS.md).
 
 ## Download
 
