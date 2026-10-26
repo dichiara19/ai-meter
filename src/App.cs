@@ -685,17 +685,16 @@ namespace AIMeter
                 menuHost = new Window { Width = 0, Height = 0, WindowStyle = WindowStyle.None, ShowInTaskbar = false, Topmost = true, AllowsTransparency = true, Background = Brushes.Transparent, ResizeMode = ResizeMode.NoResize };
                 menuHost.SourceInitialized += (o, e) => Native.AddExStyle(new WindowInteropHelper(menuHost).Handle, Native.WS_EX_TOOLWINDOW, 0);
             }
+            // la finestra (larga zero) va sotto il cursore, non fuori schermo: il menu prende la scala del monitor
+            // su cui si apre. Fuori schermo valeva quella del monitor più vicino, magari un altro a scala diversa.
             var pos = Forms.Cursor.Position;
-            menuHost.Left = -10000; menuHost.Top = -10000;
+            var h = new WindowInteropHelper(menuHost).EnsureHandle();
+            Native.SetWindowPos(h, IntPtr.Zero, pos.X, pos.Y, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
             menuHost.Show();
             menuHost.Activate();
-            Native.SetForegroundWindow(new WindowInteropHelper(menuHost).Handle);
-            var src = PresentationSource.FromVisual(menuHost);
-            var pt = src != null ? src.CompositionTarget.TransformFromDevice.Transform(new Point(pos.X, pos.Y)) : new Point(pos.X, pos.Y);
+            Native.SetForegroundWindow(h);
             menu.PlacementTarget = menuHost;
-            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.AbsolutePoint;
-            menu.HorizontalOffset = pt.X;
-            menu.VerticalOffset = pt.Y;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
             menu.Closed += (o, e) => menuHost.Hide();
             menu.IsOpen = true;
         }
