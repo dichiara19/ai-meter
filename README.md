@@ -129,7 +129,7 @@ Two install modes:
 
 `-Package` also builds the MSIX package for the Microsoft Store (`bin\AIMeter.msix`, needs the Windows SDK; see [docs/STORE.md](docs/STORE.md)).
 
-Command line: `--settings` opens Settings of the running instance, `--gpu` draws with the GPU, `--demo` shows demo data (for screenshots; close AI Meter first).
+Command line: `--settings` opens Settings of the running instance and `--gpu` draws with the GPU.
 
 ## Uninstall
 
