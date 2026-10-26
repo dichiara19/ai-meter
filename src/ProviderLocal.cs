@@ -140,8 +140,9 @@ namespace AIMeter
                     string name;
                     p.Procs.TryGetValue(kv.Value, out name);
                     name = name ?? "";
-                    // rete NAT di WSL: le porte dei server Linux sono aperte da wslrelay.exe
-                    if (name == "wslrelay.exe") { if (KnownPorts.Contains(kv.Key)) candidates.Add(Tuple.Create(kv.Key, "WSL", 0u, "")); continue; }
+                    // rete NAT di WSL (la predefinita): per ogni server Linux su 0.0.0.0 o 127.0.0.1, wslrelay.exe apre la stessa
+                    // porta su 127.0.0.1 di Windows. È un server in WSL, qualunque sia la porta.
+                    if (name == "wslrelay.exe") { if (kv.Key >= 1024) candidates.Add(Tuple.Create(kv.Key, "WSL", 0u, "")); continue; }
                     if (IsEngineChild(p, kv.Value, name)) continue;
                     string bare = name.EndsWith(".exe") ? name.Substring(0, name.Length - 4) : name;
                     if (Known(bare, kv.Key)) candidates.Add(Tuple.Create(kv.Key, "Windows", kv.Value, bare));
@@ -156,7 +157,15 @@ namespace AIMeter
                 wslPorts = WslListeners(p.WslRoot);
             }
             if (!p.WslUp) wslPorts.Clear();
-            foreach (var w in wslPorts) if (!winPorts.ContainsKey(w.Item1)) candidates.Add(Tuple.Create(w.Item1, "WSL", 0u, w.Item2));
+            // in rete "mirrored" le porte di WSL non hanno una riga nella tabella di Windows; in NAT ce l'hanno (wslrelay) e
+            // sono già tra i candidati. Si saltano solo le porte usate su Windows da un altro programma.
+            foreach (var w in wslPorts)
+            {
+                uint owner;
+                string ownerName;
+                bool takenByWindows = winPorts.TryGetValue(w.Item1, out owner) && !(p.Procs.TryGetValue(owner, out ownerName) && ownerName == "wslrelay.exe");
+                if (!takenByWindows) candidates.Add(Tuple.Create(w.Item1, "WSL", 0u, w.Item2));
+            }
 
             foreach (var c in candidates)
             {
@@ -378,8 +387,11 @@ namespace AIMeter
             {
                 if (!JPath.Truthy(JPath.Get(sl, "is_processing"))) continue;
                 m.Busy++;
-                int used = (int)(JPath.Num(JPath.Get(sl, "n_prompt_tokens")) ?? JPath.Num(JPath.Get(sl, "n_past")) ?? 0)
-                         + (int)(JPath.Num(JPath.Get(sl, "next_token[0].n_decoded")) ?? JPath.Num(JPath.Get(sl, "next_token.n_decoded")) ?? 0);
+                // n_prompt_tokens è la cache dello slot e comprende già i token generati (verificato con llama-server b10787);
+                // le versioni vecchie avevano n_past, senza i token in generazione
+                double? cached = JPath.Num(JPath.Get(sl, "n_prompt_tokens"));
+                int used = cached != null ? (int)cached.Value
+                         : (int)(JPath.Num(JPath.Get(sl, "n_past")) ?? 0) + (int)(JPath.Num(JPath.Get(sl, "next_token[0].n_decoded")) ?? JPath.Num(JPath.Get(sl, "next_token.n_decoded")) ?? 0);
                 int nctx = (int)(JPath.Num(JPath.Get(sl, "n_ctx")) ?? 0);
                 if (nctx > 0) { m.Context = nctx; used = Math.Min(used, nctx); }
                 m.ContextUsed = Math.Max(m.ContextUsed, used);
