@@ -30,7 +30,7 @@ jobs:
 
       - name: Upload unsigned build
         id: upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AIMeter-unsigned
           path: |
@@ -75,14 +75,14 @@ jobs:
           STORE_PUBLISHER_NAME: ${{ vars.STORE_PUBLISHER_NAME }}
         run: ./build.ps1 -NoInstall -Package
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: AIMeter
           path: |
             AIMeter.zip
             AIMeter-script.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: AIMeter-msix
           path: bin/AIMeter.msix
