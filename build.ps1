@@ -69,6 +69,7 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($p in $pngs) { $bw.Write($p) }
 $bw.Flush()
 [IO.File]::WriteAllBytes((Join-Path $root 'assets\app.ico'), $ico.ToArray())
+[IO.File]::WriteAllBytes((Join-Path $root 'assets\logo.png'), (New-RingPng 256))   # logo del README
 
 # --- manifest (DPI per monitor, Windows 10/11) e configurazione runtime (GC leggero)
 @'

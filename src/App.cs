@@ -69,6 +69,9 @@ namespace AIMeter
                 Native.SetWindowAppId(new System.Windows.Interop.WindowInteropHelper(w).Handle, "AIMeter.App", IconPath, "AI Meter", LaunchCommand);
         }
 
+        /// <summary>--demo: dati dimostrativi al posto di quelli veri (per provare l'aspetto o fare screenshot), niente rete né notifiche.</summary>
+        public static bool Demo { get; private set; }
+
         public static Stream OpenAsset(string name)
         {
             var s = typeof(Program).Assembly.GetManifestResourceStream(name);
@@ -94,6 +97,7 @@ namespace AIMeter
                     return;
                 }
 
+                Demo = args.Contains("--demo");
                 ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
                 // Disegno in software: nessun dispositivo Direct3D (circa -60 MB) e nessun lavoro sulla GPU.
                 // La composizione (Mica, Acrilico, ombre) resta a carico di Windows. --gpu per il disegno in hardware.
@@ -201,7 +205,11 @@ namespace AIMeter
                 if (paused) { wake.WaitOne(); continue; }
                 bool saving = Native.SavingPower();
                 Snapshot snap = null;
-                try { snap = collector.Collect(anyVisible || ticks == 0, saving); forecaster.Apply(snap); }
+                try
+                {
+                    if (Program.Demo) snap = DemoData.Build(DateTime.Now);
+                    else { snap = collector.Collect(anyVisible || ticks == 0, saving); forecaster.Apply(snap); }
+                }
                 catch (Exception ex) { Trace.WriteLine(ex); }
                 if (snap != null) ui.BeginInvoke(DispatcherPriority.Background, new Action(() => Apply(snap)));
                 if (Json.BytesRead > 8 << 20)
@@ -546,6 +554,7 @@ namespace AIMeter
         /// <summary>Notifiche dei limiti (una alla volta: Windows mostra comunque solo l'ultima). Il clic apre il pannello.</summary>
         private void Notify(Snapshot s)
         {
+            if (Program.Demo) return;
             if (alerts == null) alerts = new Alerts();
             var list = alerts.Check(s, Settings);
             if (list.Count == 0) return;
