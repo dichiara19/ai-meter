@@ -1,0 +1,24 @@
+{
+  "id": "vercel",
+  "name": "Vercel AI Gateway",
+  "monogram": "V",
+  "description": "Remaining AI Gateway credits of your Vercel team.",
+  "color": { "light": "#000000", "dark": "#EDEDED" },
+  "logo": { "image": "vercel.png" },
+  "detect": { "env": ["AI_GATEWAY_API_KEY"] },
+  "auth": { "type": "key", "env": ["AI_GATEWAY_API_KEY"], "page": "https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys" },
+  "request": { "url": "https://ai-gateway.vercel.sh/v1/credits", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
+  "limits": [
+    { "label": "AI Gateway credits", "balance": "balance", "currency": "USD" }
+  ],
+  "notes": [
+    { "when": "total_used", "text": "{0} used to date", "values": [{ "path": "total_used", "currency": "USD" }] }
+  ],
+  "i18n": {
+    "it": { "Remaining AI Gateway credits of your Vercel team.": "Crediti AI Gateway rimasti del tuo team Vercel.", "AI Gateway credits": "Crediti AI Gateway", "{0} used to date": "{0} usati finora" },
+    "es": { "Remaining AI Gateway credits of your Vercel team.": "Créditos de AI Gateway restantes de tu equipo de Vercel.", "AI Gateway credits": "Créditos de AI Gateway", "{0} used to date": "{0} usados hasta ahora" },
+    "fr": { "Remaining AI Gateway credits of your Vercel team.": "Crédits AI Gateway restants de votre équipe Vercel.", "AI Gateway credits": "Crédits AI Gateway", "{0} used to date": "{0} utilisés à ce jour" },
+    "de": { "Remaining AI Gateway credits of your Vercel team.": "Verbleibende AI-Gateway-Guthaben deines Vercel-Teams.", "AI Gateway credits": "AI-Gateway-Guthaben", "{0} used to date": "{0} bisher verbraucht" },
+    "pt": { "Remaining AI Gateway credits of your Vercel team.": "Créditos do AI Gateway restantes da sua equipe Vercel.", "AI Gateway credits": "Créditos do AI Gateway", "{0} used to date": "{0} usados até agora" }
+  }
+}

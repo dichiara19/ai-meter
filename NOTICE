@@ -10,9 +10,10 @@ the license does not grant permission to use them (see TRADEMARKS.md).
 Claude is a trademark of Anthropic. ChatGPT and Codex are trademarks of OpenAI.
 Google, Gemini and Google Antigravity are trademarks of Google LLC.
 The logos in assets/antigravity.png and providers/*.png (Google Antigravity,
-Cursor, DeepSeek, Kimi, OpenRouter) belong to their owners and are included
-only to identify each service.
+Cursor, DeepSeek, Experiential Labs, Kimi, OpenRouter, Vercel) belong to their
+owners and are included only to identify each service.
 GitHub and GitHub Copilot are trademarks of GitHub, Inc. Windows and Microsoft
-Store are trademarks of Microsoft Corporation. Cursor, OpenRouter, DeepSeek, Kimi,
-Ollama, LM Studio and other names are trademarks of their respective owners.
+Store are trademarks of Microsoft Corporation. Cursor, OpenRouter, Vercel,
+Experiential Labs, DeepSeek, Kimi, Ollama, LM Studio and other names are
+trademarks of their respective owners.
 AI Meter is not affiliated with, endorsed or sponsored by any of them.

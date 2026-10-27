@@ -1,0 +1,22 @@
+{
+  "id": "experientiallabs",
+  "name": "Experiential Labs",
+  "monogram": "X",
+  "description": "Credits used and left on your Experiential Labs organization.",
+  "color": { "light": "#0A0A0A", "dark": "#EDEDED" },
+  "logo": { "image": "experientiallabs.png" },
+  "detect": { "env": ["EXPLABS_API_KEY"] },
+  "auth": { "type": "key", "env": ["EXPLABS_API_KEY"], "page": "https://platform.experientiallabs.ai" },
+  "request": { "url": "https://api.experientiallabs.ai/api/v1/credits", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
+  "limits": [
+    { "label": "Credits", "short": "$", "when": "data.total_credits", "used": "data.total_usage", "limit": "data.total_credits", "currency": "USD" },
+    { "label": "Spent", "unless": "data.total_credits", "balance": "data.total_usage", "currency": "USD" }
+  ],
+  "i18n": {
+    "it": { "Credits used and left on your Experiential Labs organization.": "Crediti usati e rimasti della tua organizzazione Experiential Labs.", "Credits": "Crediti", "Spent": "Speso" },
+    "es": { "Credits used and left on your Experiential Labs organization.": "Créditos usados y restantes de tu organización de Experiential Labs.", "Credits": "Créditos", "Spent": "Gastado" },
+    "fr": { "Credits used and left on your Experiential Labs organization.": "Crédits utilisés et restants de votre organisation Experiential Labs.", "Credits": "Crédits", "Spent": "Dépensé" },
+    "de": { "Credits used and left on your Experiential Labs organization.": "Verbrauchte und verbleibende Guthaben deiner Experiential-Labs-Organisation.", "Credits": "Guthaben", "Spent": "Ausgegeben" },
+    "pt": { "Credits used and left on your Experiential Labs organization.": "Créditos usados e restantes da sua organização Experiential Labs.", "Credits": "Créditos", "Spent": "Gasto" }
+  }
+}
