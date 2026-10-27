@@ -223,6 +223,9 @@ namespace AIMeter
         public bool HoverMode { get; private set; }
         /// <summary>Aperto dalla pillola nella barra: senza focus, si chiude quando un'altra app passa in primo piano.</summary>
         public bool TaskbarMode { get; private set; }
+        /// <summary>Bordo inferiore a cui resta appoggiato quando si apre sopra la barra: se il contenuto cambia altezza,
+        /// cresce o si accorcia verso l'alto invece di staccarsi dalla barra. Nullo quando si apre verso il basso.</summary>
+        private double? bottomEdge;
 
         public Flyout(Controller c)
         {
@@ -262,6 +265,7 @@ namespace AIMeter
 
             Deactivated += (o, e) => { if (!HoverMode) Hide(); };
             IsVisibleChanged += (o, e) => { if (!IsVisible) TaskbarMode = false; };
+            SizeChanged += (o, e) => { if (IsVisible && e.HeightChanged && bottomEdge.HasValue) Top = bottomEdge.Value - e.NewSize.Height; };
             MouseEnter += (o, e) => C.CancelHideDetails();
             MouseLeave += (o, e) => { if (HoverMode) C.ScheduleHideDetails(); };
         }
@@ -292,6 +296,7 @@ namespace AIMeter
             var wa = SystemParameters.WorkArea;
             int edge = Native.TaskbarEdge();
             Left = edge == 0 ? wa.Left + 12 : wa.Right - ActualWidth - 12;
+            bottomEdge = edge == 1 ? (double?)null : wa.Bottom - 12;
             Top = edge == 1 ? wa.Top + 12 : wa.Bottom - ActualHeight - 12;
             Activate();
             Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
@@ -309,6 +314,7 @@ namespace AIMeter
             var wa = SystemParameters.WorkArea;
             bool below = anchor.Top < wa.Top + wa.Height / 2;
             Left = Math.Max(wa.Left + 12, Math.Min(anchor.Left + anchor.ActualWidth - ActualWidth, wa.Right - ActualWidth - 12));
+            bottomEdge = below ? (double?)null : anchor.Top - 8;
             Top = below ? anchor.Top + anchor.ActualHeight + 8 : anchor.Top - ActualHeight - 8;
             Animate(below ? -8 : 8);
         }
@@ -329,6 +335,7 @@ namespace AIMeter
             UpdateLayout();
             var wa = SystemParameters.WorkArea;
             Left = fromLeft ? wa.Left + 12 : wa.Right - ActualWidth - 12;
+            bottomEdge = wa.Bottom - 12;
             Top = wa.Bottom - ActualHeight - 12;
             slide.BeginAnimation(TranslateTransform.YProperty, null);
             slide.Y = 0;
