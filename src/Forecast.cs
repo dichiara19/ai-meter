@@ -140,8 +140,9 @@ namespace AIMeter
                     State st;
                     states.TryGetValue(key, out st);
                     // finestra nuova: se la precedente era quasi esaurita, il limite è di nuovo disponibile
-                    // (se l'azzeramento è già stato annunciato perché scelto nelle impostazioni, non si ripete)
-                    if (st != null && st.Reset != reset)
+                    // (se l'azzeramento è già stato annunciato perché scelto nelle impostazioni, non si ripete).
+                    // Un orario che oscilla di qualche minuto tra le letture è la stessa finestra: si tiene il primo.
+                    if (st != null && !Same(st.Reset, reset))
                     {
                         if (st.Level >= 80 && w.Used < 50 && settings.NotifyReset && st.Announced != st.Reset)
                             result.Add(Tuple.Create(L.F("{0} · {1}: available again", p.Name, Ui.LabelOf(w)),
@@ -172,8 +173,40 @@ namespace AIMeter
                 result.Add(Tuple.Create(p.Tip.Title, p.Tip.Text));
             }
 
+            // scelte su limiti che il servizio non comunica più da oltre 10 giorni (es. è cambiato il modello del limite
+            // settimanale): la pillola torna al predefinito, e lo si dice; l'avviso di azzeramento si toglie in silenzio
+            bool settingsChanged = false;
+            foreach (var p in s.Providers)
+            {
+                if (p.Usage == null || p.Usage.Source != "live") continue;
+                string choice;
+                if (settings.PillLimits.TryGetValue(p.Id, out choice) && choice != "auto" && !string.IsNullOrEmpty(choice) && Gone(p, choice))
+                {
+                    settings.PillLimits.Remove(p.Id);
+                    settingsChanged = true;
+                    result.Add(Tuple.Create(L.F("{0}: limit in the taskbar back to Default", p.Name),
+                        L.F("{0} is no longer reported by the service.", Ui.LabelOf(FromKey(choice)))));
+                }
+                foreach (var key in settings.NotifyResets.Keys.Where(k => k.StartsWith(p.Id + "|", StringComparison.Ordinal)).ToList())
+                    if (Gone(p, key.Substring(p.Id.Length + 1))) { settings.NotifyResets.Remove(key); settingsChanged = true; }
+            }
+            if (settingsChanged) settings.Save();
+
             if (changed) Save();
             return result;
+        }
+
+        /// <summary>Né nella lettura attuale né tra le finestre viste negli ultimi 10 giorni.</summary>
+        private bool Gone(ProviderState p, string windowKey)
+        {
+            return !p.Usage.Windows.Any(w => w.Key == windowKey) && !states.ContainsKey(p.Id + "|" + windowKey);
+        }
+
+        private static UsageWindow FromKey(string key)
+        {
+            int bar = key.IndexOf('|');
+            string suffix = bar < 0 ? "" : key.Substring(bar + 1);
+            return new UsageWindow { Label = bar < 0 ? key : key.Substring(0, bar), Suffix = suffix.Length > 0 ? suffix : null };
         }
 
         /// <summary>
@@ -292,6 +325,14 @@ namespace AIMeter
         private static bool Parse(string stamp, out DateTime t)
         {
             return DateTime.TryParseExact(stamp, Stamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out t);
+        }
+
+        /// <summary>Stessa finestra: azzeramenti a meno di 10 minuti l'uno dall'altro (come nella previsione).</summary>
+        private static bool Same(string a, string b)
+        {
+            DateTime x, y;
+            if (a == b) return true;
+            return Parse(a, out x) && Parse(b, out y) && Math.Abs((x - y).TotalMinutes) <= 10;
         }
 
         private void Save()

@@ -223,13 +223,13 @@ namespace AIMeter
             Group(
                 Row(Ui.Glyph("", 20, "Text"), L.T("Unused limit before it resets"),
                     L.T("When a limit resets soon and, at your usual pace, a good part of it would go unused. For the longest limit of each service and for credits that expire: what is left is lost."),
-                    Toggle(S.TipsUnused, v => { S.TipsUnused = v; Changed(); })),
+                    Toggle(S.TipsUnused, v => { S.TipsUnused = v; Changed(); C.RefreshTips(); })),
                 Row(null, L.T("Also for short limits"),
                     L.T("The same for shorter limits such as the 5-hour session, only when the longer limit has room to absorb them."),
-                    Toggle(S.TipsShort, v => { S.TipsShort = v; Changed(); })),
+                    Toggle(S.TipsShort, v => { S.TipsShort = v; Changed(); C.RefreshTips(); })),
                 Row(Ui.Glyph("", 20, "Text"), L.T("Wait instead of paying"),
                     L.T("When a limit is used up, extra usage is on and the limit resets soon."),
-                    Toggle(S.TipsWait, v => { S.TipsWait = v; Changed(); })));
+                    Toggle(S.TipsWait, v => { S.TipsWait = v; Changed(); C.RefreshTips(); })));
             Hint(L.T("Do not disturb and Focus in Windows hold these notifications like any other."));
 
             Section(L.T("General"));

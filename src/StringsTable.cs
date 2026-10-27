@@ -16,6 +16,8 @@ namespace AIMeter
         {
             // ======================================================================== italiano
             { "it", D(
+                "{0}: limit in the taskbar back to Default", "{0}: limite nella barra tornato a Predefinito",
+                "{0} is no longer reported by the service.", "{0}: il servizio non lo comunica più.",
                 "{0} · {1} has reset", "{0} · {1}: azzerato",
                 "The full limit is available again.", "Il limite è di nuovo disponibile per intero.",
                 "{0} · {1} resets {2}", "{0} · {1}: si azzera {2}",
@@ -191,6 +193,8 @@ namespace AIMeter
 
             // ======================================================================== español
             { "es", D(
+                "{0}: limit in the taskbar back to Default", "{0}: límite en la barra de tareas de vuelta a Predeterminado",
+                "{0} is no longer reported by the service.", "{0}: el servicio ya no lo indica.",
                 "{0} · {1} has reset", "{0} · {1}: restablecido",
                 "The full limit is available again.", "El límite vuelve a estar disponible por completo.",
                 "{0} · {1} resets {2}", "{0} · {1}: se restablece {2}",
@@ -366,6 +370,8 @@ namespace AIMeter
 
             // ======================================================================== français
             { "fr", D(
+                "{0}: limit in the taskbar back to Default", "{0} : limite dans la barre des tâches remise sur Par défaut",
+                "{0} is no longer reported by the service.", "{0} : le service ne l'indique plus.",
                 "{0} · {1} has reset", "{0} · {1} : réinitialisée",
                 "The full limit is available again.", "La limite est de nouveau entièrement disponible.",
                 "{0} · {1} resets {2}", "{0} · {1} : réinitialisation {2}",
@@ -541,6 +547,8 @@ namespace AIMeter
 
             // ======================================================================== deutsch
             { "de", D(
+                "{0}: limit in the taskbar back to Default", "{0}: Limit in der Taskleiste wieder auf Standard",
+                "{0} is no longer reported by the service.", "{0}: Der Dienst meldet es nicht mehr.",
                 "{0} · {1} has reset", "{0} · {1}: zurückgesetzt",
                 "The full limit is available again.", "Das Limit ist wieder vollständig verfügbar.",
                 "{0} · {1} resets {2}", "{0} · {1}: wird {2} zurückgesetzt",
@@ -716,6 +724,8 @@ namespace AIMeter
 
             // ======================================================================== português
             { "pt", D(
+                "{0}: limit in the taskbar back to Default", "{0}: limite na barra de tarefas de volta a Padrão",
+                "{0} is no longer reported by the service.", "{0}: o serviço já não o informa.",
                 "{0} · {1} has reset", "{0} · {1}: redefinido",
                 "The full limit is available again.", "O limite está de novo totalmente disponível.",
                 "{0} · {1} resets {2}", "{0} · {1}: redefine {2}",

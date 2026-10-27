@@ -146,6 +146,7 @@ namespace AIMeter
         private Window menuHost;
         private Forms.NotifyIcon tray;
         private string lastSignature;
+        private string limitKeys;
         private DateTime flyoutHiddenAt;
         private readonly DispatcherTimer hideDetails = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         private DispatcherTimer loginWatch;
@@ -256,6 +257,13 @@ namespace AIMeter
         {
             Last = s;
             Notify(s);
+            // le impostazioni elencano i limiti dei servizi: se cambiano (primo aggiornamento, servizio acceso) si ridisegnano
+            string keys = string.Join(",", s.Providers.Where(p => p.Usage != null).SelectMany(p => p.Usage.Windows.Where(w => w.HasPercent).Select(w => p.Id + "|" + w.Key)));
+            if (keys != limitKeys)
+            {
+                limitKeys = keys;
+                if (settingsWindow != null && settingsWindow.IsVisible) settingsWindow.Build();
+            }
             string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed + string.Join(",", Settings.PillLimits.Select(kv => kv.Key + kv.Value));
             UpdateTrayText(s);
             if (sig == lastSignature) return;   // niente è cambiato: nessun ridisegno
@@ -267,6 +275,14 @@ namespace AIMeter
         }
 
         private void Rerender() { lastSignature = null; if (Last != null) Apply(Last); }
+
+        /// <summary>Ricalcola subito i suggerimenti (dopo un cambio nelle impostazioni), senza aspettare la lettura successiva.</summary>
+        public void RefreshTips()
+        {
+            if (Last == null) return;
+            foreach (var p in Last.Providers) p.Tip = Alerts.TipFor(p, Settings, DateTime.Now);
+            Rerender();
+        }
 
         public void RefreshNow() { collector.InvalidateNetwork(); wake.Set(); }
 
