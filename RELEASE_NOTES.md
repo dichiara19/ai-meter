@@ -1,11 +1,13 @@
-<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.6.0/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.7.0/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
 
-## What's new in 0.6.0
+## What's new in 0.7.0
 
-- **New Settings.** Built like Windows 11 Settings: a side menu (Services, Where to see it, Notifications, General, About) and a page for each service ("Services › Claude") with its sign-in, options and limit in the taskbar. The services list shows each one's status at a glance.
-- **Vercel AI Gateway and Experiential Labs.** Remaining credits of your Vercel team and credits used and left on Experiential Labs, with an API key.
-- **Official logos.** Cursor, DeepSeek, Kimi and OpenRouter show their logos even when no app is installed.
-- **Model limits show the real room left.** A model's weekly limit (for example Week · Fable) counts toward the weekly limit for all models too, so AI Meter now shows the lower of the two and no longer suggests using a model limit the general one can't cover.
+- **API keys found automatically.** If OpenCode, Pi or Crush already use your OpenRouter, DeepSeek, Kimi, Vercel or Experiential Labs key, or it is exported in your shell profile, AI Meter uses it from there, on Windows and in WSL. Each key is sent only to its own service, and this can be turned off.
+- **Budgets and spend per period.** See what you spent today, this week and this month, and set a spending budget per day, week or month with its bar and notifications.
+- **Today's models.** The models your agents used today with each service, with cost and tokens, from OpenCode and Pi.
+- **OpenRouter account credits.** The credits left on your account, with the same API key.
+- **Choose what each card shows.** Every service page has an "In the panel" section to show or hide each row.
+- **Model limits.** A model's weekly limit (for example Week · Fable) shows its own share as a faint bar behind the real room left.
 
 ## Download
 
