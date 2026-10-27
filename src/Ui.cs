@@ -400,10 +400,11 @@ namespace AIMeter
                 foreach (var w in Shown(p, metric))
                 {
                     var stack = new StackPanel { Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-                    var t = Text(Math.Round(w.Remaining).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
+                    double room = p.Usage.Room(w);
+                    var t = Text(Math.Round(room).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
                     t.HorizontalAlignment = HorizontalAlignment.Center;
                     stack.Children.Add(t);
-                    var bar = Bar(w.Remaining, LevelBrush(w, BrandBrush(p.Id)), 2);
+                    var bar = Bar(room, room < w.Remaining ? LevelBrush(room, BrandBrush(p.Id)) : LevelBrush(w, BrandBrush(p.Id)), 2);
                     bar.Width = 26;
                     bar.Margin = new Thickness(0, 1, 0, 0);
                     stack.Children.Add(bar);
@@ -500,7 +501,7 @@ namespace AIMeter
                 if (p.Models != null) return LocalSummary(p);
                 var w = Primary(p);
                 string n = p.Name;
-                return w == null ? L.F("{0}: no data", n) : L.F("{0}: {1}% left ({2})", n, Math.Round(w.Remaining), LabelOf(w)) +
+                return w == null ? L.F("{0}: no data", n) : L.F("{0}: {1}% left ({2})", n, Math.Round(p.Usage.Room(w)), LabelOf(w)) +
                        (w.ResetsAt.HasValue ? L.F(", resets {0}", Alerts.When(w.ResetsAt.Value)) : "") +
                        (w.RunsOutAt.HasValue ? " · " + L.F("runs out {0}", Alerts.When(w.RunsOutAt.Value)) : "");
             }));
@@ -528,7 +529,11 @@ namespace AIMeter
             var root = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
             var top = new DockPanel { LastChildFill = true };
             // per i crediti in denaro si mostra quanto resta, non la percentuale
-            string right = w.RightText != null ? L.T(w.RightText) : (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(w.Remaining).ToString(It) + "%");
+            // limite di un modello dentro uno generale con meno margine: si mostra il margine vero
+            var parent = u == null ? null : u.ParentOf(w);
+            bool capped = parent != null && parent.Remaining < w.Remaining;
+            double room = capped ? parent.Remaining : w.Remaining;
+            string right = w.RightText != null ? L.T(w.RightText) : (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(room).ToString(It) + "%");
             var pct = Text(right, 13, "Text", FontWeights.SemiBold);
             pct.Margin = new Thickness(8, 0, 0, 0);
             DockPanel.SetDock(pct, Dock.Right);
@@ -548,9 +553,16 @@ namespace AIMeter
             top.Children.Add(left);
             root.Children.Add(top);
             if (w.NoBar) { root.ToolTip = LabelOf(w) + ": " + right; return root; }
-            var bar = Bar(w.Remaining, LevelBrush(w, brand), 4);
+            var bar = Bar(room, capped ? LevelBrush(room, brand) : LevelBrush(w, brand), 4);
             bar.Margin = new Thickness(0, 5, 0, 0);
             root.Children.Add(bar);
+            if (capped)
+            {
+                var c = Text(L.F("{0:0}% of its own limit, but {1} has {2:0}% left", w.Remaining, LabelOf(parent), parent.Remaining), 11.5, "Text3");
+                c.Margin = new Thickness(0, 4, 0, 0);
+                c.TextWrapping = TextWrapping.Wrap;
+                root.Children.Add(c);
+            }
             // previsione: a questo ritmo finisce prima dell'azzeramento
             if (w.RunsOutAt.HasValue)
             {

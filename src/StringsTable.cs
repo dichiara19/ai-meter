@@ -16,6 +16,7 @@ namespace AIMeter
         {
             // ======================================================================== italiano
             { "it", D(
+                "{0:0}% of its own limit, but {1} has {2:0}% left", "{0:0}% del suo limite, ma {1} ha il {2:0}% rimasto",
                 "Sign in to Antigravity CLI to see your Google AI quotas", "Accedi ad Antigravity CLI per vedere le quote di Google AI",
                 "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "Quote di 5 ore e settimanali del tuo piano Google AI in Antigravity, per gruppo di modelli. Lette con l'accesso di Antigravity CLI (anche in WSL). L'app Gemini non espone i suoi limiti.",
                 "Antigravity CLI sign-in", "Accesso di Antigravity CLI",
@@ -199,6 +200,7 @@ namespace AIMeter
 
             // ======================================================================== español
             { "es", D(
+                "{0:0}% of its own limit, but {1} has {2:0}% left", "{0:0}% de su propio límite, pero {1} tiene un {2:0}% restante",
                 "Sign in to Antigravity CLI to see your Google AI quotas", "Inicia sesión en Antigravity CLI para ver las cuotas de Google AI",
                 "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "Cuotas de 5 horas y semanales de tu plan de Google AI en Antigravity, por grupo de modelos. Se leen con el inicio de sesión de Antigravity CLI (también en WSL). La app Gemini no expone sus límites.",
                 "Antigravity CLI sign-in", "Inicio de sesión de Antigravity CLI",
@@ -382,6 +384,7 @@ namespace AIMeter
 
             // ======================================================================== français
             { "fr", D(
+                "{0:0}% of its own limit, but {1} has {2:0}% left", "{0:0} % de sa propre limite, mais {1} n'a plus que {2:0} %",
                 "Sign in to Antigravity CLI to see your Google AI quotas", "Connectez-vous à Antigravity CLI pour voir les quotas Google AI",
                 "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "Quotas de 5 heures et hebdomadaires de votre forfait Google AI dans Antigravity, par groupe de modèles. Lus avec la connexion d'Antigravity CLI (aussi dans WSL). L'application Gemini n'expose pas ses limites.",
                 "Antigravity CLI sign-in", "Connexion d'Antigravity CLI",
@@ -565,6 +568,7 @@ namespace AIMeter
 
             // ======================================================================== deutsch
             { "de", D(
+                "{0:0}% of its own limit, but {1} has {2:0}% left", "{0:0} % des eigenen Limits, aber {1} hat nur noch {2:0} %",
                 "Sign in to Antigravity CLI to see your Google AI quotas", "Melde dich bei Antigravity CLI an, um die Google-AI-Kontingente zu sehen",
                 "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "5-Stunden- und Wochenkontingente deines Google-AI-Abos in Antigravity, pro Modellgruppe. Gelesen mit der Anmeldung von Antigravity CLI (auch in WSL). Die Gemini-App gibt ihre Limits nicht preis.",
                 "Antigravity CLI sign-in", "Anmeldung von Antigravity CLI",
@@ -748,6 +752,7 @@ namespace AIMeter
 
             // ======================================================================== português
             { "pt", D(
+                "{0:0}% of its own limit, but {1} has {2:0}% left", "{0:0}% do seu próprio limite, mas {1} tem {2:0}% restante",
                 "Sign in to Antigravity CLI to see your Google AI quotas", "Entre no Antigravity CLI para ver as cotas do Google AI",
                 "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "Cotas de 5 horas e semanais do seu plano Google AI no Antigravity, por grupo de modelos. Lidas com o acesso do Antigravity CLI (também no WSL). O app Gemini não expõe os seus limites.",
                 "Antigravity CLI sign-in", "Acesso do Antigravity CLI",

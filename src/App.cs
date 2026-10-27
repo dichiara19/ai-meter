@@ -669,7 +669,7 @@ namespace AIMeter
             var parts = s.Providers.Where(p => p.Models == null).Select(p =>
             {
                 var w = Ui.Primary(p);
-                return w == null ? p.Name + " –" : p.Name + " " + Math.Round(w.Remaining) + "%";
+                return w == null ? p.Name + " –" : p.Name + " " + Math.Round(p.Usage.Room(w)) + "%";
             });
             string text = "AI Meter · " + string.Join(" · ", parts);
             tray.Text = text.Length > 63 ? text.Substring(0, 63) : text;

@@ -82,6 +82,24 @@ namespace AIMeter
         /// <summary>L'uso oltre i limiti del piano è attivo e si paga a consumo (es. extra usage di Claude).</summary>
         public bool ExtraActive;
 
+        /// <summary>
+        /// Il limite generale che contiene questo: stessa etichetta senza modello o gruppo (es. "Settimana" per
+        /// "Settimana · Fable"). L'uso del modello conta anche lì, quindi il margine vero è il più basso dei due.
+        /// </summary>
+        public UsageWindow ParentOf(UsageWindow w)
+        {
+            if (w.Suffix == null) return null;
+            foreach (var x in Windows) if (x != w && x.Suffix == null && x.Label == w.Label && x.HasPercent && x.Spent == null) return x;
+            return null;
+        }
+
+        /// <summary>Margine reale di un limite: il suo, o quello del limite generale che lo contiene se è più basso.</summary>
+        public double Room(UsageWindow w)
+        {
+            var p = ParentOf(w);
+            return p == null ? w.Remaining : Math.Min(w.Remaining, p.Remaining);
+        }
+
         /// <summary>Stessi dati, marcati come non più in tempo reale.</summary>
         public Usage AsCache()
         {

@@ -246,6 +246,9 @@ namespace AIMeter
             foreach (var w in ws)
             {
                 if (w.Used >= 100) continue;
+                // limite di un modello dentro uno generale (es. Settimana · Fable dentro Settimana): quello che resta
+                // davvero è del limite generale, ed è lui ad avere il suo suggerimento
+                if (p.Usage.ParentOf(w) != null) continue;
                 var left = w.ResetsAt.Value - now;
                 if (left > Lead(w)) continue;
                 double unused = Unused(w, left, now);
@@ -308,9 +311,9 @@ namespace AIMeter
             // un altro servizio con margine: il consiglio per continuare a lavorare
             var other = s.Providers.Where(x => x != p && x.Models == null)
                 .Select(x => Tuple.Create(x, Ui.Primary(x)))
-                .Where(x => x.Item2 != null && x.Item2.Remaining >= 40)
-                .OrderByDescending(x => x.Item2.Remaining).FirstOrDefault();
-            if (other != null) text.Append(' ').Append(L.F("{0} still has {1}% left.", other.Item1.Name, Math.Round(other.Item2.Remaining)));
+                .Where(x => x.Item2 != null && x.Item1.Usage.Room(x.Item2) >= 40)
+                .OrderByDescending(x => x.Item1.Usage.Room(x.Item2)).FirstOrDefault();
+            if (other != null) text.Append(' ').Append(L.F("{0} still has {1}% left.", other.Item1.Name, Math.Round(other.Item1.Usage.Room(other.Item2))));
             return Tuple.Create(title, text.ToString());
         }
 
