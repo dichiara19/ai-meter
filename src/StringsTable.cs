@@ -16,6 +16,12 @@ namespace AIMeter
         {
             // ======================================================================== italiano
             { "it", D(
+                "Default ({0})", "Predefinito ({0})",
+                "In the panel", "Nel pannello",
+                "Spend today, this week and this month", "Spesa di oggi, della settimana e del mese",
+                "Models used today", "Modelli usati oggi",
+                "From OpenCode and Pi, with the cost they computed.", "Da OpenCode e Pi, con il costo calcolato da loro.",
+                "What this service's card shows in the panel and in the desktop widget. The pill shows the limit chosen in Limit in the taskbar.", "Cosa mostra la scheda di questo servizio nel pannello e nel widget sul desktop. La pillola mostra il limite scelto in Limite nella barra.",
                 "Account credits", "Crediti dell'account",
                 "Management key", "Chiave di gestione",
                 "OpenRouter did not return your account credits with your API key; a management key can read them.", "OpenRouter non ha restituito i crediti dell'account con la tua chiave API; una chiave di gestione può leggerli.",
@@ -236,6 +242,12 @@ namespace AIMeter
 
             // ======================================================================== español
             { "es", D(
+                "Default ({0})", "Predeterminado ({0})",
+                "In the panel", "En el panel",
+                "Spend today, this week and this month", "Gasto de hoy, de la semana y del mes",
+                "Models used today", "Modelos usados hoy",
+                "From OpenCode and Pi, with the cost they computed.", "De OpenCode y Pi, con el coste que calcularon.",
+                "What this service's card shows in the panel and in the desktop widget. The pill shows the limit chosen in Limit in the taskbar.", "Qué muestra la tarjeta de este servicio en el panel y en el widget del escritorio. La píldora muestra el límite elegido en Límite en la barra de tareas.",
                 "Account credits", "Créditos de la cuenta",
                 "Management key", "Clave de gestión",
                 "OpenRouter did not return your account credits with your API key; a management key can read them.", "OpenRouter no devolvió los créditos de la cuenta con tu clave API; una clave de gestión puede leerlos.",
@@ -456,6 +468,12 @@ namespace AIMeter
 
             // ======================================================================== français
             { "fr", D(
+                "Default ({0})", "Par défaut ({0})",
+                "In the panel", "Dans le panneau",
+                "Spend today, this week and this month", "Dépenses du jour, de la semaine et du mois",
+                "Models used today", "Modèles utilisés aujourd'hui",
+                "From OpenCode and Pi, with the cost they computed.", "Depuis OpenCode et Pi, avec le coût qu'ils ont calculé.",
+                "What this service's card shows in the panel and in the desktop widget. The pill shows the limit chosen in Limit in the taskbar.", "Ce que la carte de ce service affiche dans le panneau et dans le widget du bureau. La pastille affiche la limite choisie dans Limite dans la barre des tâches.",
                 "Account credits", "Crédits du compte",
                 "Management key", "Clé de gestion",
                 "OpenRouter did not return your account credits with your API key; a management key can read them.", "OpenRouter n'a pas renvoyé les crédits du compte avec votre clé API ; une clé de gestion peut les lire.",
@@ -676,6 +694,12 @@ namespace AIMeter
 
             // ======================================================================== deutsch
             { "de", D(
+                "Default ({0})", "Standard ({0})",
+                "In the panel", "Im Bereich",
+                "Spend today, this week and this month", "Ausgaben heute, diese Woche und diesen Monat",
+                "Models used today", "Heute genutzte Modelle",
+                "From OpenCode and Pi, with the cost they computed.", "Aus OpenCode und Pi, mit den von ihnen berechneten Kosten.",
+                "What this service's card shows in the panel and in the desktop widget. The pill shows the limit chosen in Limit in the taskbar.", "Was die Karte dieses Dienstes im Bereich und im Desktop-Widget zeigt. Die Pille zeigt das unter Limit in der Taskleiste gewählte Limit.",
                 "Account credits", "Kontoguthaben",
                 "Management key", "Verwaltungsschlüssel",
                 "OpenRouter did not return your account credits with your API key; a management key can read them.", "OpenRouter hat mit deinem API-Schlüssel kein Kontoguthaben geliefert; ein Verwaltungsschlüssel kann es lesen.",
@@ -896,6 +920,12 @@ namespace AIMeter
 
             // ======================================================================== português
             { "pt", D(
+                "Default ({0})", "Padrão ({0})",
+                "In the panel", "No painel",
+                "Spend today, this week and this month", "Gasto de hoje, da semana e do mês",
+                "Models used today", "Modelos usados hoje",
+                "From OpenCode and Pi, with the cost they computed.", "Do OpenCode e do Pi, com o custo que calcularam.",
+                "What this service's card shows in the panel and in the desktop widget. The pill shows the limit chosen in Limit in the taskbar.", "O que o cartão deste serviço mostra no painel e no widget da área de trabalho. A pílula mostra o limite escolhido em Limite na barra de tarefas.",
                 "Account credits", "Créditos da conta",
                 "Management key", "Chave de gestão",
                 "OpenRouter did not return your account credits with your API key; a management key can read them.", "O OpenRouter não devolveu os créditos da conta com a sua chave de API; uma chave de gestão pode lê-los.",

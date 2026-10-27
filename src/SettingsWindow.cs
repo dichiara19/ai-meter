@@ -278,6 +278,32 @@ namespace AIMeter
                 Section(L.T("Options"));
                 Group(rows.ToArray());
             }
+
+            // cosa mostra la scheda del servizio: ogni limite letto, la spesa del periodo, i modelli di oggi
+            var prov = C.Last == null ? null : C.Last.Providers.FirstOrDefault(x => x.Id == s.Id);
+            if (prov == null || prov.Usage == null || prov.Models != null) return;
+            var vis = new List<FrameworkElement>();
+            foreach (var w in prov.Usage.Windows.Where(x => !x.Hidden))
+                vis.Add(Row(null, Ui.LabelOf(w), null, RowToggle(s.Id, w.Key)));
+            var def = Definitions.Get(s.Id);
+            bool credits = def != null && Json.Obj(def.Raw, "spend") != null;
+            if (prov.Usage.SpendNote != null || credits)
+                vis.Add(Row(null, L.T("Spend today, this week and this month"), null, RowToggle(s.Id, "*spend")));
+            if (prov.Usage.TodayModels != null || credits)
+                vis.Add(Row(null, L.T("Models used today"), L.T("From OpenCode and Pi, with the cost they computed."), RowToggle(s.Id, "*models")));
+            if (vis.Count == 0) return;
+            Section(L.T("In the panel"));
+            Hint(L.T("What this service's card shows in the panel and in the desktop widget. The pill shows the limit chosen in Limit in the taskbar."));
+            Group(vis.ToArray());
+        }
+
+        private CheckBox RowToggle(string id, string key)
+        {
+            return Toggle(!S.RowHidden(id, key), v =>
+            {
+                if (v) S.HiddenRows.Remove(id + "|" + key); else S.HiddenRows[id + "|" + key] = true;
+                Changed();
+            });
         }
 
         private string Description(string id)
@@ -556,9 +582,11 @@ namespace AIMeter
             string cur;
             S.PillLimits.TryGetValue(id, out cur);
             if (windows.Count < 2 && string.IsNullOrEmpty(cur)) return;
+            // "Predefinito" dice quale limite è: quello che la pillola mostra senza una scelta
+            var dflt = p == null ? null : Ui.Primary(p.Usage);
             var options = new List<Tuple<string, string>>
             {
-                Tuple.Create("", L.T("Default")),
+                Tuple.Create("", dflt != null ? L.F("Default ({0})", Ui.LabelOf(dflt)) : L.T("Default")),
                 Tuple.Create("auto", L.T("Automatic: the one closest to running out")),
             };
             options.AddRange(windows.Select(w => Tuple.Create(w.Key, Ui.LabelOf(w))));

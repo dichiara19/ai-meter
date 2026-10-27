@@ -264,7 +264,7 @@ namespace AIMeter
                 limitKeys = keys;
                 if (settingsWindow != null && settingsWindow.IsVisible) settingsWindow.Build();
             }
-            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed + string.Join(",", Settings.PillLimits.Select(kv => kv.Key + kv.Value));
+            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed + string.Join(",", Settings.PillLimits.Select(kv => kv.Key + kv.Value)) + string.Join(",", Settings.HiddenRows.Where(kv => kv.Value).Select(kv => kv.Key));
             UpdateTrayText(s);
             if (sig == lastSignature) return;   // niente è cambiato: nessun ridisegno
             lastSignature = sig;

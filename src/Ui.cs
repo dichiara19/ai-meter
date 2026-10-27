@@ -509,6 +509,9 @@ namespace AIMeter
             return f;
         }
 
+        /// <summary>Riga della scheda nascosta nelle impostazioni del servizio ("Nel pannello").</summary>
+        private static bool RowHidden(string providerId, string key) { return Settings.Current != null && Settings.Current.RowHidden(providerId, key); }
+
         /// <summary>Nome breve del modello: senza il prefisso del fornitore ("anthropic/claude-sonnet-5" → "claude-sonnet-5").</summary>
         public static string ShortModel(string model)
         {
@@ -737,7 +740,7 @@ namespace AIMeter
             // limiti
             var limits = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
             if (p.Usage != null && p.Usage.Windows.Count > 0)
-                foreach (var w in p.Usage.Windows.Where(x => !x.Hidden).Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
+                foreach (var w in p.Usage.Windows.Where(x => !x.Hidden && !RowHidden(p.Id, x.Key)).Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
             else if (!p.NeedsLogin)
                 limits.Children.Add(new TextBlock { Text = L.T("No limit data yet"), FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
             stack.Children.Add(limits);
@@ -767,14 +770,14 @@ namespace AIMeter
             }
 
             // servizi a credito: spesa del periodo e modelli usati oggi dagli agenti del PC
-            if (p.Usage != null && p.Usage.SpendNote != null)
+            if (p.Usage != null && p.Usage.SpendNote != null && !RowHidden(p.Id, "*spend"))
             {
                 var sn = Text(p.Usage.SpendNote(), 11.5, "Text3");
                 sn.Margin = new Thickness(0, 8, 0, 0);
                 sn.TextWrapping = TextWrapping.Wrap;
                 stack.Children.Add(sn);
             }
-            if (p.Usage != null && p.Usage.TodayModels != null && p.Usage.TodayModels.Count > 0)
+            if (p.Usage != null && p.Usage.TodayModels != null && p.Usage.TodayModels.Count > 0 && !RowHidden(p.Id, "*models"))
             {
                 // un modello per riga: nome a sinistra, costo (o token, se l'agente non dà un costo) a destra
                 var ms = p.Usage.TodayModels;

@@ -57,6 +57,15 @@ namespace AIMeter
         public bool TipsShort { get; set; }         // lo stesso anche per i limiti brevi (sessione), che pesano su quelli lunghi
         public bool TipsWait { get; set; }          // suggerimento: aspettare l'azzeramento invece di pagare l'uso extra
 
+        /// <summary>Righe nascoste nella scheda di un servizio: "id|chiave del limite", "id|*spend", "id|*models" → nascosta.</summary>
+        public System.Collections.Generic.Dictionary<string, bool> HiddenRows { get; set; }
+
+        internal bool RowHidden(string providerId, string key)
+        {
+            bool h;
+            return HiddenRows != null && HiddenRows.TryGetValue(providerId + "|" + key, out h) && h;
+        }
+
         /// <summary>Budget di spesa dei servizi a credito: id → "importo|periodo" (periodo: day, week, month).</summary>
         public System.Collections.Generic.Dictionary<string, string> Budgets { get; set; }
 
@@ -84,6 +93,7 @@ namespace AIMeter
             Theme = "system"; Language = "system"; Refresh = "auto"; NotifyLow = true; NotifyReset = true;
             NotifyResets = new System.Collections.Generic.Dictionary<string, bool>(); PillLimits = new System.Collections.Generic.Dictionary<string, string>();
             Budgets = new System.Collections.Generic.Dictionary<string, string>();
+            HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
         }
 
@@ -124,6 +134,7 @@ namespace AIMeter
                         if (s.NotifyResets == null) s.NotifyResets = new System.Collections.Generic.Dictionary<string, bool>();
                         if (s.PillLimits == null) s.PillLimits = new System.Collections.Generic.Dictionary<string, string>();
                         if (s.Budgets == null) s.Budgets = new System.Collections.Generic.Dictionary<string, string>();
+                        if (s.HiddenRows == null) s.HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
                         return s;
                     }
                 }
