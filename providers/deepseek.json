@@ -1,8 +1,9 @@
-﻿{
+{
   "id": "deepseek",
   "name": "DeepSeek",
   "description": "Remaining balance of your DeepSeek API account.",
   "color": { "light": "#4D6BFE", "dark": "#8EA2FF" },
+  "logo": { "image": "deepseek.png" },
   "detect": { "env": ["DEEPSEEK_API_KEY"] },
   "auth": { "type": "key", "env": ["DEEPSEEK_API_KEY"], "page": "https://platform.deepseek.com/api_keys" },
   "request": { "url": "https://api.deepseek.com/user/balance", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },

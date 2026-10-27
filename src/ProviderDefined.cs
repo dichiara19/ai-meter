@@ -97,6 +97,33 @@ namespace AIMeter
             return null;
         }
 
+        /// <summary>
+        /// Logo incluso con la definizione ("logo": { "image": "x.png", "imageDark": "x-dark.png" }), accanto al file:
+        /// per quelle incluse una risorsa dell'eseguibile o la cartella providers, per quelle dell'utente la sua cartella.
+        /// </summary>
+        public Stream LogoImage(bool dark)
+        {
+            var logo = Json.Obj(Raw, "logo");
+            string name = (dark ? Json.Str(logo, "imageDark") : null) ?? Json.Str(logo, "image");
+            if (string.IsNullOrEmpty(name)) return null;
+            name = Path.GetFileName(name);   // solo un file accanto alla definizione, mai un percorso altrove
+            try
+            {
+                if (Origin == "built-in")
+                {
+                    var s = typeof(ServiceDefinition).Assembly.GetManifestResourceStream("providers." + name);
+                    if (s != null) return s;
+                    string f = Path.Combine(Program.Home, "providers", name);
+                    return File.Exists(f) ? File.OpenRead(f) : null;
+                }
+                string own = Path.Combine(Path.GetDirectoryName(Origin), name);
+                return File.Exists(own) ? File.OpenRead(own) : null;
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+            catch (ArgumentException) { return null; }
+        }
+
         // ------------------------------------------------------------ utilità condivise
         public static IEnumerable<string> Strings(Dictionary<string, object> d, string key)
         {

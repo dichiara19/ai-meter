@@ -38,7 +38,7 @@ Claude, ChatGPT/Codex and GitHub Copilot need custom sign-in flows and stay in c
 | `monogram` | Letter shown when there is no logo (default: first letter of `name`). |
 | `color` | Brand color for light and dark theme, `#RRGGBB`. |
 | `detect` | When the service counts as installed, which turns it on at first run: `paths` (files or folders), `env` (environment variables), `commands` (programs on the `PATH`). |
-| `logo` | `file` (PNG) or `exe` (its icon), first one found wins. Paths accept `%VARIABLES%` and `~`. |
+| `logo` | `file` (PNG) or `exe` (its icon) of the installed app, first one found wins; paths accept `%VARIABLES%` and `~`. Without an installed app, `image` (and `imageDark` for the dark theme) is a PNG next to the definition file, for example the service's official logo. |
 | `processes` | `[{ "name": "app.exe", "title": "App open" }]`: shown as an open app while the process runs. |
 | `auth` | Where the secret comes from, see below. |
 | `request` | `url`, `method` (default `GET`), `headers`, `body`, `timeout` in seconds (15), `interval` in minutes between requests (5; three times longer on battery). |

@@ -1,9 +1,10 @@
-﻿{
+{
   "id": "moonshot",
   "name": "Kimi (Moonshot)",
   "monogram": "K",
   "description": "Remaining balance of your Kimi API account (platform.kimi.ai).",
   "color": { "light": "#1F1F1F", "dark": "#E8E8E8" },
+  "logo": { "image": "moonshot.png" },
   "detect": { "env": ["MOONSHOT_API_KEY"] },
   "auth": { "type": "key", "env": ["MOONSHOT_API_KEY"], "page": "https://platform.kimi.ai/console/api-keys" },
   "request": { "url": "https://api.moonshot.ai/v1/users/me/balance", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },

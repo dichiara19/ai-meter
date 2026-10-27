@@ -1,10 +1,10 @@
-﻿{
+{
   "id": "cursor",
   "name": "Cursor",
   "description": "Included usage and on-demand spend of your Cursor plan, read with the Cursor app's own sign-in.",
   "color": { "light": "#3E5A86", "dark": "#9FB4D8" },
   "detect": { "paths": ["%APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb", "%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe"] },
-  "logo": { "exe": ["%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe"] },
+  "logo": { "exe": ["%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe"], "image": "cursor.png", "imageDark": "cursor-dark.png" },
   "processes": [{ "name": "cursor.exe", "title": "Cursor app open" }],
   "auth": {
     "type": "sqlite",

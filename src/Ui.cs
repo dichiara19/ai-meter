@@ -55,27 +55,11 @@ namespace AIMeter
         {
             string key = id + (dark ? ":dark" : ":light");
             BitmapSource bmp;
-            if (!Logos.TryGetValue(key, out bmp) && id == "antigravity")
-            {
-                // Antigravity CLI non installa icone: il logo ufficiale è incluso nell'app (assets\antigravity.png)
-                bmp = null;
-                using (var s = Program.OpenAsset("antigravity.png"))
-                    if (s != null)
-                    {
-                        var bi = new BitmapImage();
-                        bi.BeginInit();
-                        bi.StreamSource = s;
-                        bi.DecodePixelWidth = 64;
-                        bi.CacheOption = BitmapCacheOption.OnLoad;
-                        bi.EndInit();
-                        bi.Freeze();
-                        bmp = bi;
-                    }
-                Logos[key] = bmp;
-            }
             if (!Logos.TryGetValue(key, out bmp))
             {
-                string file = FindInstalledLogo(id, dark);
+                // l'icona dell'app installata, se c'è; altrimenti il logo ufficiale incluso in AI Meter
+                // (Antigravity CLI non installa icone; i servizi via API hanno il loro accanto alla definizione)
+                string file = id == "antigravity" ? null : FindInstalledLogo(id, dark);
                 if (file != null && file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                     bmp = IconFromExe(file);
                 else if (file != null)
@@ -93,12 +77,40 @@ namespace AIMeter
                     }
                     catch (Exception) { bmp = null; }
                 }
+                if (bmp == null)
+                {
+                    var def = Definitions.Get(id);
+                    bmp = FromStream(id == "antigravity" ? Program.OpenAsset("antigravity.png") : def != null ? def.LogoImage(dark) : null);
+                }
                 Logos[key] = bmp;
             }
             if (bmp == null) return Monogram(id, size);
             var img = new Image { Source = bmp, Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+            // angoli arrotondati come le icone di Windows: i loghi quadrati presi dai siti non hanno angoli vivi
+            img.Clip = new RectangleGeometry(new Rect(0, 0, size, size), size * 0.22, size * 0.22);
             return img;
+        }
+
+        /// <summary>Un'immagine da un flusso (risorsa incorporata o file), ridotta a 64 px; null se manca o non è valida.</summary>
+        private static BitmapSource FromStream(Stream s)
+        {
+            if (s == null) return null;
+            try
+            {
+                using (s)
+                {
+                    var bi = new BitmapImage();
+                    bi.BeginInit();
+                    bi.StreamSource = s;
+                    bi.DecodePixelWidth = 64;
+                    bi.CacheOption = BitmapCacheOption.OnLoad;
+                    bi.EndInit();
+                    bi.Freeze();
+                    return bi;
+                }
+            }
+            catch (Exception) { return null; }
         }
 
         /// <summary>Icona principale di un eseguibile installato (per le app che non hanno un'immagine del logo).</summary>
