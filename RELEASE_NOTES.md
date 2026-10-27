@@ -1,10 +1,11 @@
-<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.5.0/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.6.0/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
 
-## What's new in 0.5.0
+## What's new in 0.6.0
 
-- **Google Antigravity.** The 5-hour and weekly quotas of your Google AI plan in Antigravity, per model group (Gemini, Claude + GPT), in the pill and in the panel. AI Meter reads the sign-in of Antigravity CLI, on Windows or in WSL, and lets the CLI renew it. Turn it on in Settings → Services. Limit choice, reset notifications and tips work here too.
-
-The Gemini app and Gemini CLI for personal accounts do not expose their limits, so they are not shown.
+- **New Settings.** Built like Windows 11 Settings: a side menu (Services, Where to see it, Notifications, General, About) and a page for each service ("Services › Claude") with its sign-in, options and limit in the taskbar. The services list shows each one's status at a glance.
+- **Vercel AI Gateway and Experiential Labs.** Remaining credits of your Vercel team and credits used and left on Experiential Labs, with an API key.
+- **Official logos.** Cursor, DeepSeek, Kimi and OpenRouter show their logos even when no app is installed.
+- **Model limits show the real room left.** A model's weekly limit (for example Week · Fable) counts toward the weekly limit for all models too, so AI Meter now shows the lower of the two and no longer suggests using a model limit the general one can't cover.
 
 ## Download
 
