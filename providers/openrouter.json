@@ -7,6 +7,7 @@
   "detect": { "env": ["OPENROUTER_API_KEY"] },
   "auth": { "type": "key", "ids": ["openrouter"], "env": ["OPENROUTER_API_KEY"], "page": "https://openrouter.ai/settings/keys" },
   "request": { "url": "https://openrouter.ai/api/v1/key", "headers": { "Authorization": "Bearer {token}" }, "interval": 5 },
+  "spend": { "total": "data.usage", "day": "data.usage_daily", "week": "data.usage_weekly", "month": "data.usage_monthly", "currency": "USD" },
   "limits": [
     { "label": "Key limit", "short": "$", "when": "data.limit", "used": "data.usage", "limit": "data.limit", "currency": "USD" },
     { "label": "Spent with this key", "unless": "data.limit", "balance": "data.usage", "currency": "USD" }

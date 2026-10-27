@@ -57,6 +57,9 @@ namespace AIMeter
         public bool TipsShort { get; set; }         // lo stesso anche per i limiti brevi (sessione), che pesano su quelli lunghi
         public bool TipsWait { get; set; }          // suggerimento: aspettare l'azzeramento invece di pagare l'uso extra
 
+        /// <summary>Budget di spesa dei servizi a credito: id → "importo|periodo" (periodo: day, week, month).</summary>
+        public System.Collections.Generic.Dictionary<string, string> Budgets { get; set; }
+
         /// <summary>Limite da mostrare nella pillola per ogni servizio: id → chiave del limite o "auto". Assente = predefinito.</summary>
         public System.Collections.Generic.Dictionary<string, string> PillLimits { get; set; }
 
@@ -80,6 +83,7 @@ namespace AIMeter
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
             Theme = "system"; Language = "system"; Refresh = "auto"; NotifyLow = true; NotifyReset = true;
             NotifyResets = new System.Collections.Generic.Dictionary<string, bool>(); PillLimits = new System.Collections.Generic.Dictionary<string, string>();
+            Budgets = new System.Collections.Generic.Dictionary<string, string>();
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
         }
 
@@ -119,6 +123,7 @@ namespace AIMeter
                         if (s.ExpandedServices == null) s.ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
                         if (s.NotifyResets == null) s.NotifyResets = new System.Collections.Generic.Dictionary<string, bool>();
                         if (s.PillLimits == null) s.PillLimits = new System.Collections.Generic.Dictionary<string, string>();
+                        if (s.Budgets == null) s.Budgets = new System.Collections.Generic.Dictionary<string, string>();
                         return s;
                     }
                 }

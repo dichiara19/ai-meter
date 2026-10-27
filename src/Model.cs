@@ -21,6 +21,8 @@ namespace AIMeter
         public bool NoBar;        // solo un valore (es. un saldo), senza barra né percentuale
         public DateTime? RunsOutAt; // previsione: a questo ritmo il limite finisce prima dell'azzeramento
         public double? PacePerHour; // previsione: punti percentuali usati all'ora, se ci sono abbastanza letture
+        public bool Budget;       // budget di spesa scelto dall'utente: non è un credito che scade (niente "usalo o lo perdi")
+        public bool Hidden;       // solo da scegliere per la pillola (es. "speso oggi"); nella scheda c'è la riga della spesa
         public double Remaining { get { return Math.Max(0, Math.Min(100, 100 - Used)); } }
 
         /// <summary>Identità del limite nel suo servizio, stabile tra le letture (impostazioni, notifiche, previsioni).</summary>
@@ -42,6 +44,15 @@ namespace AIMeter
 
         /// <summary>Un limite in percentuale (con barra), non un saldo né un valore solo testuale.</summary>
         public bool HasPercent { get { return !NoBar && RightText == null; } }
+    }
+
+    /// <summary>Un modello usato oggi da un agente del PC con un servizio: costo (nella valuta del servizio) e token.</summary>
+    internal sealed class ModelCost
+    {
+        public string Model;
+        public double Cost;
+        public long Tokens;
+        public int Replies;
     }
 
     /// <summary>Suggerimento attivo per un servizio: una riga nella scheda e, una volta per finestra, una notifica.</summary>
@@ -81,6 +92,19 @@ namespace AIMeter
         public Func<string> CreditsNote;
         /// <summary>L'uso oltre i limiti del piano è attivo e si paga a consumo (es. extra usage di Claude).</summary>
         public bool ExtraActive;
+        /// <summary>Spesa di oggi, della settimana e del mese, nella lingua attiva (servizi a credito).</summary>
+        public Func<string> SpendNote;
+        /// <summary>Modelli usati oggi con questo servizio dagli agenti del PC (OpenCode, Pi): costo e token.</summary>
+        public List<ModelCost> TodayModels;
+
+        /// <summary>Copia con altre finestre (budget, spesa del periodo), senza toccare quella letta dal servizio.</summary>
+        public Usage With(IEnumerable<UsageWindow> extra)
+        {
+            var u = new Usage { Source = Source, At = At, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
+            u.Windows.AddRange(Windows);
+            u.Windows.AddRange(extra);
+            return u;
+        }
 
         /// <summary>
         /// Il limite generale che contiene questo: stessa etichetta senza modello o gruppo (es. "Settimana" per
@@ -103,7 +127,7 @@ namespace AIMeter
         /// <summary>Stessi dati, marcati come non più in tempo reale.</summary>
         public Usage AsCache()
         {
-            return new Usage { Windows = Windows, Source = "cache", At = At, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive };
+            return new Usage { Windows = Windows, Source = "cache", At = At, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
         }
     }
 
@@ -168,7 +192,8 @@ namespace AIMeter
                 if (p.Usage != null)
                 {
                     sb.Append(p.Usage.Source);
-                    foreach (var w in p.Usage.Windows) sb.Append(w.Label).Append((int)w.Used).Append(w.ResetsAt).Append(w.RunsOutAt.HasValue ? w.RunsOutAt.Value.Ticks / TimeSpan.TicksPerMinute / 5 : 0);
+                    foreach (var w in p.Usage.Windows) sb.Append(w.Label).Append((int)w.Used).Append(w.RightText).Append(w.ResetsAt).Append(w.RunsOutAt.HasValue ? w.RunsOutAt.Value.Ticks / TimeSpan.TicksPerMinute / 5 : 0);
+                    if (p.Usage.TodayModels != null) foreach (var m in p.Usage.TodayModels) sb.Append(m.Model).Append((int)(m.Cost * 100)).Append(m.Tokens >> 10);
                 }
                 foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
                 if (p.Models != null) sb.Append(p.GpuUsed >> 28);

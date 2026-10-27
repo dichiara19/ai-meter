@@ -41,6 +41,7 @@ Claude, ChatGPT/Codex and GitHub Copilot need custom sign-in flows and stay in c
 | `logo` | `file` (PNG) or `exe` (its icon) of the installed app, first one found wins; paths accept `%VARIABLES%` and `~`. Without an installed app, `image` (and `imageDark` for the dark theme) is a PNG next to the definition file, for example the service's official logo. |
 | `processes` | `[{ "name": "app.exe", "title": "App open" }]`: shown as an open app while the process runs. |
 | `auth` | Where the secret comes from, see below. |
+| `spend` | For services billed in credits: paths of `total` (spent to date), `balance`, and if the service has them `day`, `week`, `month` (spent in the period), with `currency` or `currencyPath`. AI Meter then shows what was spent today, this week and this month (computing it from its own readings when the service only gives a total or a balance), lets the user set a spending budget with a bar, and lists the models agents used today with the service. |
 | `request` | `url`, `method` (default `GET`), `headers`, `body`, `timeout` in seconds (15), `interval` in minutes between requests (5; three times longer on battery). |
 | `plan` | Path of the plan name in the answer, shown as a badge. |
 | `limits` | The bars, see below. |

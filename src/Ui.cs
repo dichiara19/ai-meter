@@ -200,7 +200,9 @@ namespace AIMeter
         public static UsageWindow Primary(Usage u)
         {
             if (u == null) return null;
-            return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null && w.HasPercent);
+            return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null && w.HasPercent)
+                   // servizi a credito: il limite in denaro del servizio (non il budget scelto, che si sceglie per la barra)
+                   ?? u.Windows.FirstOrDefault(w => w.HasPercent && !w.Budget && !w.Hidden);
         }
 
         /// <summary>Il limite da mostrare in pillola, icona e suggerimenti per questo servizio, secondo le impostazioni.</summary>
@@ -411,6 +413,16 @@ namespace AIMeter
                 bool any = false;
                 foreach (var w in Shown(p, metric))
                 {
+                    // un importo scelto per la pillola (es. speso oggi): il valore, senza barra
+                    if (w.NoBar && w.RightText != null)
+                    {
+                        var v = Text(w.RightText, 12, "Text", FontWeights.SemiBold);
+                        v.Margin = new Thickness(7, 0, 0, 0);
+                        v.VerticalAlignment = VerticalAlignment.Center;
+                        item.Children.Add(v);
+                        any = true;
+                        continue;
+                    }
                     var stack = new StackPanel { Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
                     double room = p.Usage.Room(w);
                     var t = Text(Math.Round(room).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
@@ -495,6 +507,14 @@ namespace AIMeter
             if (m.Context > 0) f.Add(L.F("{0} context", Tokens(m.Context)));
             if (m.Busy > 0) f.Add(L.T("working"));
             return f;
+        }
+
+        /// <summary>Nome breve del modello: senza il prefisso del fornitore ("anthropic/claude-sonnet-5" → "claude-sonnet-5").</summary>
+        public static string ShortModel(string model)
+        {
+            if (string.IsNullOrEmpty(model)) return model;
+            int slash = model.LastIndexOf('/');
+            return slash >= 0 && slash < model.Length - 1 ? model.Substring(slash + 1) : model;
         }
 
         /// <summary>Token in forma breve: 32768 → 32K, 40000 → 40K.</summary>
@@ -706,7 +726,7 @@ namespace AIMeter
             // limiti
             var limits = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
             if (p.Usage != null && p.Usage.Windows.Count > 0)
-                foreach (var w in p.Usage.Windows.Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
+                foreach (var w in p.Usage.Windows.Where(x => !x.Hidden).Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
             else if (!p.NeedsLogin)
                 limits.Children.Add(new TextBlock { Text = L.T("No limit data yet"), FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
             stack.Children.Add(limits);
@@ -733,6 +753,39 @@ namespace AIMeter
                 c.Margin = new Thickness(0, p.Usage.Breakdown.Count > 0 ? 2 : 8, 0, 0);
                 c.TextWrapping = TextWrapping.Wrap;
                 stack.Children.Add(c);
+            }
+
+            // servizi a credito: spesa del periodo e modelli usati oggi dagli agenti del PC
+            if (p.Usage != null && p.Usage.SpendNote != null)
+            {
+                var sn = Text(p.Usage.SpendNote(), 11.5, "Text3");
+                sn.Margin = new Thickness(0, 8, 0, 0);
+                sn.TextWrapping = TextWrapping.Wrap;
+                stack.Children.Add(sn);
+            }
+            if (p.Usage != null && p.Usage.TodayModels != null && p.Usage.TodayModels.Count > 0)
+            {
+                // un modello per riga: nome a sinistra, costo (o token, se l'agente non dà un costo) a destra
+                var ms = p.Usage.TodayModels;
+                var money = new Money { Currency = "USD" };
+                var box = new StackPanel { Margin = new Thickness(0, p.Usage.SpendNote != null ? 4 : 8, 0, 0) };
+                box.Children.Add(Text(L.F("Today: {0}", L.N(ms.Sum(m => m.Replies), "{0} reply", "{0} replies")), 11.5, "Text3"));
+                foreach (var m in ms.Take(3))
+                {
+                    var row = new DockPanel { Margin = new Thickness(0, 1, 0, 0) };
+                    var cost = Text(m.Cost > 0 ? money.Format(m.Cost) : L.F("{0} tokens", Tokens((int)Math.Min(int.MaxValue, m.Tokens))), 11.5, "Text2");
+                    cost.Margin = new Thickness(8, 0, 0, 0);
+                    DockPanel.SetDock(cost, Dock.Right);
+                    row.Children.Add(cost);
+                    var modelName = Text(ShortModel(m.Model), 11.5, "Text2");
+                    modelName.TextTrimming = TextTrimming.CharacterEllipsis;
+                    row.Children.Add(modelName);
+                    box.Children.Add(row);
+                }
+                if (ms.Count > 3) box.Children.Add(Text(L.F("+{0} more", ms.Count - 3), 11.5, "Text3"));
+                box.ToolTip = L.T("Models used today through this service by OpenCode and Pi, with the cost they computed:") + "\n"
+                              + string.Join("\n", ms.Select(m => L.F("{0}: {1}, {2} tokens, {3} replies", m.Model, money.Format(m.Cost), Tokens((int)Math.Min(int.MaxValue, m.Tokens)), m.Replies)));
+                stack.Children.Add(box);
             }
 
             // suggerimento attivo (margine che sta per andare perso, o aspettare invece di pagare)

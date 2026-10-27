@@ -349,8 +349,50 @@ namespace AIMeter
                     }
                     break;
             }
+            var def2 = Definitions.Get(id);
+            if (def2 != null && Json.Obj(def2.Raw, "spend") != null) rows.Add(BudgetRow(def2));
             if (id != "local") AddLimitRow(rows, id);
             return rows;
+        }
+
+        /// <summary>Budget di spesa di un servizio a credito: importo e periodo; vuoto = nessun budget.</summary>
+        private FrameworkElement BudgetRow(ServiceDefinition d)
+        {
+            double amount;
+            string period;
+            bool has = SpendTracker.Budget(S, d.Id, out amount, out period);
+            var box = new TextBox { Width = 80, FontSize = 14, BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0), Text = has ? amount.ToString("0.##", L.Culture) : "" };
+            box.SetResourceReference(Control.ForegroundProperty, "Text");
+            box.SetResourceReference(TextBox.CaretBrushProperty, "Text");
+            System.Windows.Automation.AutomationProperties.SetName(box, L.T("Spending budget"));
+            var frame = new Border { CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1, 1, 1, 2), Padding = new Thickness(10, 5, 10, 5), Child = box };
+            frame.SetResourceReference(Border.BackgroundProperty, "Control");
+            frame.SetResourceReference(Border.BorderBrushProperty, "ControlStroke");
+            box.GotKeyboardFocus += (o, e) => frame.SetResourceReference(Border.BorderBrushProperty, "Accent");
+            box.LostKeyboardFocus += (o, e) => frame.SetResourceReference(Border.BorderBrushProperty, "ControlStroke");
+            string chosen = period;
+            Action save = () =>
+            {
+                double a;
+                string t = box.Text.Trim().Replace("$", "").Replace("€", "");
+                bool ok = double.TryParse(t, NumberStyles.Float, L.Culture, out a) || double.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out a);
+                string before;
+                S.Budgets.TryGetValue(d.Id, out before);
+                string after = ok && a > 0 ? a.ToString("R", CultureInfo.InvariantCulture) + "|" + chosen : null;
+                if (after == before) return;
+                if (after == null) S.Budgets.Remove(d.Id); else S.Budgets[d.Id] = after;
+                Changed();
+                C.RefreshNow();
+            };
+            box.LostFocus += (o, e) => save();
+            box.KeyDown += (o, e) => { if (e.Key == Key.Enter) save(); };
+            var per = Combo(new[]
+            {
+                Tuple.Create("day", L.T("per day")), Tuple.Create("week", L.T("per week")), Tuple.Create("month", L.T("per month")),
+            }, period, v => { chosen = v; save(); });
+            return Row(null, L.T("Spending budget"),
+                L.T("An amount per day, week or month: the pill and the panel show how much of it is used, with a notification at 80% and 95%. Leave it empty for no budget."),
+                Pair(frame, per));
         }
 
         // ------------------------------------------------------------ dove vederlo
@@ -493,7 +535,8 @@ namespace AIMeter
         private void AddLimitRow(List<FrameworkElement> rows, string id)
         {
             var p = C.Last == null ? null : C.Last.Providers.FirstOrDefault(x => x.Id == id);
-            var windows = p == null || p.Usage == null ? new List<UsageWindow>() : p.Usage.Windows.Where(w => w.HasPercent).ToList();
+            // i limiti con barra e, per i servizi a credito, anche la spesa del giorno, della settimana e del mese
+            var windows = p == null || p.Usage == null ? new List<UsageWindow>() : p.Usage.Windows.Where(w => w.HasPercent || w.Hidden).ToList();
             string cur;
             S.PillLimits.TryGetValue(id, out cur);
             if (windows.Count < 2 && string.IsNullOrEmpty(cur)) return;

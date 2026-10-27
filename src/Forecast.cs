@@ -220,7 +220,8 @@ namespace AIMeter
         public static Tip TipFor(ProviderState p, Settings settings, DateTime now)
         {
             if (p.Usage == null || p.Models != null) return null;
-            var ws = p.Usage.Windows.Where(w => w.HasPercent && w.ResetsAt.HasValue && w.ResetsAt.Value > now && w.Length.HasValue).ToList();
+            // i budget scelti dall'utente non sono crediti che scadono: niente suggerimenti su di loro
+            var ws = p.Usage.Windows.Where(w => w.HasPercent && !w.Budget && w.ResetsAt.HasValue && w.ResetsAt.Value > now && w.Length.HasValue).ToList();
             if (ws.Count == 0) return null;
 
             if (settings.TipsWait && p.Usage.ExtraActive)

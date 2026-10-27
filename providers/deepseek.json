@@ -7,6 +7,7 @@
   "detect": { "env": ["DEEPSEEK_API_KEY"] },
   "auth": { "type": "key", "ids": ["deepseek"], "env": ["DEEPSEEK_API_KEY"], "page": "https://platform.deepseek.com/api_keys" },
   "request": { "url": "https://api.deepseek.com/user/balance", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
+  "spend": { "balance": "balance_infos[0].total_balance", "currencyPath": "balance_infos[0].currency" },
   "limits": [
     { "label": "Balance", "balance": "balance_infos[0].total_balance", "currencyPath": "balance_infos[0].currency" }
   ],

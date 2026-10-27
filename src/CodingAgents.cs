@@ -90,7 +90,7 @@ namespace AIMeter
         /// Il database da aprire. Quelli in WAL dentro WSL non si aprono via \\wsl.localhost (memoria condivisa non
         /// disponibile): se ne copia il file con il suo WAL in una cartella temporanea, solo quando cambiano.
         /// </summary>
-        private static string Openable(string path)
+        internal static string Openable(string path)
         {
             if (!path.StartsWith(@"\\") || !File.Exists(path)) return path;
             try

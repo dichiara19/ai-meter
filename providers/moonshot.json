@@ -8,6 +8,7 @@
   "detect": { "env": ["MOONSHOT_API_KEY"] },
   "auth": { "type": "key", "ids": ["moonshotai", "moonshot", "kimi", "moonshotai-cn"], "env": ["MOONSHOT_API_KEY"], "page": "https://platform.kimi.ai/console/api-keys" },
   "request": { "url": "https://api.moonshot.ai/v1/users/me/balance", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
+  "spend": { "balance": "data.available_balance", "currency": "USD" },
   "limits": [
     { "label": "Balance", "balance": "data.available_balance", "currency": "USD" }
   ],

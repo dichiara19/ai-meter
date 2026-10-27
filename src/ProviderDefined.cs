@@ -351,13 +351,75 @@ namespace AIMeter
                 Fetch(req);
             }
             st.Plan = plan;
-            if (live != null) st.Usage = (DateTime.Now - live.At).TotalMinutes > interval + 2 ? live.AsCache() : live;
+            if (live != null) st.Usage = Decorate((DateTime.Now - live.At).TotalMinutes > interval + 2 ? live.AsCache() : live, p);
             if (problem != null && live == null)
             {
                 st.NeedsLogin = true;
                 st.Notice = L.T(problem);
             }
             return st;
+        }
+
+        // ================================================================ spesa, budget, modelli usati
+        /// <summary>Spesa letta dal servizio ("spend" nella definizione): totale, saldo, e se ci sono giorno/settimana/mese.</summary>
+        private sealed class SpendIn { public double? Total, Balance, Day, Week, Month; public string Currency; }
+        private SpendIn spend;
+
+        private SpendIn ReadSpend(object doc)
+        {
+            var s = Json.Obj(D.Raw, "spend");
+            if (s == null) return null;
+            double scale = Json.Num(s, "scale") ?? 1;
+            Func<string, double?> num = k => { var v = Number(doc, s, k); return v == null ? null : v * scale; };
+            var r = new SpendIn { Total = num("total"), Balance = num("balance"), Day = num("day"), Week = num("week"), Month = num("month"), Currency = Currency(doc, s) ?? "USD" };
+            return r.Total == null && r.Balance == null && r.Day == null ? null : r;
+        }
+
+        /// <summary>
+        /// La lettura del servizio più quello che calcola AI Meter: spesa di oggi, della settimana e del mese (per la pillola
+        /// e una riga nella scheda), il budget scelto nelle impostazioni come limite con barra, e i modelli usati oggi.
+        /// </summary>
+        private Usage Decorate(Usage u, Probe p)
+        {
+            var extra = new List<UsageWindow>();
+            Func<string> note = null;
+            var models = AgentCosts.For(p, ServiceDefinition.Strings(D.Auth, "ids").DefaultIfEmpty(D.Id));
+            if (spend != null)
+            {
+                var money = new Money { Currency = spend.Currency };
+                bool fromService = spend.Day != null || spend.Week != null || spend.Month != null;
+                var now = DateTime.Now;
+                Func<string, double?> spent = per => fromService
+                    ? (per == "day" ? spend.Day : per == "week" ? spend.Week : spend.Month)
+                    : SpendTracker.Since(D.Id, SpendTracker.Start(per, now, false));
+                var values = new Dictionary<string, double?> { { "day", spent("day") }, { "week", spent("week") }, { "month", spent("month") } };
+                var labels = new Dictionary<string, string> { { "day", "Spent today" }, { "week", "Spent this week" }, { "month", "Spent this month" } };
+                foreach (var kv in values)
+                    if (kv.Value.HasValue)
+                        extra.Add(new UsageWindow { Label = labels[kv.Key], Short = "$", NoBar = true, Hidden = true, RightText = money.Format(kv.Value.Value) });
+                if (values.Values.Any(v => v.HasValue))
+                    note = () => L.F("Spent: today {0} · this week {1} · this month {2}",
+                        values["day"].HasValue ? money.Format(values["day"].Value) : "–",
+                        values["week"].HasValue ? money.Format(values["week"].Value) : "–",
+                        values["month"].HasValue ? money.Format(values["month"].Value) : "–");
+
+                double amount;
+                string period;
+                if (SpendTracker.Budget(Settings.Current, D.Id, out amount, out period))
+                {
+                    double used = spent(period) ?? 0;
+                    extra.Add(new UsageWindow
+                    {
+                        Label = period == "day" ? "Daily budget" : period == "week" ? "Weekly budget" : "Monthly budget", Short = "$", Budget = true,
+                        Used = Math.Min(100, used / amount * 100), Spent = new Money { Used = used, Limit = amount, Currency = spend.Currency },
+                        StartedAt = SpendTracker.Start(period, now, fromService), ResetsAt = SpendTracker.End(period, now, fromService),
+                    });
+                }
+            }
+            var result = u.With(extra);
+            result.SpendNote = note;
+            result.TodayModels = models.Count > 0 ? models : null;
+            return result;
         }
 
         private List<Dictionary<string, object>> ProcessList()
@@ -504,6 +566,8 @@ namespace AIMeter
                     if (Json.Str(D.Raw, "plan") == null) plan = null;
                     live = Map(doc);
                     problem = live == null ? "The service answered without usage data" : null;
+                    spend = ReadSpend(doc);
+                    if (spend != null) SpendTracker.Record(D.Id, spend.Total, spend.Balance);
                 }
             }
             catch (WebException e)
