@@ -92,6 +92,7 @@ namespace AIMeter
                     Row(null, L.T("Cowork tasks"), L.T("Cowork tasks running in the last 30 minutes."), Toggle(S.ClaudeShowCowork, v => { S.ClaudeShowCowork = v; Changed(); })),
                     Row(null, L.T("Claude app open"), L.T("Individual chats leave no trace on the PC: you only see whether the app is open."), Toggle(S.ClaudeShowChat, v => { S.ClaudeShowChat = v; Changed(); })),
                 });
+            if (S.ClaudeEnabled) AddLimitRow(claudeRows, "claude");
             Group(claudeRows.ToArray());
 
             var openaiRows = new List<FrameworkElement>
@@ -102,6 +103,7 @@ namespace AIMeter
             };
             if (S.OpenAIEnabled)
                 openaiRows.Add(Row(null, L.T("ChatGPT app open"), L.T("ChatGPT does not expose chat limits: you only see whether the app is open."), Toggle(S.OpenAIShowChat, v => { S.OpenAIShowChat = v; Changed(); })));
+            if (S.OpenAIEnabled) AddLimitRow(openaiRows, "openai");
             Group(openaiRows.ToArray());
 
             bool gh = GitHubAuth.HasToken;
@@ -116,6 +118,7 @@ namespace AIMeter
                     gh ? L.T("Connected. The token is encrypted with Windows data protection and stays on this PC.")
                        : L.T("Connect your account to read your Copilot quotas."),
                     gh ? Button(L.T("Disconnect"), () => { C.SignOutGitHub(); Build(); }, false) : Button(L.T("Connect GitHub…"), () => C.LoginGitHub(), true)));
+            if (S.CopilotEnabled) AddLimitRow(copilotRows, "copilot");
             Group(copilotRows.ToArray());
 
             // servizi descritti dai file di definizione (inclusi e aggiunti dall'utente)
@@ -134,6 +137,7 @@ namespace AIMeter
                     rows.Add(Row(null, L.T("API key"),
                         ApiKeys.Has(d.Id) ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.") : L.T("Add an API key to read your usage."),
                         ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false) : Button(L.T("Add key…"), () => C.EnterApiKey(d), true)));
+                if (on) AddLimitRow(rows, d.Id);
                 Group(rows.ToArray());
             }
             var localRows = new List<FrameworkElement>
@@ -183,7 +187,7 @@ namespace AIMeter
                     Tuple.Create("tr", L.T("Top right")), Tuple.Create("tl", L.T("Top left")),
                     Tuple.Create("br", L.T("Bottom right")), Tuple.Create("bl", L.T("Bottom left")),
                 }, S.OverlayCorner, v => { S.OverlayCorner = v; Changed(); })),
-                Row(null, L.T("Values shown"), L.T("Remaining share of the chosen limit."), Combo(new[]
+                Row(null, L.T("Values shown"), L.T("Remaining share of the chosen limit, for services whose limit in the taskbar is set to Default."), Combo(new[]
                 {
                     Tuple.Create("5h", L.T("5-hour limit")), Tuple.Create("week", L.T("Weekly limit")), Tuple.Create("both", L.T("Both")),
                 }, S.OverlayMetric, v => { S.OverlayMetric = v; Changed(); })),
@@ -201,6 +205,31 @@ namespace AIMeter
                 Row(Ui.Glyph("", 20, "Text"), L.T("When a limit is available again"),
                     L.T("After a limit you had almost used up resets."),
                     Toggle(S.NotifyReset, v => { S.NotifyReset = v; S.Save(); })));
+
+            // ogni limite che i servizi forniscono, per l'avviso a ogni azzeramento
+            Hint(L.T("Every time these limits reset, at the time the service announces:"));
+            var limits = C.Last == null ? new List<Tuple<ProviderState, UsageWindow>>() : C.Last.Providers
+                .Where(p => p.Models == null && p.Usage != null)
+                .SelectMany(p => p.Usage.Windows.Where(w => w.HasPercent && (w.ResetsAt.HasValue || w.Length.HasValue)).Select(w => Tuple.Create(p, w))).ToList();
+            if (limits.Count == 0) Group(Row(null, L.T("No limits yet"), L.T("They appear here after the first update of the services you turned on."), null));
+            else Group(limits.Select(x =>
+            {
+                string key = x.Item1.Id + "|" + x.Item2.Key;
+                return Row(Ui.Logo(x.Item1.Id, 20), x.Item1.Name + " · " + Ui.LabelOf(x.Item2), null,
+                    Toggle(S.NotifiesReset(x.Item1.Id, x.Item2), v => { if (v) S.NotifyResets[key] = true; else S.NotifyResets.Remove(key); S.Save(); }));
+            }).ToArray());
+
+            Hint(L.T("Tips, in the panel and as a notification once per limit window:"));
+            Group(
+                Row(Ui.Glyph("", 20, "Text"), L.T("Unused limit before it resets"),
+                    L.T("When a limit resets soon and, at your usual pace, a good part of it would go unused. For the longest limit of each service and for credits that expire: what is left is lost."),
+                    Toggle(S.TipsUnused, v => { S.TipsUnused = v; Changed(); })),
+                Row(null, L.T("Also for short limits"),
+                    L.T("The same for shorter limits such as the 5-hour session, only when the longer limit has room to absorb them."),
+                    Toggle(S.TipsShort, v => { S.TipsShort = v; Changed(); })),
+                Row(Ui.Glyph("", 20, "Text"), L.T("Wait instead of paying"),
+                    L.T("When a limit is used up, extra usage is on and the limit resets soon."),
+                    Toggle(S.TipsWait, v => { S.TipsWait = v; Changed(); })));
             Hint(L.T("Do not disturb and Focus in Windows hold these notifications like any other."));
 
             Section(L.T("General"));
@@ -242,6 +271,28 @@ namespace AIMeter
         }
 
         private void Changed() { S.Save(); C.ApplySettings(); }
+
+        /// <summary>
+        /// "Limite nella barra" di un servizio, con i limiti che il servizio fornisce davvero. Solo se ce n'è più di uno:
+        /// con uno solo non c'è niente da scegliere.
+        /// </summary>
+        private void AddLimitRow(List<FrameworkElement> rows, string id)
+        {
+            var p = C.Last == null ? null : C.Last.Providers.FirstOrDefault(x => x.Id == id);
+            var windows = p == null || p.Usage == null ? new List<UsageWindow>() : p.Usage.Windows.Where(w => w.HasPercent).ToList();
+            string current;
+            S.PillLimits.TryGetValue(id, out current);
+            if (windows.Count < 2 && string.IsNullOrEmpty(current)) return;
+            var options = new List<Tuple<string, string>>
+            {
+                Tuple.Create("", L.T("Default")),
+                Tuple.Create("auto", L.T("Automatic: the one closest to running out")),
+            };
+            options.AddRange(windows.Select(w => Tuple.Create(w.Key, Ui.LabelOf(w))));
+            if (!string.IsNullOrEmpty(current) && !options.Any(o => o.Item1 == current)) options.Add(Tuple.Create(current, L.T("Not available right now")));
+            rows.Add(Row(null, L.T("Limit in the taskbar"), L.T("Which limit the pill, its tooltip and the overlay show for this service."),
+                Combo(options.ToArray(), current ?? "", v => { if (v == "") S.PillLimits.Remove(id); else S.PillLimits[id] = v; Changed(); })));
+        }
 
         private static string Found(bool detected) { return L.T(detected ? "Found on this PC." : "Not found on this PC.") + " "; }
 

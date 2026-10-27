@@ -166,11 +166,51 @@ namespace AIMeter
 
         public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : id == "copilot" ? "Copilot" : id == "claude" ? "Claude" : "Brand." + id; }
 
-        /// <summary>Il limite da mostrare in pillola, icona e suggerimenti: la sessione di 5 ore, altrimenti il primo limite in percentuale.</summary>
+        /// <summary>Il limite predefinito: la sessione di 5 ore, altrimenti il primo limite in percentuale.</summary>
         public static UsageWindow Primary(Usage u)
         {
             if (u == null) return null;
-            return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null && !w.NoBar && w.RightText == null);
+            return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null && w.HasPercent);
+        }
+
+        /// <summary>Il limite da mostrare in pillola, icona e suggerimenti per questo servizio, secondo le impostazioni.</summary>
+        public static UsageWindow Primary(ProviderState p)
+        {
+            var shown = Shown(p, "5h");
+            return shown.Length > 0 ? shown[0] : null;
+        }
+
+        /// <summary>
+        /// I limiti di un servizio da mostrare nella pillola: quello scelto nelle impostazioni ("auto" = il più vicino a
+        /// esaurirsi), altrimenti quelli dell'impostazione generale della sovrimpressione (5 ore, settimana o entrambi).
+        /// </summary>
+        public static UsageWindow[] Shown(ProviderState p, string metric)
+        {
+            if (p.Usage == null) return new UsageWindow[0];
+            var s = Settings.Current;
+            string choice;
+            if (s != null && s.PillLimits.TryGetValue(p.Id, out choice) && !string.IsNullOrEmpty(choice))
+            {
+                var w = choice == "auto" ? Tightest(p.Usage) : p.Usage.Windows.FirstOrDefault(x => x.Key == choice);
+                if (w != null) return new[] { w };
+            }
+            var five = Primary(p.Usage);
+            var week = p.Usage.Windows.FirstOrDefault(w => w.Short == "7g");
+            var list = metric == "week" ? new[] { week ?? five } : metric == "both" ? new[] { five, week } : new[] { five };
+            return list.Where(x => x != null).Distinct().ToArray();
+        }
+
+        /// <summary>
+        /// Il limite più vicino a esaurirsi: prima quelli che a questo ritmo finiscono prima dell'azzeramento (il primo a
+        /// finire), poi quello con meno margine. A parità, il più lungo, che è quello che blocca più a lungo.
+        /// </summary>
+        public static UsageWindow Tightest(Usage u)
+        {
+            var list = u.Windows.Where(w => w.HasPercent && w.Spent == null).ToList();
+            if (list.Count == 0) return null;
+            var running = list.Where(w => w.RunsOutAt.HasValue).OrderBy(w => w.RunsOutAt.Value).FirstOrDefault();
+            if (running != null) return running;
+            return list.OrderBy(w => Math.Round(w.Remaining)).ThenByDescending(w => w.Length ?? TimeSpan.Zero).First();
         }
 
         /// <summary>Colore della barra: avviso anche con margine se, a questo ritmo, finisce prima dell'azzeramento.</summary>
@@ -338,11 +378,8 @@ namespace AIMeter
                 item.Children.Add(logoHost);
 
                 var windows = p.Usage == null ? new UsageWindow[0] : p.Usage.Windows.ToArray();
-                var five = Primary(p.Usage);
-                var week = windows.FirstOrDefault(w => w.Short == "7g");
-                var shown = metric == "week" ? new[] { week } : metric == "both" ? new[] { five, week } : new[] { five };
                 bool any = false;
-                foreach (var w in shown.Where(x => x != null))
+                foreach (var w in Shown(p, metric))
                 {
                     var stack = new StackPanel { Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
                     var t = Text(Math.Round(w.Remaining).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
@@ -443,7 +480,7 @@ namespace AIMeter
             return string.Join("\n", s.Providers.Select(p =>
             {
                 if (p.Models != null) return LocalSummary(p);
-                var w = Primary(p.Usage);
+                var w = Primary(p);
                 string n = p.Name;
                 return w == null ? L.F("{0}: no data", n) : L.F("{0}: {1}% left ({2})", n, Math.Round(w.Remaining), LabelOf(w)) +
                        (w.ResetsAt.HasValue ? L.F(", resets {0}", Alerts.When(w.ResetsAt.Value)) : "") +
@@ -654,6 +691,22 @@ namespace AIMeter
                 c.Margin = new Thickness(0, p.Usage.Breakdown.Count > 0 ? 2 : 8, 0, 0);
                 c.TextWrapping = TextWrapping.Wrap;
                 stack.Children.Add(c);
+            }
+
+            // suggerimento attivo (margine che sta per andare perso, o aspettare invece di pagare)
+            if (p.Tip != null)
+            {
+                var tip = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
+                var ic = Glyph("", 12, brand);
+                ic.Margin = new Thickness(0, 1, 6, 0);
+                ic.VerticalAlignment = VerticalAlignment.Top;
+                DockPanel.SetDock(ic, Dock.Left);
+                tip.Children.Add(ic);
+                var t = Text(p.Tip.Line, 11.5, "Text2");
+                t.TextWrapping = TextWrapping.Wrap;
+                tip.Children.Add(t);
+                tip.ToolTip = p.Tip.Text;
+                stack.Children.Add(tip);
             }
 
             if (!string.IsNullOrEmpty(p.Notice))

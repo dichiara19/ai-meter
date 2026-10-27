@@ -78,7 +78,7 @@ A path picks a value from the JSON answer: `data.usage`, `items[0].name`, `items
 | `currency`, `currencyPath`, `scale` | With a currency the row shows money left (`scale: 0.01` for cents). |
 | `balance` | Path of a balance with no limit: only the amount is shown, without a bar. |
 | `unlimited` | Path that, when true, shows *unlimited*. |
-| `starts`, `resets` | Paths of the start and reset time: ISO text, Unix seconds or milliseconds. |
+| `starts`, `resets` | Paths of the start and reset time: ISO text, Unix seconds or milliseconds. With both, AI Meter knows the length of the window: it uses it for the forecast, the reset notification and the tip before a reset (`short` values `5h`, `7g` and `mese` also tell it the length). |
 | `when`, `unless` | Paths (one or a list): the row is shown only if all `when` are true and no `unless` is. |
 
 ### `notes`

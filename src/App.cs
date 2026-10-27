@@ -170,6 +170,7 @@ namespace AIMeter
         {
             ui = Dispatcher.CurrentDispatcher;
             Settings = Settings.Load();
+            Settings.Current = Settings;
             bool firstRun = !Settings.FirstRunDone;
             if (firstRun)
             {
@@ -255,7 +256,7 @@ namespace AIMeter
         {
             Last = s;
             Notify(s);
-            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed;
+            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed + string.Join(",", Settings.PillLimits.Select(kv => kv.Key + kv.Value));
             UpdateTrayText(s);
             if (sig == lastSignature) return;   // niente è cambiato: nessun ridisegno
             lastSignature = sig;
@@ -571,7 +572,7 @@ namespace AIMeter
         /// <summary>Notifiche dei limiti (una alla volta: Windows mostra comunque solo l'ultima). Il clic apre il pannello.</summary>
         private void Notify(Snapshot s)
         {
-            if (Program.Demo) return;
+            if (Program.Demo) { foreach (var p in s.Providers) p.Tip = Alerts.TipFor(p, Settings, DateTime.Now); return; }
             if (alerts == null) alerts = new Alerts();
             var list = alerts.Check(s, Settings);
             if (list.Count == 0) return;
@@ -635,7 +636,7 @@ namespace AIMeter
         {
             var parts = s.Providers.Where(p => p.Models == null).Select(p =>
             {
-                var w = Ui.Primary(p.Usage);
+                var w = Ui.Primary(p);
                 return w == null ? p.Name + " –" : p.Name + " " + Math.Round(w.Remaining) + "%";
             });
             string text = "AI Meter · " + string.Join(" · ", parts);

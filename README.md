@@ -22,7 +22,7 @@ That's all of it, most of the time: a pill **inside** the taskbar. No widget to 
 - **Practically free to run.** About 0.02% CPU and 120 MB at rest. No Electron, no WebView, no runtime to install: WPF on the .NET Framework already in Windows. Efficiency cores, slower refresh on battery and when nothing is visible, nothing at all while the PC is locked.
 - **Windows and WSL, one view.** Claude Code, Codex and other coding agents running in WSL, model servers inside WSL (NAT or mirrored networking), the video memory of the WSL VM: shown next to their Windows counterparts. WSL is never started, and nothing is launched inside it.
 - **Local models are first-class.** Ollama, LM Studio, llama.cpp, llama-swap, vLLM and more: video memory, context window, how much context the current request uses, requests in flight, and which coding agent (OpenCode, Pi, Gemini CLI, Qwen Code…) is talking to which model.
-- **Your subscriptions, before the wall.** Claude, ChatGPT / Codex, GitHub Copilot, Cursor, OpenRouter, DeepSeek, Kimi: 5-hour and weekly limits, a forecast ("at this pace it runs out at 15:40") and a notification at 20% and 5% that tells you which service still has room.
+- **Your subscriptions, before the wall.** Claude, ChatGPT / Codex, GitHub Copilot, Cursor, OpenRouter, DeepSeek, Kimi: 5-hour and weekly limits, a forecast ("at this pace it runs out at 15:40"), a notification at 20% and 5% that tells you which service still has room, and a tip before a reset when part of a limit would go unused. Pick which limit each service shows in the pill, and get notified whenever the limits you choose reset.
 - **Private and open.** No telemetry; the only network requests are each service's own usage endpoint. Apache 2.0 licensed, and a new service is a [20-line JSON file](docs/PROVIDERS.md).
 
 <p align="center"><img src="docs/media/demo.gif" alt="A notification warns that the Claude session is running low, then a click on the pill opens the panel with every service, local models and agents" width="440"></p>
@@ -131,7 +131,7 @@ Command line: `--settings` opens Settings of the running instance and `--gpu` dr
 
 ## Uninstall
 
-Settings → turn off *Start with Windows*, choose *Exit* from the menu, then delete `%LOCALAPPDATA%\Programs\AI Meter`, `%APPDATA%\AIMeter`, the *AI Meter* Start menu shortcut and the registry key `HKCU\Software\Classes\AppUserModelId\AIMeter.App` (name and icon of its notifications).
+Settings → turn off *Start with Windows*, choose *Exit* from the menu, then delete `%LOCALAPPDATA%\Programs\AI Meter`, `%APPDATA%\AIMeter`, the *AI Meter* shortcuts in the Start menu and in the Startup folder, and the registry key `HKCU\Software\Classes\AppUserModelId\AIMeter.App` (name and icon of its notifications).
 
 ## Project layout
 
@@ -146,7 +146,7 @@ src/ProviderDefined.cs services described by JSON definitions, API keys, SQLite 
 src/ProviderLocal.cs   local model servers: discovery on Windows and WSL, loaded models, memory, context
 src/CodingAgents.cs    sessions of terminal coding agents (OpenCode, Pi, Gemini CLI, Qwen Code, …)
 src/GpuMemory.cs       video memory per process from the Windows GPU counters
-src/Forecast.cs        when each limit runs out at the current pace; low-limit and reset notifications
+src/Forecast.cs        when each limit runs out at the current pace; low-limit and reset notifications, tips
 providers/*.json       built-in service definitions
 tools/render-media.ps1 regenerates the README images (docs/media) from the real UI with demo data
 src/Settings.cs        preferences and start with Windows

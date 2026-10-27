@@ -269,7 +269,7 @@ namespace AIMeter
                     else if (kind == "weekly_scoped")
                     {
                         string model = Json.Str(Json.Obj(Json.Obj(l, "scope"), "model"), "display_name");
-                        u.Windows.Add(new UsageWindow { Label = "Week", Suffix = model ?? "model", Short = "m", Used = pct.Value, ResetsAt = resets });
+                        u.Windows.Add(new UsageWindow { Label = "Week", Suffix = model ?? "model", Short = "m", Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddDays(-7) : (DateTime?)null });
                     }
                 }
             }
@@ -277,8 +277,8 @@ namespace AIMeter
             {
                 AddWindow(u, d, "five_hour", "Session 5 h", null, "5h", TimeSpan.FromHours(5));
                 AddWindow(u, d, "seven_day", "Week", null, "7g", TimeSpan.FromDays(7));
-                AddWindow(u, d, "seven_day_opus", "Week", "Opus", "m", null);
-                AddWindow(u, d, "seven_day_sonnet", "Week", "Sonnet", "m", null);
+                AddWindow(u, d, "seven_day_opus", "Week", "Opus", "m", TimeSpan.FromDays(7));
+                AddWindow(u, d, "seven_day_sonnet", "Week", "Sonnet", "m", TimeSpan.FromDays(7));
             }
 
             // crediti in dollari con rinnovo: iguana_necktie sono i crediti per le sessioni cloud;
@@ -305,6 +305,7 @@ namespace AIMeter
                 string state = Json.Bool(extra, "is_enabled") ? "active"
                     : Json.Str(extra, "disabled_reason") == "out_of_credits" ? "paused, out of credits" : "disabled";
                 u.CreditsNote = () => L.F("Extra usage: {0} of {1} per month · {2}", m.Format(m.Used), m.Format(m.Limit), L.T(state));
+                u.ExtraActive = Json.Bool(extra, "is_enabled");
             }
 
             // come si ripartisce la settimana tra Claude Code, chat, Cowork…

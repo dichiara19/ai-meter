@@ -20,7 +20,36 @@ namespace AIMeter
         public Func<string> Detail; // dettaglio per il suggerimento, calcolato nella lingua attiva
         public bool NoBar;        // solo un valore (es. un saldo), senza barra né percentuale
         public DateTime? RunsOutAt; // previsione: a questo ritmo il limite finisce prima dell'azzeramento
+        public double? PacePerHour; // previsione: punti percentuali usati all'ora, se ci sono abbastanza letture
         public double Remaining { get { return Math.Max(0, Math.Min(100, 100 - Used)); } }
+
+        /// <summary>Identità del limite nel suo servizio, stabile tra le letture (impostazioni, notifiche, previsioni).</summary>
+        public string Key { get { return Label + "|" + Suffix; } }
+
+        /// <summary>Durata della finestra: dall'inizio all'azzeramento, o dedotta dal tipo di limite. Null se non nota.</summary>
+        public TimeSpan? Length
+        {
+            get
+            {
+                if (StartedAt.HasValue && ResetsAt.HasValue && ResetsAt.Value > StartedAt.Value) return ResetsAt.Value - StartedAt.Value;
+                if (Short == "5h" || Label == "Session 5 h") return TimeSpan.FromHours(5);
+                if (Short == "7g" || Label == "Week") return TimeSpan.FromDays(7);
+                if (Short == "mese") return TimeSpan.FromDays(30);
+                return null;
+            }
+        }
+
+        /// <summary>Un limite in percentuale (con barra), non un saldo né un valore solo testuale.</summary>
+        public bool HasPercent { get { return !NoBar && RightText == null; } }
+    }
+
+    /// <summary>Suggerimento attivo per un servizio: una riga nella scheda e, una volta per finestra, una notifica.</summary>
+    internal sealed class Tip
+    {
+        public string Key;        // servizio|limite a cui si riferisce: una notifica sola per ogni finestra
+        public string Kind;       // "unused" o "wait"
+        public string Title, Text;
+        public string Line;       // testo breve per la scheda del servizio
     }
 
     /// <summary>Importo speso su un limite, nella valuta del servizio.</summary>
@@ -49,11 +78,13 @@ namespace AIMeter
         public List<KeyValuePair<string, double>> Breakdown = new List<KeyValuePair<string, double>>();
         /// <summary>Riga di stato dei crediti extra / a consumo, calcolata nella lingua attiva al momento di mostrarla.</summary>
         public Func<string> CreditsNote;
+        /// <summary>L'uso oltre i limiti del piano è attivo e si paga a consumo (es. extra usage di Claude).</summary>
+        public bool ExtraActive;
 
         /// <summary>Stessi dati, marcati come non più in tempo reale.</summary>
         public Usage AsCache()
         {
-            return new Usage { Windows = Windows, Source = "cache", At = At, Breakdown = Breakdown, CreditsNote = CreditsNote };
+            return new Usage { Windows = Windows, Source = "cache", At = At, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive };
         }
     }
 
@@ -80,6 +111,7 @@ namespace AIMeter
         public bool CanSignIn;    // l'avviso offre il collegamento "Accedi" (accesso gestito da AI Meter)
         public List<LocalModel> Models;   // solo per i modelli locali: i modelli caricati in memoria
         public long GpuUsed, GpuTotal;    // solo per i modelli locali: memoria video della scheda (byte), letta nella raccolta
+        public Tip Tip;           // suggerimento attivo (calcolato a ogni lettura)
 
         public int Active { get { int n = 0; foreach (var s in Sessions) if (s.Status != "app") n++; return n; } }
         public int Busy { get { int n = 0; foreach (var s in Sessions) if (s.Status == "busy") n++; return n; } }
@@ -113,7 +145,7 @@ namespace AIMeter
             sb.Append(DateTime.Now.ToString("HHmm"));
             foreach (var p in Providers)
             {
-                sb.Append('|').Append(p.Id).Append(p.Running).Append(p.Plan).Append(p.Notice).Append(p.NeedsLogin);
+                sb.Append('|').Append(p.Id).Append(p.Running).Append(p.Plan).Append(p.Notice).Append(p.NeedsLogin).Append(p.Tip != null ? p.Tip.Line : "");
                 if (p.Usage != null)
                 {
                     sb.Append(p.Usage.Source);

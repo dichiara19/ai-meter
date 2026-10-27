@@ -149,7 +149,7 @@ namespace AIMeter
 
         private FrameworkElement Collapsed(Snapshot s)
         {
-            var five = s.Providers.Where(p => p.Models == null).Select(p => Tuple.Create(p, Ui.Primary(p.Usage))).ToList();
+            var five = s.Providers.Where(p => p.Models == null).Select(p => Tuple.Create(p, Ui.Primary(p))).ToList();
             var icon = Ui.RingIcon(five, 24);
             // un pulsante vero: clic, tastiera e strumenti di accessibilità lo riespandono allo stesso modo
             var b = new Button { Content = icon, Padding = new Thickness(6), Cursor = Cursors.Hand };

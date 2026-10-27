@@ -49,6 +49,17 @@ namespace AIMeter
         // notifiche
         public bool NotifyLow { get; set; }         // limite sotto il 20% e il 5%
         public bool NotifyReset { get; set; }       // limite di nuovo disponibile
+        /// <summary>Limiti per cui avvisare a ogni azzeramento: "servizio|limite" → attivo.</summary>
+        public System.Collections.Generic.Dictionary<string, bool> NotifyResets { get; set; }
+        public bool TipsUnused { get; set; }        // suggerimento: limite che sta per azzerarsi con molto margine inutilizzato
+        public bool TipsShort { get; set; }         // lo stesso anche per i limiti brevi (sessione), che pesano su quelli lunghi
+        public bool TipsWait { get; set; }          // suggerimento: aspettare l'azzeramento invece di pagare l'uso extra
+
+        /// <summary>Limite da mostrare nella pillola per ogni servizio: id → chiave del limite o "auto". Assente = predefinito.</summary>
+        public System.Collections.Generic.Dictionary<string, string> PillLimits { get; set; }
+
+        /// <summary>Le preferenze in uso nell'app (per le parti dell'interfaccia che non le ricevono come parametro).</summary>
+        internal static Settings Current;
 
         // generale
         public string Theme { get; set; }           // "system", "light", "dark"
@@ -66,6 +77,15 @@ namespace AIMeter
             TaskbarDock = true; TaskbarSide = "auto";
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
             Theme = "system"; Language = "system"; Refresh = "auto"; NotifyLow = true; NotifyReset = true;
+            NotifyResets = new System.Collections.Generic.Dictionary<string, bool>(); PillLimits = new System.Collections.Generic.Dictionary<string, string>();
+            TipsUnused = true; TipsShort = false; TipsWait = true;
+        }
+
+        /// <summary>Avviso a ogni azzeramento attivo per questo limite.</summary>
+        internal bool NotifiesReset(string providerId, UsageWindow w)
+        {
+            bool on;
+            return NotifyResets.TryGetValue(providerId + "|" + w.Key, out on) && on;
         }
 
         internal bool ServiceOn(ServiceDefinition d)
@@ -95,6 +115,8 @@ namespace AIMeter
                         if (string.IsNullOrEmpty(s.WslUser)) s.WslUser = Environment.UserName;
                         if (s.Services == null) s.Services = new System.Collections.Generic.Dictionary<string, bool>();
                         if (s.ExpandedServices == null) s.ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
+                        if (s.NotifyResets == null) s.NotifyResets = new System.Collections.Generic.Dictionary<string, bool>();
+                        if (s.PillLimits == null) s.PillLimits = new System.Collections.Generic.Dictionary<string, string>();
                         return s;
                     }
                 }
