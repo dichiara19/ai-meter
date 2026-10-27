@@ -1,11 +1,10 @@
-<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.4.0/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.5.0/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
 
-## What's new in 0.4.0
+## What's new in 0.5.0
 
-- **Choose the limit each service shows.** In Settings → Services, pick which limit the pill, its tooltip and the overlay show for each service: the weekly limit instead of the 5-hour one, a model's weekly limit, or **Automatic**, the one closest to running out at your current pace.
-- **A notification when a limit resets.** In Settings → Notifications, turn it on for any limit. It arrives at the time the service announced, and never hours late if the PC was off.
-- **Use it or lose it.** A tip in the panel, and once as a notification, when a limit resets soon and at your usual pace a good part of it would go unused ("Week: 60% still unused, resets tomorrow at 09:00"). It works the same for 5-hour, weekly and monthly limits and for credits that expire. Another tip suggests waiting for a close reset instead of paying for extra usage.
-- **Fixes.** The panel stays docked to the taskbar when its content changes height. Reset times that drift by a few minutes no longer repeat notifications. A limit choice that the service stops reporting goes back to Default.
+- **Google Antigravity.** The 5-hour and weekly quotas of your Google AI plan in Antigravity, per model group (Gemini, Claude + GPT), in the pill and in the panel. AI Meter reads the sign-in of Antigravity CLI, on Windows or in WSL, and lets the CLI renew it. Turn it on in Settings → Services. Limit choice, reset notifications and tips work here too.
+
+The Gemini app and Gemini CLI for personal accounts do not expose their limits, so they are not shown.
 
 ## Download
 
