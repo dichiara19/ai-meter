@@ -428,7 +428,7 @@ namespace AIMeter
                     var t = Text(Math.Round(room).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
                     t.HorizontalAlignment = HorizontalAlignment.Center;
                     stack.Children.Add(t);
-                    var bar = Bar(room, room < w.Remaining ? LevelBrush(room, BrandBrush(p.Id)) : LevelBrush(w, BrandBrush(p.Id)), 2);
+                    var bar = Bar(room, room < w.Remaining ? LevelBrush(room, BrandBrush(p.Id)) : LevelBrush(w, BrandBrush(p.Id)), 2, w.Remaining);
                     bar.Width = 26;
                     bar.Margin = new Thickness(0, 1, 0, 0);
                     stack.Children.Add(bar);
@@ -539,20 +539,30 @@ namespace AIMeter
             }));
         }
 
-        public static FrameworkElement Bar(double remaining, string brush, double height)
+        /// <summary>
+        /// Barra del margine rimasto. ghost: un secondo riempimento, dello stesso colore ma tenue, dietro quello pieno
+        /// (es. il margine del limite di Fable, quando quello vero è il più basso del limite settimanale).
+        /// </summary>
+        public static FrameworkElement Bar(double remaining, string brush, double height, double ghost = -1)
         {
             var g = new Grid { Height = height, VerticalAlignment = VerticalAlignment.Center };
             var track = new Border { CornerRadius = new CornerRadius(height / 2) };
             track.SetResourceReference(Border.BackgroundProperty, "Track");
             g.Children.Add(track);
-            var fillHost = new Grid();
-            fillHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, remaining), GridUnitType.Star) });
-            fillHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, 100 - remaining), GridUnitType.Star) });
-            var fill = new Border { CornerRadius = new CornerRadius(height / 2), MinWidth = remaining > 0 ? height : 0 };
-            fill.SetResourceReference(Border.BackgroundProperty, brush);
-            fillHost.Children.Add(fill);
-            g.Children.Add(fillHost);
+            if (ghost > remaining) g.Children.Add(Fill(ghost, brush, height, 0.3));
+            g.Children.Add(Fill(remaining, brush, height, 1));
             return g;
+        }
+
+        private static FrameworkElement Fill(double value, string brush, double height, double opacity)
+        {
+            var host = new Grid();
+            host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, value), GridUnitType.Star) });
+            host.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, 100 - value), GridUnitType.Star) });
+            var fill = new Border { CornerRadius = new CornerRadius(height / 2), MinWidth = value > 0 ? height : 0, Opacity = opacity };
+            fill.SetResourceReference(Border.BackgroundProperty, brush);
+            host.Children.Add(fill);
+            return host;
         }
 
         /// <summary>Riga di un limite: etichetta e azzeramento a sinistra, percentuale rimasta a destra, barra sotto.</summary>
@@ -585,7 +595,8 @@ namespace AIMeter
             top.Children.Add(left);
             root.Children.Add(top);
             if (w.NoBar) { root.ToolTip = LabelOf(w) + ": " + right; return root; }
-            var bar = Bar(room, capped ? LevelBrush(room, brand) : LevelBrush(w, brand), 4);
+            // limitato dal limite generale: il margine vero pieno, quello del modello in trasparenza dietro
+            var bar = Bar(room, capped ? LevelBrush(room, brand) : LevelBrush(w, brand), 4, capped ? w.Remaining : -1);
             bar.Margin = new Thickness(0, 5, 0, 0);
             root.Children.Add(bar);
             if (capped)

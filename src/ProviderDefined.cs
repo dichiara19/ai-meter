@@ -532,6 +532,80 @@ namespace AIMeter
             }
             try
             {
+                string text = Send(req, token);
+                // risposta senza segreti, per diagnosi e per chi scrive una definizione
+                try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + "-usage-raw.json"), text, new UTF8Encoding(false)); }
+                catch (IOException) { }
+                var doc = Json.ParseAny(text);
+                plan = JPath.Str(JPath.Get(doc, Json.Str(D.Raw, "plan")));
+                if (Json.Str(D.Raw, "plan") == null) plan = null;
+                live = Map(doc, D.Raw);
+                problem = live == null ? "The service answered without usage data" : null;
+                spend = ReadSpend(doc);
+                if (spend != null) SpendTracker.Record(D.Id, spend.Total, spend.Balance);
+                if (live != null) FetchMore(token);
+            }
+            catch (WebException e)
+            {
+                var hr = e.Response as HttpWebResponse;
+                if (hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden))
+                {
+                    problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "The API key was not accepted: check it in Settings" : "Sign-in expired: sign in again");
+                    live = null;
+                }
+            }
+            catch (IOException) { }
+        }
+
+        /// <summary>
+        /// Richieste aggiuntive ("more"): altri dati dello stesso servizio, come il credito dell'account di OpenRouter. Usano
+        /// la chiave aggiuntiva indicata ("key", salvata nella pagina del servizio) o, se manca, quella principale; se il
+        /// servizio la rifiuta si riprova dopo 6 ore. Un errore qui non tocca i dati principali.
+        /// </summary>
+        private readonly Dictionary<int, DateTime> moreBlocked = new Dictionary<int, DateTime>();
+
+        /// <summary>Chiavi aggiuntive ("&lt;id&gt;.&lt;slot&gt;") che servono perché il servizio ha rifiutato quella principale: le impostazioni le propongono.</summary>
+        public static readonly HashSet<string> NeedsExtraKey = new HashSet<string>();
+
+        private void FetchMore(string token)
+        {
+            var list = Items(D.Raw, "more").ToList();
+            for (int i = 0; i < list.Count; i++)
+            {
+                var spec = list[i];
+                var req = Json.Obj(spec, "request");
+                if (req == null) continue;
+                string slot = Json.Str(spec, "key");
+                string own = slot != null ? ApiKeys.Get(D.Id + "." + slot) : null;
+                DateTime until;
+                if (own == null && moreBlocked.TryGetValue(i, out until) && DateTime.Now < until) continue;
+                try
+                {
+                    string text = Send(req, own ?? token);
+                    try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + "-more" + i + "-raw.json"), text, new UTF8Encoding(false)); }
+                    catch (IOException) { }
+                    var extra = Map(Json.ParseAny(text), spec);
+                    if (extra != null) live.Windows.AddRange(extra.Windows);
+                    moreBlocked.Remove(i);
+                    if (slot != null && own == null) lock (NeedsExtraKey) NeedsExtraKey.Remove(D.Id + "." + slot);
+                }
+                catch (WebException e)
+                {
+                    var hr = e.Response as HttpWebResponse;
+                    if (hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden))
+                    {
+                        moreBlocked[i] = DateTime.Now.AddHours(own == null ? 6 : 1);
+                        if (slot != null) lock (NeedsExtraKey) NeedsExtraKey.Add(D.Id + "." + slot);
+                    }
+                }
+                catch (IOException) { }
+            }
+        }
+
+        /// <summary>Una richiesta al servizio come la descrive la definizione; il testo della risposta.</summary>
+        private string Send(Dictionary<string, object> req, string token)
+        {
+            {
                 var r = (HttpWebRequest)WebRequest.Create(Fill(Json.Str(req, "url"), token));
                 r.Method = Json.Str(req, "method") ?? "GET";
                 r.Accept = "application/json";
@@ -556,44 +630,23 @@ namespace AIMeter
                 }
                 using (var resp = (HttpWebResponse)r.GetResponse())
                 using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                {
-                    string text = sr.ReadToEnd();
-                    // risposta senza segreti, per diagnosi e per chi scrive una definizione
-                    try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + "-usage-raw.json"), text, new UTF8Encoding(false)); }
-                    catch (IOException) { }
-                    var doc = Json.ParseAny(text);
-                    plan = JPath.Str(JPath.Get(doc, Json.Str(D.Raw, "plan")));
-                    if (Json.Str(D.Raw, "plan") == null) plan = null;
-                    live = Map(doc);
-                    problem = live == null ? "The service answered without usage data" : null;
-                    spend = ReadSpend(doc);
-                    if (spend != null) SpendTracker.Record(D.Id, spend.Total, spend.Balance);
-                }
+                    return sr.ReadToEnd();
             }
-            catch (WebException e)
-            {
-                var hr = e.Response as HttpWebResponse;
-                if (hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden))
-                {
-                    problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "The API key was not accepted: check it in Settings" : "Sign-in expired: sign in again");
-                    live = null;
-                }
-            }
-            catch (IOException) { }
         }
 
         // ================================================================ lettura della risposta
-        private Usage Map(object doc)
+        /// <summary>Limiti e note di un blocco della definizione (quello principale o uno di "more") letti dalla risposta.</summary>
+        private Usage Map(object doc, Dictionary<string, object> block)
         {
             var u = new Usage { Source = "live", At = DateTime.Now };
-            foreach (var spec in Items(D.Raw, "limits"))
+            foreach (var spec in Items(block, "limits"))
             {
                 if (!Applies(doc, spec)) continue;
                 var w = Limit(doc, spec);
                 if (w != null) u.Windows.Add(w);
             }
             var notes = new List<Func<string>>();
-            foreach (var spec in Items(D.Raw, "notes"))
+            foreach (var spec in Items(block, "notes"))
             {
                 if (!Applies(doc, spec)) continue;
                 string text = Json.Str(spec, "text");
@@ -689,9 +742,14 @@ namespace AIMeter
     {
         public event Action Saved;
 
-        public ApiKeyWindow(ServiceDefinition d)
+        public ApiKeyWindow(ServiceDefinition d) : this(d, null) { }
+
+        /// <summary>slot: una chiave aggiuntiva della definizione ("keys"), salvata come &lt;id&gt;.&lt;slot&gt;; null = quella principale.</summary>
+        public ApiKeyWindow(ServiceDefinition d, string slot)
         {
-            Title = L.F("Connect {0}", d.Name);
+            var extra = slot == null ? null : Json.Obj(Json.Obj(d.Raw, "keys"), slot);
+            string keyPage = extra != null ? Json.Str(extra, "page") : d.KeyPage;
+            Title = extra != null ? L.T(Json.Str(extra, "label") ?? slot) + " · " + d.Name : L.F("Connect {0}", d.Name);
             Width = 460;
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
@@ -707,7 +765,8 @@ namespace AIMeter
             var h = Ui.Text(Title, 20, "Text", FontWeights.SemiBold);
             h.FontFamily = Theme.DisplayFont;
             root.Children.Add(h);
-            var info = Ui.Text(L.F("Paste an API key of your {0} account. AI Meter uses it only to read your usage; it is encrypted with Windows data protection and stays on this PC.", d.Name), 13, "Text2");
+            var info = Ui.Text((extra != null && Json.Str(extra, "description") != null ? L.T(Json.Str(extra, "description")) + " " : "")
+                + L.F("Paste an API key of your {0} account. AI Meter uses it only to read your usage; it is encrypted with Windows data protection and stays on this PC.", d.Name), 13, "Text2");
             info.TextWrapping = TextWrapping.Wrap;
             info.TextTrimming = TextTrimming.None;
             info.Margin = new Thickness(0, 8, 0, 16);
@@ -724,11 +783,11 @@ namespace AIMeter
             root.Children.Add(frame);
 
             var buttons = new DockPanel { Margin = new Thickness(0, 18, 0, 0), LastChildFill = false };
-            if (d.KeyPage != null)
+            if (keyPage != null)
             {
                 var link = new Button { Content = L.T("Create a key"), Padding = new Thickness(0, 0, 4, 1), FontSize = 13 };
                 link.SetResourceReference(StyleProperty, "LinkButton");
-                link.Click += (o, e) => { try { System.Diagnostics.Process.Start(d.KeyPage); } catch (Exception) { } };
+                link.Click += (o, e) => { try { System.Diagnostics.Process.Start(keyPage); } catch (Exception) { } };
                 DockPanel.SetDock(link, Dock.Left);
                 buttons.Children.Add(link);
             }
@@ -738,7 +797,7 @@ namespace AIMeter
             DockPanel.SetDock(cancel, Dock.Right);
             var save = new Button { Content = L.T("Save"), Margin = new Thickness(0, 0, 8, 0), IsEnabled = false, IsDefault = true };
             save.SetResourceReference(StyleProperty, "AccentButton");
-            save.Click += (o, e) => { ApiKeys.Save(d.Id, box.Password); if (Saved != null) Saved(); Close(); };
+            save.Click += (o, e) => { ApiKeys.Save(slot == null ? d.Id : d.Id + "." + slot, box.Password); if (Saved != null) Saved(); Close(); };
             DockPanel.SetDock(save, Dock.Right);
             buttons.Children.Add(cancel);
             buttons.Children.Add(save);

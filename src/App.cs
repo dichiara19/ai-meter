@@ -400,9 +400,12 @@ namespace AIMeter
         }
 
         /// <summary>Chiave API di un servizio descritto da una definizione: finestra per incollarla.</summary>
-        public void EnterApiKey(ServiceDefinition d)
+        public void EnterApiKey(ServiceDefinition d) { EnterApiKey(d, null); }
+
+        /// <summary>slot: una chiave aggiuntiva della definizione (es. "management" per OpenRouter); null = quella principale.</summary>
+        public void EnterApiKey(ServiceDefinition d, string slot)
         {
-            var w = new ApiKeyWindow(d);
+            var w = new ApiKeyWindow(d, slot);
             w.Saved += () => { RefreshNow(); if (settingsWindow != null) settingsWindow.Build(); };
             w.Show();
             w.Activate();

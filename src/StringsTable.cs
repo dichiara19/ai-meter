@@ -16,6 +16,9 @@ namespace AIMeter
         {
             // ======================================================================== italiano
             { "it", D(
+                "Account credits", "Crediti dell'account",
+                "Management key", "Chiave di gestione",
+                "OpenRouter did not return your account credits with your API key; a management key can read them.", "OpenRouter non ha restituito i crediti dell'account con la tua chiave API; una chiave di gestione può leggerli.",
                 "{0} reply", "{0} risposta",
                 "{0} replies", "{0} risposte",
                 "{0} tokens", "{0} token",
@@ -233,6 +236,9 @@ namespace AIMeter
 
             // ======================================================================== español
             { "es", D(
+                "Account credits", "Créditos de la cuenta",
+                "Management key", "Clave de gestión",
+                "OpenRouter did not return your account credits with your API key; a management key can read them.", "OpenRouter no devolvió los créditos de la cuenta con tu clave API; una clave de gestión puede leerlos.",
                 "{0} reply", "{0} respuesta",
                 "{0} replies", "{0} respuestas",
                 "{0} tokens", "{0} tokens",
@@ -450,6 +456,9 @@ namespace AIMeter
 
             // ======================================================================== français
             { "fr", D(
+                "Account credits", "Crédits du compte",
+                "Management key", "Clé de gestion",
+                "OpenRouter did not return your account credits with your API key; a management key can read them.", "OpenRouter n'a pas renvoyé les crédits du compte avec votre clé API ; une clé de gestion peut les lire.",
                 "{0} reply", "{0} réponse",
                 "{0} replies", "{0} réponses",
                 "{0} tokens", "{0} jetons",
@@ -667,6 +676,9 @@ namespace AIMeter
 
             // ======================================================================== deutsch
             { "de", D(
+                "Account credits", "Kontoguthaben",
+                "Management key", "Verwaltungsschlüssel",
+                "OpenRouter did not return your account credits with your API key; a management key can read them.", "OpenRouter hat mit deinem API-Schlüssel kein Kontoguthaben geliefert; ein Verwaltungsschlüssel kann es lesen.",
                 "{0} reply", "{0} Antwort",
                 "{0} replies", "{0} Antworten",
                 "{0} tokens", "{0} Tokens",
@@ -884,6 +896,9 @@ namespace AIMeter
 
             // ======================================================================== português
             { "pt", D(
+                "Account credits", "Créditos da conta",
+                "Management key", "Chave de gestão",
+                "OpenRouter did not return your account credits with your API key; a management key can read them.", "O OpenRouter não devolveu os créditos da conta com a sua chave de API; uma chave de gestão pode lê-los.",
                 "{0} reply", "{0} resposta",
                 "{0} replies", "{0} respostas",
                 "{0} tokens", "{0} tokens",

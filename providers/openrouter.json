@@ -12,6 +12,11 @@
     { "label": "Key limit", "short": "$", "when": "data.limit", "used": "data.usage", "limit": "data.limit", "currency": "USD" },
     { "label": "Spent with this key", "unless": "data.limit", "balance": "data.usage", "currency": "USD" }
   ],
+  "more": [
+    { "request": { "url": "https://openrouter.ai/api/v1/credits", "headers": { "Authorization": "Bearer {token}" } }, "key": "management",
+      "limits": [ { "label": "Account credits", "short": "$", "used": "data.total_usage", "limit": "data.total_credits", "currency": "USD" } ] }
+  ],
+  "keys": { "management": { "label": "Management key", "description": "OpenRouter did not return your account credits with your API key; a management key can read them.", "page": "https://openrouter.ai/settings/management-keys" } },
   "i18n": {
     "it": { "Spending and limit of your OpenRouter API key.": "Spesa e limite della tua chiave API di OpenRouter.", "Key limit": "Limite della chiave", "Spent with this key": "Speso con questa chiave" },
     "es": { "Spending and limit of your OpenRouter API key.": "Gasto y límite de tu clave API de OpenRouter.", "Key limit": "Límite de la clave", "Spent with this key": "Gastado con esta clave" },

@@ -346,6 +346,22 @@ namespace AIMeter
                         rows.Add(Row(null, L.T("API key"), text,
                             ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false)
                                               : Button(found != null ? L.T("Use another key…") : L.T("Add key…"), () => C.EnterApiKey(d), found == null)));
+                        // chiavi aggiuntive (es. di gestione di OpenRouter): solo se servono o se ne è già salvata una
+                        var keys = Json.Obj(d.Raw, "keys");
+                        if (keys != null)
+                            foreach (var kv in keys)
+                            {
+                                string slot = kv.Key;
+                                var spec = kv.Value as Dictionary<string, object>;
+                                bool saved = ApiKeys.Has(d.Id + "." + slot);
+                                bool needed;
+                                lock (DefinedProvider.NeedsExtraKey) needed = DefinedProvider.NeedsExtraKey.Contains(d.Id + "." + slot);
+                                if (!saved && !needed) continue;
+                                rows.Add(Row(null, L.T(Json.Str(spec, "label") ?? slot),
+                                    saved ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.") : L.T(Json.Str(spec, "description") ?? ""),
+                                    saved ? Button(L.T("Remove"), () => { ApiKeys.Remove(d.Id + "." + slot); C.RefreshNow(); Build(); }, false)
+                                          : Button(L.T("Add key…"), () => C.EnterApiKey(d, slot), true)));
+                            }
                     }
                     break;
             }
