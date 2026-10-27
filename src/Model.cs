@@ -35,6 +35,7 @@ namespace AIMeter
                 if (Short == "5h" || Label == "Session 5 h") return TimeSpan.FromHours(5);
                 if (Short == "7g" || Label == "Week") return TimeSpan.FromDays(7);
                 if (Short == "mese") return TimeSpan.FromDays(30);
+                if (Short == "1g") return TimeSpan.FromDays(1);
                 return null;
             }
         }

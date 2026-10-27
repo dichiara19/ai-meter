@@ -17,6 +17,7 @@ namespace AIMeter
         public bool OpenAIEnabled { get; set; }
         public bool OpenAIShowChat { get; set; }
         public bool CopilotEnabled { get; set; }
+        public bool AntigravityEnabled { get; set; } // quote di Google Antigravity (accesso di Antigravity CLI)
         /// <summary>Servizi descritti dai file di definizione: id → attivo. Assente = attivo se trovato sul PC.</summary>
         public System.Collections.Generic.Dictionary<string, bool> Services { get; set; }
         public bool LocalEnabled { get; set; }      // modelli locali (Ollama, LM Studio, llama.cpp…)

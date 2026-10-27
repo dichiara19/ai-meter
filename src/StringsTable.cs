@@ -16,6 +16,12 @@ namespace AIMeter
         {
             // ======================================================================== italiano
             { "it", D(
+                "Sign in to Antigravity CLI to see your Google AI quotas", "Accedi ad Antigravity CLI per vedere le quote di Google AI",
+                "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "Quote di 5 ore e settimanali del tuo piano Google AI in Antigravity, per gruppo di modelli. Lette con l'accesso di Antigravity CLI (anche in WSL). L'app Gemini non espone i suoi limiti.",
+                "Antigravity CLI sign-in", "Accesso di Antigravity CLI",
+                "AI Meter uses the sign-in of Antigravity CLI and lets the CLI renew it: the token stays where the CLI keeps it.", "AI Meter usa l'accesso di Antigravity CLI e lascia che sia la CLI a rinnovarlo: il token resta dove lo tiene la CLI.",
+                "Waiting for confirmation on Google…", "In attesa della conferma su Google…",
+                "Connect Google…", "Collega Google…",
                 "{0}: limit in the taskbar back to Default", "{0}: limite nella barra tornato a Predefinito",
                 "{0} is no longer reported by the service.", "{0}: il servizio non lo comunica più.",
                 "{0} · {1} has reset", "{0} · {1}: azzerato",
@@ -193,6 +199,12 @@ namespace AIMeter
 
             // ======================================================================== español
             { "es", D(
+                "Sign in to Antigravity CLI to see your Google AI quotas", "Inicia sesión en Antigravity CLI para ver las cuotas de Google AI",
+                "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "Cuotas de 5 horas y semanales de tu plan de Google AI en Antigravity, por grupo de modelos. Se leen con el inicio de sesión de Antigravity CLI (también en WSL). La app Gemini no expone sus límites.",
+                "Antigravity CLI sign-in", "Inicio de sesión de Antigravity CLI",
+                "AI Meter uses the sign-in of Antigravity CLI and lets the CLI renew it: the token stays where the CLI keeps it.", "AI Meter usa el inicio de sesión de Antigravity CLI y deja que la CLI lo renueve: el token se queda donde lo guarda la CLI.",
+                "Waiting for confirmation on Google…", "Esperando la confirmación en Google…",
+                "Connect Google…", "Conectar Google…",
                 "{0}: limit in the taskbar back to Default", "{0}: límite en la barra de tareas de vuelta a Predeterminado",
                 "{0} is no longer reported by the service.", "{0}: el servicio ya no lo indica.",
                 "{0} · {1} has reset", "{0} · {1}: restablecido",
@@ -370,6 +382,12 @@ namespace AIMeter
 
             // ======================================================================== français
             { "fr", D(
+                "Sign in to Antigravity CLI to see your Google AI quotas", "Connectez-vous à Antigravity CLI pour voir les quotas Google AI",
+                "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "Quotas de 5 heures et hebdomadaires de votre forfait Google AI dans Antigravity, par groupe de modèles. Lus avec la connexion d'Antigravity CLI (aussi dans WSL). L'application Gemini n'expose pas ses limites.",
+                "Antigravity CLI sign-in", "Connexion d'Antigravity CLI",
+                "AI Meter uses the sign-in of Antigravity CLI and lets the CLI renew it: the token stays where the CLI keeps it.", "AI Meter utilise la connexion d'Antigravity CLI et laisse la CLI la renouveler : le jeton reste là où la CLI le garde.",
+                "Waiting for confirmation on Google…", "En attente de la confirmation sur Google…",
+                "Connect Google…", "Connecter Google…",
                 "{0}: limit in the taskbar back to Default", "{0} : limite dans la barre des tâches remise sur Par défaut",
                 "{0} is no longer reported by the service.", "{0} : le service ne l'indique plus.",
                 "{0} · {1} has reset", "{0} · {1} : réinitialisée",
@@ -547,6 +565,12 @@ namespace AIMeter
 
             // ======================================================================== deutsch
             { "de", D(
+                "Sign in to Antigravity CLI to see your Google AI quotas", "Melde dich bei Antigravity CLI an, um die Google-AI-Kontingente zu sehen",
+                "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "5-Stunden- und Wochenkontingente deines Google-AI-Abos in Antigravity, pro Modellgruppe. Gelesen mit der Anmeldung von Antigravity CLI (auch in WSL). Die Gemini-App gibt ihre Limits nicht preis.",
+                "Antigravity CLI sign-in", "Anmeldung von Antigravity CLI",
+                "AI Meter uses the sign-in of Antigravity CLI and lets the CLI renew it: the token stays where the CLI keeps it.", "AI Meter nutzt die Anmeldung von Antigravity CLI und lässt sie von der CLI erneuern: Das Token bleibt dort, wo die CLI es speichert.",
+                "Waiting for confirmation on Google…", "Warte auf die Bestätigung bei Google…",
+                "Connect Google…", "Google verbinden…",
                 "{0}: limit in the taskbar back to Default", "{0}: Limit in der Taskleiste wieder auf Standard",
                 "{0} is no longer reported by the service.", "{0}: Der Dienst meldet es nicht mehr.",
                 "{0} · {1} has reset", "{0} · {1}: zurückgesetzt",
@@ -724,6 +748,12 @@ namespace AIMeter
 
             // ======================================================================== português
             { "pt", D(
+                "Sign in to Antigravity CLI to see your Google AI quotas", "Entre no Antigravity CLI para ver as cotas do Google AI",
+                "5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.", "Cotas de 5 horas e semanais do seu plano Google AI no Antigravity, por grupo de modelos. Lidas com o acesso do Antigravity CLI (também no WSL). O app Gemini não expõe os seus limites.",
+                "Antigravity CLI sign-in", "Acesso do Antigravity CLI",
+                "AI Meter uses the sign-in of Antigravity CLI and lets the CLI renew it: the token stays where the CLI keeps it.", "O AI Meter usa o acesso do Antigravity CLI e deixa a CLI renová-lo: o token fica onde a CLI o guarda.",
+                "Waiting for confirmation on Google…", "Aguardando a confirmação no Google…",
+                "Connect Google…", "Conectar o Google…",
                 "{0}: limit in the taskbar back to Default", "{0}: limite na barra de tarefas de volta a Padrão",
                 "{0} is no longer reported by the service.", "{0}: o serviço já não o informa.",
                 "{0} · {1} has reset", "{0} · {1}: redefinido",

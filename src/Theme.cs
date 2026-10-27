@@ -79,7 +79,7 @@ namespace AIMeter
                 add("Fallback", 0xFF202020); add("Layer", 0x4C3A3A3A);
                 add("Flyout", 0xFF2C2C2C); add("FlyoutStroke", 0x33000000);
                 add("Caution", 0xFFFCE100); add("Critical", 0xFFFF99A4); add("Success", 0xFF6CCB5F); add("Info", 0xFF60CDFF);
-                add("Claude", 0xFFE08A6A); add("OpenAI", 0xFF3DD68C); add("Copilot", 0xFFC297FF);
+                add("Claude", 0xFFE08A6A); add("OpenAI", 0xFF3DD68C); add("Copilot", 0xFFC297FF); add("Antigravity", 0xFF8AB4F8);
                 foreach (var def in Definitions.All) add("Brand." + def.Id, def.ColorDark);
             }
             else
@@ -94,7 +94,7 @@ namespace AIMeter
                 add("Fallback", 0xFFF3F3F3); add("Layer", 0x80FFFFFF);
                 add("Flyout", 0xFFF9F9F9); add("FlyoutStroke", 0x0F000000);
                 add("Caution", 0xFF9D5D00); add("Critical", 0xFFC42B1C); add("Success", 0xFF0F7B0F); add("Info", 0xFF005FB8);
-                add("Claude", 0xFFC2603D); add("OpenAI", 0xFF0E8A5F); add("Copilot", 0xFF8250DF);
+                add("Claude", 0xFFC2603D); add("OpenAI", 0xFF0E8A5F); add("Copilot", 0xFF8250DF); add("Antigravity", 0xFF1A73E8);
                 foreach (var def in Definitions.All) add("Brand." + def.Id, def.ColorLight);
             }
             return d;

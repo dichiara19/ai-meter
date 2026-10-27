@@ -103,7 +103,7 @@ function Invoke-Csc([string]$out, [string[]]$extra = @()) {
         "$fw\System.Xaml.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll",
         "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
     ) | ForEach-Object { "/r:$_" }
-    $res = @('app.ico' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
+    $res = @('app.ico', 'antigravity.png' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
     # definizioni dei servizi incluse nell'eseguibile (nell'avvio da sorgente si leggono dalla cartella providers)
     $res += @(Get-ChildItem (Join-Path $root 'providers') -Filter *.json | ForEach-Object { "/resource:$($_.FullName),providers.$($_.Name)" })
     $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
@@ -232,7 +232,7 @@ else {
     New-Item -ItemType Directory -Force (Join-Path $dest 'src'), (Join-Path $dest 'assets'), (Join-Path $dest 'providers') | Out-Null
     Copy-Item (Join-Path $root 'src\*.cs') (Join-Path $dest 'src') -Force
     Copy-Item (Join-Path $root 'providers\*.json') (Join-Path $dest 'providers') -Force
-    Copy-Item (Join-Path $root 'assets\app.ico') (Join-Path $dest 'assets') -Force
+    Copy-Item (Join-Path $root 'assets\app.ico'), (Join-Path $root 'assets\antigravity.png') (Join-Path $dest 'assets') -Force
     Copy-Item (Join-Path $root 'AIMeter.ps1') $dest -Force
     $target = Join-Path $env:WINDIR 'System32\conhost.exe'
     $arguments = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File `"$(Join-Path $dest 'AIMeter.ps1')`""

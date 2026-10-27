@@ -61,7 +61,7 @@ jobs:
           # same app, started from source by PowerShell: for PCs with Smart App Control on
           New-Item -ItemType Directory script, script\src, script\assets, script\providers | Out-Null
           Copy-Item src\*.cs script\src
-          Copy-Item assets\app.ico script\assets
+          Copy-Item assets\app.ico, assets\antigravity.png script\assets
           Copy-Item providers\*.json script\providers
           Copy-Item AIMeter.ps1, 'Start AI Meter.cmd', LICENSE, NOTICE script
           Compress-Archive script\* AIMeter-script.zip

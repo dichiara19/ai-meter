@@ -382,6 +382,7 @@ namespace AIMeter
         {
             var def = Definitions.Get(id);
             if (id == "copilot") LoginGitHub();
+            else if (id == "antigravity") LoginAntigravity();
             else if (id == "claude") LoginClaude();
             else if (def != null && def.UsesKey) EnterApiKey(def);
         }
@@ -416,6 +417,21 @@ namespace AIMeter
         public void SignOutGitHub()
         {
             GitHubAuth.SignOut();
+            RefreshNow();
+        }
+
+        /// <summary>Accesso di Antigravity CLI: la CLI si apre in un terminale (su Windows se c'è, altrimenti in WSL) e lo chiede lei.</summary>
+        public void LoginAntigravity()
+        {
+            try
+            {
+                string exe = Path.Combine(Probe.Home, @".local\bin\agy.exe");
+                if (File.Exists(exe))
+                    Process.Start(new ProcessStartInfo("cmd.exe", "/c \"\"" + exe + "\"\"") { UseShellExecute = true });
+                else
+                    Process.Start(new ProcessStartInfo("wsl.exe", "-d " + Settings.WslDistro + " -- bash -lc \"~/.local/bin/agy\"") { UseShellExecute = true });
+            }
+            catch (System.ComponentModel.Win32Exception) { return; }
             RefreshNow();
         }
 

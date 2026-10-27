@@ -139,7 +139,7 @@ namespace AIMeter
     {
         private static List<ServiceDefinition> all;
         /// <summary>Servizi gestiti dal codice: una definizione con lo stesso id viene ignorata.</summary>
-        private static readonly string[] Reserved = { "claude", "openai", "copilot", "local" };
+        private static readonly string[] Reserved = { "claude", "openai", "copilot", "antigravity", "local" };
 
         public static string UserFolder { get { return Path.Combine(Settings.Folder, "providers"); } }
 

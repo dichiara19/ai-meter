@@ -121,6 +121,21 @@ namespace AIMeter
             if (S.CopilotEnabled) AddLimitRow(copilotRows, "copilot");
             Group(copilotRows.ToArray());
 
+            var agRows = new List<FrameworkElement>
+            {
+                Row(Ui.Logo("antigravity", 28), "Google Antigravity",
+                    Found(AntigravityProvider.Detected()) + L.T("5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits."),
+                    Toggle(S.AntigravityEnabled, v => { S.AntigravityEnabled = v; Changed(); Rebuild(); })),
+            };
+            if (S.AntigravityEnabled)
+            {
+                agRows.Add(Row(null, L.T("Antigravity CLI sign-in"),
+                    L.T("AI Meter uses the sign-in of Antigravity CLI and lets the CLI renew it: the token stays where the CLI keeps it."),
+                    Button(L.T("Sign in…"), () => C.LoginAntigravity(), false)));
+                AddLimitRow(agRows, "antigravity");
+            }
+            Group(agRows.ToArray());
+
             // servizi descritti dai file di definizione (inclusi e aggiunti dall'utente)
             foreach (var def in Definitions.All)
             {

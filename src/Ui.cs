@@ -55,6 +55,24 @@ namespace AIMeter
         {
             string key = id + (dark ? ":dark" : ":light");
             BitmapSource bmp;
+            if (!Logos.TryGetValue(key, out bmp) && id == "antigravity")
+            {
+                // Antigravity CLI non installa icone: il logo ufficiale è incluso nell'app (assets\antigravity.png)
+                bmp = null;
+                using (var s = Program.OpenAsset("antigravity.png"))
+                    if (s != null)
+                    {
+                        var bi = new BitmapImage();
+                        bi.BeginInit();
+                        bi.StreamSource = s;
+                        bi.DecodePixelWidth = 64;
+                        bi.CacheOption = BitmapCacheOption.OnLoad;
+                        bi.EndInit();
+                        bi.Freeze();
+                        bmp = bi;
+                    }
+                Logos[key] = bmp;
+            }
             if (!Logos.TryGetValue(key, out bmp))
             {
                 string file = FindInstalledLogo(id, dark);
@@ -164,7 +182,7 @@ namespace AIMeter
             return null;
         }
 
-        public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : id == "copilot" ? "Copilot" : id == "claude" ? "Claude" : "Brand." + id; }
+        public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : id == "copilot" ? "Copilot" : id == "claude" ? "Claude" : id == "antigravity" ? "Antigravity" : "Brand." + id; }
 
         /// <summary>Il limite predefinito: la sessione di 5 ore, altrimenti il primo limite in percentuale.</summary>
         public static UsageWindow Primary(Usage u)

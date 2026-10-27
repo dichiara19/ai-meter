@@ -20,9 +20,9 @@ That's all of it, most of the time: a pill **inside** the taskbar. No widget to 
 - **Lives in the taskbar.** The pill is part of the taskbar, not a window floating on it: it hides with an auto-hiding taskbar and with full-screen apps, follows the taskbar's light or dark mode and finds the free space for your layout. A desktop widget and a compact overlay are there if you want them.
 - **Looks like Windows made it.** Fluent design, Mica and Acrylic, your accent color, Windows fonts and notifications, a Settings page built like Windows 11 Settings. Six languages.
 - **Practically free to run.** About 0.02% CPU and 120 MB at rest. No Electron, no WebView, no runtime to install: WPF on the .NET Framework already in Windows. Efficiency cores, slower refresh on battery and when nothing is visible, nothing at all while the PC is locked.
-- **Windows and WSL, one view.** Claude Code, Codex and other coding agents running in WSL, model servers inside WSL (NAT or mirrored networking), the video memory of the WSL VM: shown next to their Windows counterparts. WSL is never started, and nothing is launched inside it.
+- **Windows and WSL, one view.** Claude Code, Codex and other coding agents running in WSL, model servers inside WSL (NAT or mirrored networking), the video memory of the WSL VM: shown next to their Windows counterparts. WSL is never started, and nothing runs inside it except, when a sign-in has expired, the agent's own CLI to renew it.
 - **Local models are first-class.** Ollama, LM Studio, llama.cpp, llama-swap, vLLM and more: video memory, context window, how much context the current request uses, requests in flight, and which coding agent (OpenCode, Pi, Gemini CLI, Qwen Code…) is talking to which model.
-- **Your subscriptions, before the wall.** Claude, ChatGPT / Codex, GitHub Copilot, Cursor, OpenRouter, DeepSeek, Kimi: 5-hour and weekly limits, a forecast ("at this pace it runs out at 15:40"), a notification at 20% and 5% that tells you which service still has room, and a tip before a reset when part of a limit would go unused. Pick which limit each service shows in the pill, and get notified whenever the limits you choose reset.
+- **Your subscriptions, before the wall.** Claude, ChatGPT / Codex, GitHub Copilot, Google Antigravity, Cursor, OpenRouter, DeepSeek, Kimi: 5-hour and weekly limits, a forecast ("at this pace it runs out at 15:40"), a notification at 20% and 5% that tells you which service still has room, and a tip before a reset when part of a limit would go unused. Pick which limit each service shows in the pill, and get notified whenever the limits you choose reset.
 - **Private and open.** No telemetry; the only network requests are each service's own usage endpoint. Apache 2.0 licensed, and a new service is a [20-line JSON file](docs/PROVIDERS.md).
 
 <p align="center"><img src="docs/media/demo.gif" alt="A notification warns that the Claude session is running low, then a click on the pill opens the panel with every service, local models and agents" width="440"></p>
@@ -72,6 +72,7 @@ Everything is read locally from files the official apps already write. Nothing i
   The panel shows the 5-hour session with its start and end time, weekly and per-model weekly limits, cloud session credits, extra usage credits and how the week splits between Claude Code, chats and Cowork.
 - **ChatGPT / Codex**: active Codex threads (app, CLI, VS Code) from Codex's local logs. Limits **in real time** by asking the installed `codex` program (`codex app-server`, JSON-RPC `account/rateLimits/read`): Codex uses its own login, AI Meter never reads or refreshes its tokens. Includes credits and free limit resets. If Codex is not available, the last value in its logs is used.
 - **GitHub Copilot** (off by default): premium requests and monthly quotas from GitHub's Copilot usage API. You sign in to GitHub from AI Meter with a device code; the token is encrypted with Windows Data Protection (DPAPI) for your user only. GitHub shows the request as "Visual Studio Code", the official Copilot app that can read quotas.
+- **Google Antigravity** (off by default): the 5-hour and weekly quotas of your Google AI plan, per model group (Gemini, Claude + GPT), from the API Antigravity itself uses. AI Meter reads the sign-in of Antigravity CLI (on Windows or in WSL, only while WSL is running) and never renews it: when it expires, it asks the CLI to (`agy models`, at most every 30 minutes). The Gemini app does not expose its limits, so they are not shown.
 - **Services described by a definition file** ([`providers/`](providers), format in [docs/PROVIDERS.md](docs/PROVIDERS.md)):
   - **Cursor**: included usage and on-demand spend for the billing cycle, from cursor.com, using the sign-in the Cursor app already keeps on your PC (read from its local database with the SQLite library built into Windows). AI Meter never refreshes or stores that token and never reads browser cookies.
   - **OpenRouter**: spending and limit of your API key. **DeepSeek** and **Kimi (Moonshot)**: account balance. You paste an API key in Settings (or set the usual environment variable); it is encrypted with Windows Data Protection.
@@ -98,7 +99,7 @@ How:
 - Data collection runs on a low-priority thread with **EcoQoS** (efficiency cores). Refresh every 10 s while the panel or Settings are open, every 30 s when only the pill, widget or overlay are visible, twice as slow on battery or Energy Saver, 120 s when nothing is visible, and **stopped** while the PC is locked or asleep. A refresh takes about 50 ms.
 - The taskbar pill checks every 2 s, with two window-position reads, whether the taskbar moved; it repositions itself only when something changed.
 - Files are read only when they change, large logs only from their tail, and only the needed fields are cached.
-- **WSL is never started**: it is read only if its VM is already running, and no process is ever launched inside it (listening ports are read from the kernel's TCP table as a file). AI Meter asks Windows which distributions are running at most once a minute.
+- **WSL is never started**: it is read only if its VM is already running, and listening ports are read from the kernel's TCP table as a file. The only process launched inside it is the CLI of Claude Code or Antigravity, to renew its own expired sign-in (`claude auth status`, `agy models`), so that AI Meter never handles refresh tokens. AI Meter asks Windows which distributions are running at most once a minute.
 - Local model servers are contacted only on `127.0.0.1`; a port that does not answer HTTP is dropped after one short request. GPU memory is read with PDH only while a local server runs.
 - The Claude limit is fetched over the network every 5 minutes (15 on battery), only while something is visible.
 - Full-screen detection is event-driven, not polled.
@@ -141,6 +142,7 @@ src/Probe.cs           shared probe (processes, WSL, file cache) and the collect
 src/ProviderClaude.cs  Claude: Claude Code and Cowork sessions, usage API
 src/ProviderCodex.cs   ChatGPT / Codex: threads from local logs, limits via codex app-server
 src/ProviderCopilot.cs GitHub Copilot: device-code sign-in, quotas API
+src/ProviderAntigravity.cs Google Antigravity: quota groups with the Antigravity CLI sign-in
 src/Model.cs           data model and JSON helpers
 src/ProviderDefined.cs services described by JSON definitions, API keys, SQLite reader
 src/ProviderLocal.cs   local model servers: discovery on Windows and WSL, loaded models, memory, context
@@ -182,6 +184,7 @@ Network connections are limited to reading your own usage:
 - **Claude limits** (on by default): a request to Anthropic's API (`api.anthropic.com`) with the OAuth access token of your existing Claude Code login. Governed by [Anthropic's privacy policy](https://www.anthropic.com/legal/privacy). You are told about it on first launch and can turn it off in Settings → *Limiti in tempo reale*.
 - **Codex limits**: requested by the installed `codex` program with its own login; AI Meter never handles that token.
 - **GitHub Copilot quotas** (off by default): a request to `api.github.com`, only if you enable Copilot and sign in to GitHub.
+- **Google Antigravity quotas** (off by default): requests to `cloudcode-pa.googleapis.com`, only if you enable Antigravity, with the sign-in of Antigravity CLI.
 - **Cursor usage**: a request to `cursor.com` with the Cursor app's own sign-in, only if Cursor is enabled.
 - **OpenRouter, DeepSeek, Kimi**: a request to `openrouter.ai`, `api.deepseek.com` or `api.moonshot.ai` with your API key, only if you turn the service on and add a key.
 - **Definitions you add**: a request to the address named in the file.
