@@ -6,7 +6,7 @@
   "color": { "light": "#000000", "dark": "#EDEDED" },
   "logo": { "image": "vercel.png" },
   "detect": { "env": ["AI_GATEWAY_API_KEY"] },
-  "auth": { "type": "key", "env": ["AI_GATEWAY_API_KEY"], "page": "https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys" },
+  "auth": { "type": "key", "ids": ["vercel", "vercel-ai-gateway"], "env": ["AI_GATEWAY_API_KEY"], "page": "https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys" },
   "request": { "url": "https://ai-gateway.vercel.sh/v1/credits", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
   "limits": [
     { "label": "AI Gateway credits", "balance": "balance", "currency": "USD" }

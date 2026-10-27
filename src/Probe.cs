@@ -57,7 +57,16 @@ namespace AIMeter
         public string WslRoot { get { return @"\\wsl.localhost\" + S.WslDistro; } }
         public string WslHome { get { return WslRoot + @"\home\" + S.WslUser; } }
 
+        /// <summary>La home in WSL se la distribuzione è accesa, altrimenti null: per chi legge file senza una raccolta in corso.</summary>
+        public static volatile string WslHomeUp;
+
         private void RefreshWslState()
+        {
+            RefreshWslStateCore();
+            WslHomeUp = wslUp ? WslHome : null;
+        }
+
+        private void RefreshWslStateCore()
         {
             bool vm = Procs.ContainsValue("vmmemwsl") || Procs.ContainsValue("vmmem");
             if (!vm || string.IsNullOrEmpty(S.WslDistro)) { wslUp = false; vmSeen = false; return; }

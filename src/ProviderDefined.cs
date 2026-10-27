@@ -72,7 +72,8 @@ namespace AIMeter
         public bool Detected()
         {
             if (detected == null) detected = DetectNow();
-            return detected.Value;
+            // una chiave in un programma del PC (OpenCode, Pi…) si cerca ogni volta: può comparire dopo, anche in WSL
+            return detected.Value || KeyFinder.Find(this) != null;
         }
 
         private bool DetectNow()
@@ -375,7 +376,14 @@ namespace AIMeter
             string token = null;
             if (type == "none") return "";
             foreach (var v in ServiceDefinition.Strings(a, "env")) { token = ServiceDefinition.Env(v); if (!string.IsNullOrEmpty(token)) return token.Trim(); }
-            if (type == "key") return ApiKeys.Get(D.Id);
+            if (type == "key")
+            {
+                // la chiave salvata in AI Meter, altrimenti quella di un programma del PC che usa lo stesso servizio
+                token = ApiKeys.Get(D.Id);
+                if (token != null) return token;
+                var found = KeyFinder.Find(D);
+                return found == null ? null : found.Key;
+            }
             if (type == "env") return null;
             if (type == "file")
             {

@@ -20,6 +20,7 @@ namespace AIMeter
         public bool AntigravityEnabled { get; set; } // quote di Google Antigravity (accesso di Antigravity CLI)
         /// <summary>Servizi descritti dai file di definizione: id → attivo. Assente = attivo se trovato sul PC.</summary>
         public System.Collections.Generic.Dictionary<string, bool> Services { get; set; }
+        public bool FindKeys { get; set; }          // usa le chiavi API già nei programmi del PC (OpenCode, Pi…), Windows e WSL
         public bool LocalEnabled { get; set; }      // modelli locali (Ollama, LM Studio, llama.cpp…)
         public bool LocalAgents { get; set; }       // sessioni delle CLI (OpenCode, Pi…)
         public string WslDistro { get; set; }
@@ -79,7 +80,7 @@ namespace AIMeter
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
             Theme = "system"; Language = "system"; Refresh = "auto"; NotifyLow = true; NotifyReset = true;
             NotifyResets = new System.Collections.Generic.Dictionary<string, bool>(); PillLimits = new System.Collections.Generic.Dictionary<string, string>();
-            TipsUnused = true; TipsShort = false; TipsWait = true;
+            TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
         }
 
         /// <summary>Avviso a ogni azzeramento attivo per questo limite.</summary>

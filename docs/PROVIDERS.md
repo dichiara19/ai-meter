@@ -57,7 +57,7 @@ Claude, ChatGPT/Codex and GitHub Copilot need custom sign-in flows and stay in c
 | `file` | A file. With `field` the file is JSON and the token is that field; `expires` is the path of its expiry. |
 | `sqlite` | A value read with `query` from the SQLite database at `path` (read only), for apps that keep their sign-in there. |
 
-All types also accept `env`: variables tried first. `jwt: true` checks the token's `exp` claim and treats an expired token as missing. `notice` replaces the message shown when the secret is missing.
+All types also accept `env`: variables tried first. With `type: "key"`, `ids` lists the names coding agents use for the service (OpenCode, Pi, Crush; default: the definition's `id`): if no key is saved in AI Meter, it uses the one those programs keep, or an `export` of an `env` variable in the shell profile, on Windows and in WSL while it is running. `jwt: true` checks the token's `exp` claim and treats an expired token as missing. `notice` replaces the message shown when the secret is missing.
 
 AI Meter never refreshes another app's sign-in: if a token has expired, the user opens that app and it renews it.
 

@@ -16,6 +16,13 @@ namespace AIMeter
         {
             // ======================================================================== italiano
             { "it", D(
+                "shell profile", "profilo della shell",
+                "Key found in {0}", "Chiave trovata in {0}",
+                "Using the key found in {0}. AI Meter reads it where it is and sends it only to {1}.", "Usa la chiave trovata in {0}. AI Meter la legge dov'è e la invia solo a {1}.",
+                "Use another key…", "Usa un'altra chiave…",
+                "API keys can come from the programs that already use them, so you don't have to paste them again:", "Le chiavi API possono arrivare dai programmi che le usano già, così non devi incollarle di nuovo:",
+                "Use API keys already on this PC", "Usa le chiavi API già presenti sul PC",
+                "OpenRouter, DeepSeek, Kimi, Vercel and other keys saved by OpenCode, Pi or Crush, or exported in your shell profile, on Windows and in WSL while it is running. Each key is sent only to its own service.", "Le chiavi di OpenRouter, DeepSeek, Kimi, Vercel e altri salvate da OpenCode, Pi o Crush, o esportate nel profilo della shell, su Windows e in WSL quando è acceso. Ogni chiave viene inviata solo al suo servizio.",
                 "On", "Attivo",
                 "{0}% left · {1}", "{0}% rimasto · {1}",
                 "Turn the service on to see its options.", "Attiva il servizio per vederne le opzioni.",
@@ -207,6 +214,13 @@ namespace AIMeter
 
             // ======================================================================== español
             { "es", D(
+                "shell profile", "perfil de la shell",
+                "Key found in {0}", "Clave encontrada en {0}",
+                "Using the key found in {0}. AI Meter reads it where it is and sends it only to {1}.", "Usa la clave encontrada en {0}. AI Meter la lee donde está y la envía solo a {1}.",
+                "Use another key…", "Usar otra clave…",
+                "API keys can come from the programs that already use them, so you don't have to paste them again:", "Las claves API pueden venir de los programas que ya las usan, así no tienes que pegarlas otra vez:",
+                "Use API keys already on this PC", "Usar las claves API que ya están en el PC",
+                "OpenRouter, DeepSeek, Kimi, Vercel and other keys saved by OpenCode, Pi or Crush, or exported in your shell profile, on Windows and in WSL while it is running. Each key is sent only to its own service.", "Claves de OpenRouter, DeepSeek, Kimi, Vercel y otros guardadas por OpenCode, Pi o Crush, o exportadas en tu perfil de shell, en Windows y en WSL mientras está en marcha. Cada clave se envía solo a su servicio.",
                 "On", "Activado",
                 "{0}% left · {1}", "{0}% restante · {1}",
                 "Turn the service on to see its options.", "Activa el servicio para ver sus opciones.",
@@ -398,6 +412,13 @@ namespace AIMeter
 
             // ======================================================================== français
             { "fr", D(
+                "shell profile", "profil du shell",
+                "Key found in {0}", "Clé trouvée dans {0}",
+                "Using the key found in {0}. AI Meter reads it where it is and sends it only to {1}.", "Utilise la clé trouvée dans {0}. AI Meter la lit là où elle est et l'envoie uniquement à {1}.",
+                "Use another key…", "Utiliser une autre clé…",
+                "API keys can come from the programs that already use them, so you don't have to paste them again:", "Les clés API peuvent venir des programmes qui les utilisent déjà, sans avoir à les recoller :",
+                "Use API keys already on this PC", "Utiliser les clés API déjà présentes sur le PC",
+                "OpenRouter, DeepSeek, Kimi, Vercel and other keys saved by OpenCode, Pi or Crush, or exported in your shell profile, on Windows and in WSL while it is running. Each key is sent only to its own service.", "Clés OpenRouter, DeepSeek, Kimi, Vercel et autres enregistrées par OpenCode, Pi ou Crush, ou exportées dans votre profil de shell, sous Windows et dans WSL quand il est lancé. Chaque clé n'est envoyée qu'à son propre service.",
                 "On", "Activé",
                 "{0}% left · {1}", "{0} % restant · {1}",
                 "Turn the service on to see its options.", "Activez le service pour voir ses options.",
@@ -589,6 +610,13 @@ namespace AIMeter
 
             // ======================================================================== deutsch
             { "de", D(
+                "shell profile", "Shell-Profil",
+                "Key found in {0}", "Schlüssel gefunden in {0}",
+                "Using the key found in {0}. AI Meter reads it where it is and sends it only to {1}.", "Verwendet den Schlüssel aus {0}. AI Meter liest ihn dort, wo er liegt, und sendet ihn nur an {1}.",
+                "Use another key…", "Anderen Schlüssel verwenden…",
+                "API keys can come from the programs that already use them, so you don't have to paste them again:", "API-Schlüssel können aus den Programmen kommen, die sie schon nutzen, damit du sie nicht erneut einfügen musst:",
+                "Use API keys already on this PC", "API-Schlüssel verwenden, die schon auf dem PC sind",
+                "OpenRouter, DeepSeek, Kimi, Vercel and other keys saved by OpenCode, Pi or Crush, or exported in your shell profile, on Windows and in WSL while it is running. Each key is sent only to its own service.", "Schlüssel für OpenRouter, DeepSeek, Kimi, Vercel und andere, gespeichert von OpenCode, Pi oder Crush oder in deinem Shell-Profil exportiert, unter Windows und in WSL, solange es läuft. Jeder Schlüssel wird nur an seinen eigenen Dienst gesendet.",
                 "On", "Ein",
                 "{0}% left · {1}", "{0} % übrig · {1}",
                 "Turn the service on to see its options.", "Schalte den Dienst ein, um seine Optionen zu sehen.",
@@ -780,6 +808,13 @@ namespace AIMeter
 
             // ======================================================================== português
             { "pt", D(
+                "shell profile", "perfil do shell",
+                "Key found in {0}", "Chave encontrada em {0}",
+                "Using the key found in {0}. AI Meter reads it where it is and sends it only to {1}.", "Usa a chave encontrada em {0}. O AI Meter a lê onde está e a envia só para {1}.",
+                "Use another key…", "Usar outra chave…",
+                "API keys can come from the programs that already use them, so you don't have to paste them again:", "As chaves de API podem vir dos programas que já as usam, assim não precisa colá-las de novo:",
+                "Use API keys already on this PC", "Usar as chaves de API que já estão no PC",
+                "OpenRouter, DeepSeek, Kimi, Vercel and other keys saved by OpenCode, Pi or Crush, or exported in your shell profile, on Windows and in WSL while it is running. Each key is sent only to its own service.", "Chaves do OpenRouter, DeepSeek, Kimi, Vercel e outros salvas pelo OpenCode, Pi ou Crush, ou exportadas no perfil do shell, no Windows e no WSL enquanto está ligado. Cada chave é enviada só para o seu serviço.",
                 "On", "Ativado",
                 "{0}% left · {1}", "{0}% restante · {1}",
                 "Turn the service on to see its options.", "Ative o serviço para ver as suas opções.",

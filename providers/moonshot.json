@@ -6,7 +6,7 @@
   "color": { "light": "#1F1F1F", "dark": "#E8E8E8" },
   "logo": { "image": "moonshot.png" },
   "detect": { "env": ["MOONSHOT_API_KEY"] },
-  "auth": { "type": "key", "env": ["MOONSHOT_API_KEY"], "page": "https://platform.kimi.ai/console/api-keys" },
+  "auth": { "type": "key", "ids": ["moonshotai", "moonshot", "kimi", "moonshotai-cn"], "env": ["MOONSHOT_API_KEY"], "page": "https://platform.kimi.ai/console/api-keys" },
   "request": { "url": "https://api.moonshot.ai/v1/users/me/balance", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
   "limits": [
     { "label": "Balance", "balance": "data.available_balance", "currency": "USD" }

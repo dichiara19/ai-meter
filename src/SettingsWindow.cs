@@ -225,6 +225,10 @@ namespace AIMeter
                 var sv = s;
                 Group(Link(sv.Logo, sv.Name, StatusOf(sv), Toggle(sv.On, v => { sv.Set(v); Changed(); Rebuild(); }), () => Open("service:" + sv.Id)));
             }
+            Hint(L.T("API keys can come from the programs that already use them, so you don't have to paste them again:"));
+            Group(Row(Ui.Glyph("", 20, "Text"), L.T("Use API keys already on this PC"),
+                L.T("OpenRouter, DeepSeek, Kimi, Vercel and other keys saved by OpenCode, Pi or Crush, or exported in your shell profile, on Windows and in WSL while it is running. Each key is sent only to its own service."),
+                Toggle(S.FindKeys, v => { S.FindKeys = v; KeyFinder.Forget(); Changed(); C.RefreshNow(); Rebuild(); })));
             Hint(L.T("More services can be added with a small definition file, without updating AI Meter."));
             Group(Row(Ui.Glyph("", 20, "Text"), L.T("Add a service"),
                 L.T("Put definition files in this folder and restart AI Meter. The format is described in the project documentation."),
@@ -239,6 +243,8 @@ namespace AIMeter
             if (!s.On)
             {
                 var def = Definitions.Get(s.Id);
+                var found = def != null && !ApiKeys.Has(def.Id) ? KeyFinder.Find(def) : null;
+                if (found != null) return L.F("Key found in {0}", found.Source);
                 if (def != null && def.UsesKey && !ApiKeys.Has(def.Id) && !def.Detected()) return L.T("Add an API key to read your usage.");
                 return s.Id == "local" ? L.T("Off") : Found(Detected(s.Id)).Trim();
             }
@@ -332,9 +338,15 @@ namespace AIMeter
                 default:
                     var d = Definitions.Get(id);
                     if (d != null && d.UsesKey)
-                        rows.Add(Row(null, L.T("API key"),
-                            ApiKeys.Has(d.Id) ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.") : L.T("Add an API key to read your usage."),
-                            ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false) : Button(L.T("Add key…"), () => C.EnterApiKey(d), true)));
+                    {
+                        var found = ApiKeys.Has(d.Id) ? null : KeyFinder.Find(d);
+                        string text = ApiKeys.Has(d.Id) ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.")
+                                    : found != null ? L.F("Using the key found in {0}. AI Meter reads it where it is and sends it only to {1}.", found.Source, d.Name)
+                                    : L.T("Add an API key to read your usage.");
+                        rows.Add(Row(null, L.T("API key"), text,
+                            ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false)
+                                              : Button(found != null ? L.T("Use another key…") : L.T("Add key…"), () => C.EnterApiKey(d), found == null)));
+                    }
                     break;
             }
             if (id != "local") AddLimitRow(rows, id);

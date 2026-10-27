@@ -5,7 +5,7 @@
   "color": { "light": "#5A5FD6", "dark": "#A6A9F7" },
   "logo": { "image": "openrouter.png" },
   "detect": { "env": ["OPENROUTER_API_KEY"] },
-  "auth": { "type": "key", "env": ["OPENROUTER_API_KEY"], "page": "https://openrouter.ai/settings/keys" },
+  "auth": { "type": "key", "ids": ["openrouter"], "env": ["OPENROUTER_API_KEY"], "page": "https://openrouter.ai/settings/keys" },
   "request": { "url": "https://openrouter.ai/api/v1/key", "headers": { "Authorization": "Bearer {token}" }, "interval": 5 },
   "limits": [
     { "label": "Key limit", "short": "$", "when": "data.limit", "used": "data.usage", "limit": "data.limit", "currency": "USD" },

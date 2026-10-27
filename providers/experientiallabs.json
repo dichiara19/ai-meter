@@ -6,7 +6,7 @@
   "color": { "light": "#0A0A0A", "dark": "#EDEDED" },
   "logo": { "image": "experientiallabs.png" },
   "detect": { "env": ["EXPLABS_API_KEY"] },
-  "auth": { "type": "key", "env": ["EXPLABS_API_KEY"], "page": "https://platform.experientiallabs.ai" },
+  "auth": { "type": "key", "ids": ["explabs", "experientiallabs", "experiential-labs"], "env": ["EXPLABS_API_KEY"], "page": "https://platform.experientiallabs.ai" },
   "request": { "url": "https://api.experientiallabs.ai/api/v1/credits", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
   "limits": [
     { "label": "Credits", "short": "$", "when": "data.total_credits", "used": "data.total_usage", "limit": "data.total_credits", "currency": "USD" },
