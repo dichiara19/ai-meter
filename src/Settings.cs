@@ -5,10 +5,10 @@ using Microsoft.Win32;
 
 namespace AIMeter
 {
-    /// <summary>Preferenze utente, salvate in %APPDATA%\AIMeter\settings.json.</summary>
+    /// <summary>User preferences stored in %APPDATA%\AIMeter\settings.json.</summary>
     public sealed class Settings
     {
-        // servizi collegati
+        // Connected services.
         public bool ClaudeEnabled { get; set; }
         public bool ClaudeLiveUsage { get; set; }
         public bool ClaudeShowChat { get; set; }
@@ -17,16 +17,16 @@ namespace AIMeter
         public bool OpenAIEnabled { get; set; }
         public bool OpenAIShowChat { get; set; }
         public bool CopilotEnabled { get; set; }
-        public bool AntigravityEnabled { get; set; } // quote di Google Antigravity (accesso di Antigravity CLI)
-        /// <summary>Servizi descritti dai file di definizione: id → attivo. Assente = attivo se trovato sul PC.</summary>
+        public bool AntigravityEnabled { get; set; } // Google Antigravity quotas using the CLI's authentication.
+        /// <summary>Definition-based services: id to enabled; missing entries follow local detection.</summary>
         public System.Collections.Generic.Dictionary<string, bool> Services { get; set; }
-        public bool FindKeys { get; set; }          // usa le chiavi API già nei programmi del PC (OpenCode, Pi…), Windows e WSL
-        public bool LocalEnabled { get; set; }      // modelli locali (Ollama, LM Studio, llama.cpp…)
-        public bool LocalAgents { get; set; }       // sessioni delle CLI (OpenCode, Pi…)
+        public bool FindKeys { get; set; }          // Discover existing API keys in local apps on Windows and WSL.
+        public bool LocalEnabled { get; set; }      // Local models, including Ollama, LM Studio and llama.cpp.
+        public bool LocalAgents { get; set; }       // CLI sessions, including OpenCode and Pi.
         public string WslDistro { get; set; }
         public string WslUser { get; set; }
 
-        // widget sul desktop
+        // Desktop widget.
         public bool DesktopWidget { get; set; }
         public double DesktopX { get; set; }
         public double DesktopY { get; set; }
@@ -37,27 +37,27 @@ namespace AIMeter
 
         public System.Collections.Generic.Dictionary<string, bool> ExpandedServices { get; set; }
 
-        // sovrimpressione
+        // Overlay.
         public bool Overlay { get; set; }
         public string OverlayCorner { get; set; }   // "tr", "tl", "br", "bl"
         public string OverlayMetric { get; set; }   // "5h", "week", "both"
         public bool OverlayHideFullscreen { get; set; }
         public bool OverlayCollapsed { get; set; }
 
-        // pillola nella barra delle applicazioni
+        // Taskbar pill.
         public bool TaskbarDock { get; set; }
         public string TaskbarSide { get; set; }     // "auto", "left", "right"
 
-        // notifiche
-        public bool NotifyLow { get; set; }         // limite sotto il 20% e il 5%
-        public bool NotifyReset { get; set; }       // limite di nuovo disponibile
-        /// <summary>Limiti per cui avvisare a ogni azzeramento: "servizio|limite" → attivo.</summary>
+        // Notifications.
+        public bool NotifyLow { get; set; }         // Notify below 20% and 5% remaining.
+        public bool NotifyReset { get; set; }       // Notify when a limit becomes available again.
+        /// <summary>Reset notifications keyed by provider and limit identity.</summary>
         public System.Collections.Generic.Dictionary<string, bool> NotifyResets { get; set; }
-        public bool TipsUnused { get; set; }        // suggerimento: limite che sta per azzerarsi con molto margine inutilizzato
-        public bool TipsShort { get; set; }         // lo stesso anche per i limiti brevi (sessione), che pesano su quelli lunghi
-        public bool TipsWait { get; set; }          // suggerimento: aspettare l'azzeramento invece di pagare l'uso extra
+        public bool TipsUnused { get; set; }        // Suggest quota that would otherwise expire unused.
+        public bool TipsShort { get; set; }         // Also suggest short-session quota, which consumes enclosing long-window limits.
+        public bool TipsWait { get; set; }          // Suggest waiting for a reset instead of paying for extra usage.
 
-        /// <summary>Righe nascoste nella scheda di un servizio: "id|chiave del limite", "id|*spend", "id|*models" → nascosta.</summary>
+        /// <summary>Hidden service-card rows keyed by limit identity, *spend or *models.</summary>
         public System.Collections.Generic.Dictionary<string, bool> HiddenRows { get; set; }
 
         internal bool RowHidden(string providerId, string key)
@@ -66,18 +66,18 @@ namespace AIMeter
             return HiddenRows != null && HiddenRows.TryGetValue(providerId + "|" + key, out h) && h;
         }
 
-        /// <summary>Budget di spesa dei servizi a credito: id → "importo|periodo" (periodo: day, week, month).</summary>
+        /// <summary>Credit-service budgets keyed by id, stored as amount|period.</summary>
         public System.Collections.Generic.Dictionary<string, string> Budgets { get; set; }
 
-        /// <summary>Limite da mostrare nella pillola per ogni servizio: id → chiave del limite o "auto". Assente = predefinito.</summary>
+        /// <summary>Per-service pill limit key or "auto"; a missing entry uses Default.</summary>
         public System.Collections.Generic.Dictionary<string, string> PillLimits { get; set; }
 
-        /// <summary>Le preferenze in uso nell'app (per le parti dell'interfaccia che non le ricevono come parametro).</summary>
+        /// <summary>Current preferences for UI components that do not receive them directly.</summary>
         internal static Settings Current;
 
-        // generale
+        // General.
         public string Theme { get; set; }           // "system", "light", "dark"
-        public string Language { get; set; }        // "system" o un codice di L.Languages
+        public string Language { get; set; }        // "system" or a language code from L.Languages.
         public string Refresh { get; set; }         // "auto", "low"
         public bool FirstRunDone { get; set; }
 
@@ -87,7 +87,7 @@ namespace AIMeter
             OpenAIEnabled = CodexProvider.Detected(); OpenAIShowChat = true; CopilotEnabled = false; LocalEnabled = true; LocalAgents = true; ExpandedLocal = true;
             WslDistro = DefaultWslDistro(); WslUser = Environment.UserName;
             Services = new System.Collections.Generic.Dictionary<string, bool>(); ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
-            DesktopWidget = false; DesktopX = double.MinValue; DesktopY = double.MinValue;   // la pillola nella barra è il modo principale; il widget si attiva nelle impostazioni
+            DesktopWidget = false; DesktopX = double.MinValue; DesktopY = double.MinValue;   // The taskbar pill is the default surface; the desktop widget is optional.
             TaskbarDock = true; TaskbarSide = "auto";
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
             Theme = "system"; Language = "system"; Refresh = "auto"; NotifyLow = true; NotifyReset = true;
@@ -97,7 +97,7 @@ namespace AIMeter
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
         }
 
-        /// <summary>Avviso a ogni azzeramento attivo per questo limite.</summary>
+        /// <summary>Whether every reset of this limit should be announced.</summary>
         internal bool NotifiesReset(string providerId, UsageWindow w)
         {
             bool on;
@@ -113,8 +113,20 @@ namespace AIMeter
 
         public static string Folder
         {
-            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AIMeter"); }
+            get
+            {
+#if AIMETER_TEST
+                if (TestFolder == null) throw new InvalidOperationException("Tests require an isolated settings folder.");
+                return TestFolder;
+#else
+                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AIMeter");
+#endif
+            }
         }
+
+#if AIMETER_TEST
+        internal static string TestFolder;
+#endif
 
         private static string FilePath { get { return Path.Combine(Folder, "settings.json"); } }
 
@@ -172,10 +184,10 @@ namespace AIMeter
             catch (Exception) { return ""; }
         }
 
-        // --- avvio automatico: collegamento "AI Meter" in Esecuzione automatica -------------
-        // Windows lo elenca con il nome e l'icona dell'app (Impostazioni > App > Avvio) e lo apre all'accesso.
-        // Prima era un valore nella chiave Run: con conhost.exe come programma Windows lo mostrava come
-        // "Host finestra console" e all'accesso poteva saltarlo. Il valore vecchio si sposta da solo.
+        // --- automatic startup through the AI Meter shortcut ------------------------------
+        // Windows lists the app's own name and icon under Apps > Startup and opens it at sign-in.
+        // The legacy Run entry showed conhost.exe instead of the app and could be skipped at sign-in.
+        // Migrate that entry to the startup shortcut automatically.
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string ApprovedKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder";
 
@@ -193,7 +205,7 @@ namespace AIMeter
 #endif
                 if (File.Exists(StartupLink))
                 {
-                    // spento da Impostazioni > App > Avvio o da Gestione attività: primo byte dispari
+                    // An odd first byte indicates startup was disabled through Windows Settings or Task Manager.
                     using (var k = Registry.CurrentUser.OpenSubKey(ApprovedKey))
                     {
                         var v = k == null ? null : k.GetValue("AI Meter.lnk") as byte[];
@@ -213,7 +225,7 @@ namespace AIMeter
                 if (value)
                 {
                     WriteStartupLink();
-                    // riacceso dall'app: toglie lo stato "disattivato" lasciato da Windows
+                    // Re-enabling startup in the app clears Windows' disabled state.
                     using (var k = Registry.CurrentUser.OpenSubKey(ApprovedKey, true))
                         if (k != null) k.DeleteValue("AI Meter.lnk", false);
                 }
@@ -221,7 +233,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>A ogni avvio: sposta la vecchia voce Run nel collegamento e lo allinea all'installazione attuale.</summary>
+        /// <summary>At launch, migrate the legacy Run entry and align the shortcut with the current installation.</summary>
         public static void RefreshStartup()
         {
             if (Native.IsPackaged) return;

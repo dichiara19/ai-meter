@@ -15,13 +15,13 @@ using Microsoft.Win32;
 
 namespace AIMeter
 {
-    /// <summary>Mattoni dell'interfaccia condivisi da widget, pannello e pillola.</summary>
+    /// <summary>UI components shared by the widget, panel and taskbar pill.</summary>
     internal static class Ui
     {
         private static CultureInfo It { get { return L.Culture; } }
         private static readonly Dictionary<string, BitmapSource> Logos = new Dictionary<string, BitmapSource>();
 
-        // ------------------------------------------------------------ testo e icone
+        // ------------------------------------------------------------ text and icons
         public static TextBlock Text(string text, double size, string brush, FontWeight? weight = null)
         {
             var t = new TextBlock { Text = text, FontSize = size, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -46,8 +46,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Logo ufficiale del servizio, letto dall'app installata sul PC (i marchi non sono inclusi nel progetto).
-        /// Se l'app non c'è, un monogramma con il colore del servizio.
+        /// Resolve the service logo from an installed app or a bundled provider asset.
+        /// Fall back to a monogram in the service's color when no image is available.
         /// </summary>
         public static FrameworkElement Logo(string id, double size) { return Logo(id, size, Theme.Dark); }
 
@@ -57,8 +57,8 @@ namespace AIMeter
             BitmapSource bmp;
             if (!Logos.TryGetValue(key, out bmp))
             {
-                // l'icona dell'app installata, se c'è; altrimenti il logo ufficiale incluso in AI Meter
-                // (Antigravity CLI non installa icone; i servizi via API hanno il loro accanto alla definizione)
+                // Prefer the installed app's icon, then the bundled official logo.
+                // Antigravity CLI has no icon; API services bundle theirs beside the definition.
                 string file = id == "antigravity" ? null : FindInstalledLogo(id, dark);
                 if (file != null && file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                     bmp = IconFromExe(file);
@@ -69,7 +69,7 @@ namespace AIMeter
                         var bi = new BitmapImage();
                         bi.BeginInit();
                         bi.UriSource = new Uri(file);
-                        bi.DecodePixelWidth = 64;   // basta per 16-32 px a qualsiasi DPI e tiene bassa la memoria
+                        bi.DecodePixelWidth = 64;   // Enough for 16-32 logical pixels at common DPI settings without excessive memory.
                         bi.CacheOption = BitmapCacheOption.OnLoad;
                         bi.EndInit();
                         bi.Freeze();
@@ -87,12 +87,12 @@ namespace AIMeter
             if (bmp == null) return Monogram(id, size);
             var img = new Image { Source = bmp, Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center };
             RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
-            // angoli arrotondati come le icone di Windows: i loghi quadrati presi dai siti non hanno angoli vivi
+            // Round square web logos to match Windows app icons.
             img.Clip = new RectangleGeometry(new Rect(0, 0, size, size), size * 0.22, size * 0.22);
             return img;
         }
 
-        /// <summary>Un'immagine da un flusso (risorsa incorporata o file), ridotta a 64 px; null se manca o non è valida.</summary>
+        /// <summary>Decode a resource or file stream at 64 pixels; return null for missing or invalid images.</summary>
         private static BitmapSource FromStream(Stream s)
         {
             if (s == null) return null;
@@ -113,7 +113,7 @@ namespace AIMeter
             catch (Exception) { return null; }
         }
 
-        /// <summary>Icona principale di un eseguibile installato (per le app che non hanno un'immagine del logo).</summary>
+        /// <summary>Extract an installed executable's main icon when no logo image is available.</summary>
         private static BitmapSource IconFromExe(string exe)
         {
             try
@@ -141,7 +141,7 @@ namespace AIMeter
             return b;
         }
 
-        /// <summary>Cerca l'icona nel pacchetto dell'app installata (registro dei pacchetti dell'utente).</summary>
+        /// <summary>Find the icon in an installed app package registered for the current user.</summary>
         private static string FindInstalledLogo(string id, bool dark)
         {
             if (id == "copilot") return FindCopilotLogo();
@@ -174,7 +174,7 @@ namespace AIMeter
             return null;
         }
 
-        /// <summary>Icona ufficiale di Copilot, dall'estensione inclusa in VS Code.</summary>
+        /// <summary>Load Copilot's official icon from its VS Code extension.</summary>
         private static string FindCopilotLogo()
         {
             foreach (var baseDir in new[] { Path.Combine(Probe.LocalAppData, @"Programs\Microsoft VS Code"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft VS Code") })
@@ -196,16 +196,16 @@ namespace AIMeter
 
         public static string BrandBrush(string id) { return id == "openai" ? "OpenAI" : id == "copilot" ? "Copilot" : id == "claude" ? "Claude" : id == "antigravity" ? "Antigravity" : "Brand." + id; }
 
-        /// <summary>Il limite predefinito: la sessione di 5 ore, altrimenti il primo limite in percentuale.</summary>
+        /// <summary>Default to the five-hour session, then a non-monetary limit, then a monetary service limit.</summary>
         public static UsageWindow Primary(Usage u)
         {
             if (u == null) return null;
             return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null && w.HasPercent)
-                   // servizi a credito: il limite in denaro del servizio (non il budget scelto, che si sceglie per la barra)
+                   // Use the service's monetary limit by default; a user budget requires an explicit choice.
                    ?? u.Windows.FirstOrDefault(w => w.HasPercent && !w.Budget && !w.Hidden);
         }
 
-        /// <summary>Il limite da mostrare in pillola, icona e suggerimenti per questo servizio, secondo le impostazioni.</summary>
+        /// <summary>Resolve the service's chosen limit for the pill, icon and tooltips.</summary>
         public static UsageWindow Primary(ProviderState p)
         {
             var shown = Shown(p, "5h");
@@ -213,8 +213,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// I limiti di un servizio da mostrare nella pillola: quello scelto nelle impostazioni ("auto" = il più vicino a
-        /// esaurirsi), altrimenti quelli dell'impostazione generale della sovrimpressione (5 ore, settimana o entrambi).
+        /// Use the explicit limit choice, or select the tightest limit in automatic mode.
+        /// Otherwise follow the global five-hour, weekly or combined display setting.
         /// </summary>
         public static UsageWindow[] Shown(ProviderState p, string metric)
         {
@@ -233,19 +233,19 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Il limite più vicino a esaurirsi: prima quelli che a questo ritmo finiscono prima dell'azzeramento (il primo a
-        /// finire), poi quello con meno margine. A parità, il più lungo, che è quello che blocca più a lungo.
+        /// Prefer the earliest forecast exhaustion before reset, then the smallest remaining percentage.
+        /// Break ties using the longest window, which blocks work for longer.
         /// </summary>
         public static UsageWindow Tightest(Usage u)
         {
-            var list = u.Windows.Where(w => w.HasPercent && w.Spent == null).ToList();
+            var list = u.Windows.Where(w => w.HasPercent).ToList();
             if (list.Count == 0) return null;
             var running = list.Where(w => w.RunsOutAt.HasValue).OrderBy(w => w.RunsOutAt.Value).FirstOrDefault();
             if (running != null) return running;
             return list.OrderBy(w => Math.Round(w.Remaining)).ThenByDescending(w => w.Length ?? TimeSpan.Zero).First();
         }
 
-        /// <summary>Colore della barra: avviso anche con margine se, a questo ritmo, finisce prima dell'azzeramento.</summary>
+        /// <summary>Warn about forecast exhaustion even when the current remaining percentage is high.</summary>
         public static string LevelBrush(UsageWindow w, string brand)
         {
             string level = LevelBrush(w.Remaining, brand);
@@ -259,7 +259,7 @@ namespace AIMeter
             return brand;
         }
 
-        // ------------------------------------------------------------ formattazione
+        // ------------------------------------------------------------ formatting
         public static string Ago(DateTime t)
         {
             if (t == DateTime.MinValue) return "";
@@ -270,7 +270,7 @@ namespace AIMeter
             return L.F("{0} d", (int)(s / 86400));
         }
 
-        /// <summary>"ora" oppure "5 min fa": quanto è vecchio un dato, in una frase.</summary>
+        /// <summary>Format the age of a reading, such as "now" or "5 min ago".</summary>
         public static string AgoPhrase(DateTime t)
         {
             return (DateTime.Now - t).TotalSeconds < 60 ? L.T("just now") : L.F("{0} ago", Ago(t));
@@ -289,7 +289,7 @@ namespace AIMeter
         {
             if (w.ResetsAt.HasValue && w.StartedAt.HasValue && (w.ResetsAt.Value - w.StartedAt.Value).TotalHours <= 24)
             {
-                // finestre brevi (sessione): inizio e fine, più il tempo che manca
+                // For short sessions, show the start, end and remaining time.
                 var r = w.ResetsAt.Value;
                 string span = w.StartedAt.Value.ToString("HH:mm", It) + " → " + r.ToString("HH:mm", It);
                 return r > DateTime.Now ? L.F("{0}, in {1}", span, Until(r)) : span;
@@ -306,7 +306,7 @@ namespace AIMeter
             return "";
         }
 
-        /// <summary>Nome del limite nella lingua attiva: l'etichetta è una chiave inglese, l'eventuale suffisso (modello) resta com'è.</summary>
+        /// <summary>Translate the limit label while preserving an optional model suffix.</summary>
         public static string LabelOf(UsageWindow w)
         {
             return w.Suffix == null ? L.T(w.Label) : L.T(w.Label) + " · " + w.Suffix;
@@ -332,7 +332,7 @@ namespace AIMeter
             return plan.ToUpperInvariant();
         }
 
-        // ------------------------------------------------------------ componenti
+        // ------------------------------------------------------------ components
         public static Border Card(UIElement child, Thickness padding)
         {
             var b = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = padding, Child = child };
@@ -342,8 +342,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Icona a anelli concentrici, uno per servizio (dall'esterno: Claude, poi ChatGPT):
-        /// l'arco colorato è la quota rimasta, con gli stessi colori di soglia delle barre.
+        /// Draw concentric service rings, with Claude outside ChatGPT.
+        /// Colored arcs show remaining quota using the same thresholds as the bars.
         /// </summary>
         public static FrameworkElement RingIcon(IList<Tuple<ProviderState, UsageWindow>> items, double size)
         {
@@ -383,8 +383,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Riga compatta "logo + % rimasto + barretta" per ogni servizio: è il contenuto della pillola,
-        /// sia in sovrimpressione sia nella barra delle applicazioni. dark: tema per i loghi (null = tema dell'app).
+        /// Build compact logo, value and bar rows for the overlay and taskbar pill.
+        /// The optional dark flag controls logo variants; null follows the app theme.
         /// </summary>
         public static StackPanel PillRow(Snapshot s, string metric, bool? dark)
         {
@@ -413,10 +413,11 @@ namespace AIMeter
                 bool any = false;
                 foreach (var w in Shown(p, metric))
                 {
-                    // un importo scelto per la pillola (es. speso oggi): il valore, senza barra
-                    if (w.NoBar && w.RightText != null)
+                    // Show standalone spending values and cached readings without a live percentage bar.
+                    if ((w.NoBar && w.RightText != null) || w.CachedAt.HasValue)
                     {
-                        var v = Text(w.RightText, 12, "Text", FontWeights.SemiBold);
+                        string value = w.RightText ?? (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(w.Remaining).ToString(It) + "%");
+                        var v = Text(w.CachedAt.HasValue ? L.F("{0} (cached)", value) : L.T(value), 12, "Text", FontWeights.SemiBold);
                         v.Margin = new Thickness(7, 0, 0, 0);
                         v.VerticalAlignment = VerticalAlignment.Center;
                         item.Children.Add(v);
@@ -435,7 +436,7 @@ namespace AIMeter
                     item.Children.Add(stack);
                     any = true;
                 }
-                // servizi con un saldo senza limite: l'importo al posto della percentuale
+                // Show a standalone balance instead of a percentage.
                 var balance = windows.FirstOrDefault(w => w.NoBar && w.RightText != null);
                 if (!any && balance != null) { var t = Text(balance.RightText, 12, "Text", FontWeights.SemiBold); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); any = true; }
                 if (!any) { var t = Text("–", 12, "Text3"); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); }
@@ -448,8 +449,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Area dei modelli locali nella pillola, staccata dai servizi cloud: memoria video occupata (barra sulla
-        /// capienza della scheda) o, se non nota, il numero di modelli caricati; un punto se stanno lavorando.
+        /// Keep local models separate from cloud services in the pill; show GPU memory usage when known.
+        /// Otherwise show the loaded model count, with an activity dot while models are working.
         /// </summary>
         private static FrameworkElement LocalPill(ProviderState p, bool afterCloud)
         {
@@ -488,7 +489,7 @@ namespace AIMeter
 
         public const string LocalGlyph = "";
 
-        /// <summary>Riepilogo dei modelli locali, per i suggerimenti.</summary>
+        /// <summary>Summarize local models for tooltips.</summary>
         public static string LocalSummary(ProviderState p)
         {
             if (p.Models == null || p.Models.Count == 0) return L.T("Local models: none loaded");
@@ -498,7 +499,7 @@ namespace AIMeter
             return string.Join("\n", lines);
         }
 
-        /// <summary>Server, dove gira, memoria e contesto di un modello locale, nei testi brevi della scheda.</summary>
+        /// <summary>Format a local model's server, location, memory and context for compact card text.</summary>
         public static List<string> LocalFacts(LocalModel m)
         {
             var f = new List<string> { m.Where == "WSL" ? m.Server + " (WSL)" : m.Server };
@@ -509,10 +510,10 @@ namespace AIMeter
             return f;
         }
 
-        /// <summary>Riga della scheda nascosta nelle impostazioni del servizio ("Nel pannello").</summary>
+        /// <summary>Check whether a service card row is hidden in Settings.</summary>
         private static bool RowHidden(string providerId, string key) { return Settings.Current != null && Settings.Current.RowHidden(providerId, key); }
 
-        /// <summary>Nome breve del modello: senza il prefisso del fornitore ("anthropic/claude-sonnet-5" → "claude-sonnet-5").</summary>
+        /// <summary>Shorten a model name by removing its provider prefix.</summary>
         public static string ShortModel(string model)
         {
             if (string.IsNullOrEmpty(model)) return model;
@@ -520,7 +521,7 @@ namespace AIMeter
             return slash >= 0 && slash < model.Length - 1 ? model.Substring(slash + 1) : model;
         }
 
-        /// <summary>Token in forma breve: 32768 → 32K, 40000 → 40K.</summary>
+        /// <summary>Format token counts compactly: 32768 becomes 32K, 40000 becomes 40K.</summary>
         public static string Tokens(int n)
         {
             if (n < 1000) return n.ToString(It);
@@ -528,7 +529,7 @@ namespace AIMeter
             return (k >= 10 ? Math.Round(k).ToString(It) : k.ToString("0.#", It)) + "K";
         }
 
-        /// <summary>Riepilogo testuale dei limiti a 5 ore, per i suggerimenti.</summary>
+        /// <summary>Summarize five-hour limits for tooltips.</summary>
         public static string Summary(Snapshot s)
         {
             return string.Join("\n", s.Providers.Select(p =>
@@ -543,8 +544,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Barra del margine rimasto. ghost: un secondo riempimento, dello stesso colore ma tenue, dietro quello pieno
-        /// (es. il margine del limite di Fable, quando quello vero è il più basso del limite settimanale).
+        /// Draw remaining quota with an optional faint fill behind the effective room.
+        /// The faint fill shows a model's own quota when an enclosing limit constrains it.
         /// </summary>
         public static FrameworkElement Bar(double remaining, string brush, double height, double ghost = -1)
         {
@@ -568,17 +569,18 @@ namespace AIMeter
             return host;
         }
 
-        /// <summary>Riga di un limite: etichetta e azzeramento a sinistra, percentuale rimasta a destra, barra sotto.</summary>
+        /// <summary>Build a limit row with its label and reset, remaining value, and optional bar.</summary>
         public static FrameworkElement UsageRow(UsageWindow w, Usage u, string brand)
         {
             var root = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
             var top = new DockPanel { LastChildFill = true };
-            // per i crediti in denaro si mostra quanto resta, non la percentuale
-            // limite di un modello dentro uno generale con meno margine: si mostra il margine vero
+            // Display remaining money for monetary limits.
+            // Cap model quota by the enclosing limit's remaining room.
             var parent = u == null ? null : u.ParentOf(w);
             bool capped = parent != null && parent.Remaining < w.Remaining;
             double room = capped ? parent.Remaining : w.Remaining;
             string right = w.RightText != null ? L.T(w.RightText) : (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(room).ToString(It) + "%");
+            if (w.CachedAt.HasValue) right = L.F("{0} (cached)", right);
             var pct = Text(right, 13, "Text", FontWeights.SemiBold);
             pct.Margin = new Thickness(8, 0, 0, 0);
             DockPanel.SetDock(pct, Dock.Right);
@@ -597,8 +599,13 @@ namespace AIMeter
 
             top.Children.Add(left);
             root.Children.Add(top);
-            if (w.NoBar) { root.ToolTip = LabelOf(w) + ": " + right; return root; }
-            // limitato dal limite generale: il margine vero pieno, quello del modello in trasparenza dietro
+            if (w.NoBar || w.CachedAt.HasValue)
+            {
+                root.ToolTip = LabelOf(w) + ": " + right + (w.Detail != null ? "\n" + w.Detail() : "")
+                    + (w.CachedAt.HasValue ? "\n" + L.F("Last updated {0}", w.CachedAt.Value.ToString("g", L.Culture)) : "");
+                return root;
+            }
+            // Draw effective room solid and the model's own remaining quota behind it.
             var bar = Bar(room, capped ? LevelBrush(room, brand) : LevelBrush(w, brand), 4, capped ? w.Remaining : -1);
             bar.Margin = new Thickness(0, 5, 0, 0);
             root.Children.Add(bar);
@@ -609,7 +616,7 @@ namespace AIMeter
                 c.TextWrapping = TextWrapping.Wrap;
                 root.Children.Add(c);
             }
-            // previsione: a questo ritmo finisce prima dell'azzeramento
+            // Show a forecast when exhaustion precedes the reset.
             if (w.RunsOutAt.HasValue)
             {
                 var f = Text(L.F("At this pace it runs out {0}.", Alerts.When(w.RunsOutAt.Value)).TrimEnd('.'), 11.5, "Caution");
@@ -677,14 +684,14 @@ namespace AIMeter
             return g;
         }
 
-        /// <summary>Scheda di un servizio: intestazione, limiti, avviso, elenco sessioni (se espansa).</summary>
+        /// <summary>Build a service card with its header, limits, notice and optional expanded session list.</summary>
         public static Border ProviderCard(ProviderState p, bool expanded, Action toggle, Action<string> login)
         {
             if (p.Models != null) return LocalCard(p, expanded, toggle);
             string brand = BrandBrush(p.Id);
             var stack = new StackPanel();
 
-            // intestazione cliccabile
+            // Clickable header.
             var head = new DockPanel { Background = Brushes.Transparent, Cursor = toggle != null ? Cursors.Hand : null };
             var logo = Logo(p.Id, 20);
             logo.Margin = new Thickness(0, 0, 10, 0);
@@ -737,7 +744,7 @@ namespace AIMeter
             head.Children.Add(title);
             stack.Children.Add(head);
 
-            // limiti
+            // Limits.
             var limits = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
             if (p.Usage != null && p.Usage.Windows.Count > 0)
                 foreach (var w in p.Usage.Windows.Where(x => !x.Hidden && !RowHidden(p.Id, x.Key)).Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
@@ -745,7 +752,7 @@ namespace AIMeter
                 limits.Children.Add(new TextBlock { Text = L.T("No limit data yet"), FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
             stack.Children.Add(limits);
 
-            // dato sui limiti non in tempo reale: lo si dice nella scheda, una volta sola
+            // Mark cached provider usage once in the card.
             if (p.Usage != null && p.Usage.Source != "live" && string.IsNullOrEmpty(p.Notice))
             {
                 var st = Text(L.F("Limits updated {0}", AgoPhrase(p.Usage.At)), 11.5, "Text3");
@@ -753,7 +760,7 @@ namespace AIMeter
                 stack.Children.Add(st);
             }
 
-            // ripartizione della settimana e crediti extra, in piccolo
+            // Compact weekly breakdown and extra-credit notes.
             if (p.Usage != null && p.Usage.Breakdown.Count > 0)
             {
                 var b = Text(L.F("This week: {0}", string.Join(" · ", p.Usage.Breakdown.Select(kv => kv.Key + " " + Math.Round(kv.Value) + "%"))), 11.5, "Text3");
@@ -769,7 +776,7 @@ namespace AIMeter
                 stack.Children.Add(c);
             }
 
-            // servizi a credito: spesa del periodo e modelli usati oggi dagli agenti del PC
+            // Show period spending and today's locally reported model usage for credit services.
             if (p.Usage != null && p.Usage.SpendNote != null && !RowHidden(p.Id, "*spend"))
             {
                 var sn = Text(p.Usage.SpendNote(), 11.5, "Text3");
@@ -779,7 +786,7 @@ namespace AIMeter
             }
             if (p.Usage != null && p.Usage.TodayModels != null && p.Usage.TodayModels.Count > 0 && !RowHidden(p.Id, "*models"))
             {
-                // un modello per riga: nome a sinistra, costo (o token, se l'agente non dà un costo) a destra
+                // Show each model beside its cost, or tokens if the agent does not report a cost.
                 var ms = p.Usage.TodayModels;
                 var money = new Money { Currency = "USD" };
                 var box = new StackPanel { Margin = new Thickness(0, p.Usage.SpendNote != null ? 4 : 8, 0, 0) };
@@ -802,7 +809,7 @@ namespace AIMeter
                 stack.Children.Add(box);
             }
 
-            // suggerimento attivo (margine che sta per andare perso, o aspettare invece di pagare)
+            // Show the active unused-quota or wait-instead-of-paying tip.
             if (p.Tip != null)
             {
                 var tip = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
@@ -861,8 +868,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Scheda dei modelli locali: memoria video della scheda, poi ogni modello caricato con server, memoria e contesto,
-        /// e sotto le sessioni delle CLI che lo usano. Le altre sessioni delle CLI compaiono in fondo.
+        /// Build the local-model card with GPU capacity and each model's server, memory and context.
+        /// List attached CLI sessions under each model and unmatched sessions at the bottom.
         /// </summary>
         public static Border LocalCard(ProviderState p, bool expanded, Action toggle)
         {
@@ -891,7 +898,7 @@ namespace AIMeter
             head.Children.Add(name);
             stack.Children.Add(head);
 
-            // memoria video della scheda: è il vero limite dei modelli locali
+            // GPU memory is the capacity constraint for local models.
             if (p.Running && p.GpuTotal > 0)
             {
                 double free = 100 - Math.Min(100, p.GpuUsed * 100.0 / p.GpuTotal);
@@ -929,7 +936,7 @@ namespace AIMeter
                 meta.TextTrimming = TextTrimming.CharacterEllipsis;
                 block.Children.Add(meta);
 
-                // contesto occupato dalla richiesta in corso, se il server lo dice
+                // Show context usage for the active request when the server reports it.
                 if (m.Context > 0 && m.ContextUsed > 0)
                 {
                     double left = 100 - Math.Min(100, m.ContextUsed * 100.0 / m.Context);
@@ -948,7 +955,7 @@ namespace AIMeter
                 stack.Children.Add(block);
             }
 
-            // sessioni delle CLI che non usano un modello caricato qui (cloud o server non raggiungibile)
+            // CLI sessions without a matching loaded model, including cloud and unreachable servers.
             if (expanded && p.Sessions.Count > 0)
             {
                 var div = new Border { Height = 1, Margin = new Thickness(-14, 12, -14, 6) };
@@ -969,10 +976,10 @@ namespace AIMeter
             return Card(stack, new Thickness(14, 12, 14, 12));
         }
 
-        // ------------------------------------------------------------ finestre Fluent
+        // ------------------------------------------------------------ Fluent windows
         /// <summary>
-        /// Rende la finestra "di sistema": niente barra del titolo, angoli arrotondati e ombra disegnati da DWM,
-        /// sfondo Mica (o Acrilico) gestito dal compositore. Se il backdrop non è disponibile usa un colore pieno.
+        /// Apply native window chrome with DWM corners, shadows and a compositor-managed backdrop.
+        /// Fall back to a solid background if Mica or Acrylic is unavailable.
         /// </summary>
         public static void MakeFluent(Window w, int backdrop, bool smallCorners, bool tool, bool noActivate)
         {
@@ -991,7 +998,7 @@ namespace AIMeter
                 var hwnd = new WindowInteropHelper(w).Handle;
                 var src = HwndSource.FromHwnd(hwnd);
                 if (tool) Native.AddExStyle(hwnd, Native.WS_EX_TOOLWINDOW | (noActivate ? Native.WS_EX_NOACTIVATE : 0), Native.WS_EX_APPWINDOW);
-                // niente menu di sistema: DWM non disegna pulsanti di chiusura sopra il contenuto
+                // Disable the system menu so DWM does not overlay caption buttons on the content.
                 int style = Native.GetWindowLong(hwnd, Native.GWL_STYLE);
                 Native.SetWindowLong(hwnd, Native.GWL_STYLE, style & ~(Native.WS_SYSMENU | Native.WS_MINIMIZEBOX | Native.WS_MAXIMIZEBOX));
                 ApplyBackdrop(w, backdrop, smallCorners);

@@ -21,6 +21,8 @@ You need Windows 10 or 11; no SDK and no Visual Studio are required.
 powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstall
 ```
 
+Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypass -File tests/run.ps1`. They compile the application sources in memory, use temporary storage, and contact only local HTTP fixtures. They do not start AI Meter or use your saved accounts. CI runs them before building.
+
 - **Run the build:** start `bin\AIMeter.exe`. If Smart App Control blocks unsigned executables on your PC, run `AIMeter.ps1` from the repository instead (`Start AI Meter.cmd` does the same).
 - **Close the installed copy first.** Only one instance runs at a time: exit any installed AI Meter from its menu before starting your build.
 - **`--demo`** shows demo data, handy for UI work and screenshots.
@@ -32,7 +34,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstall
 **Code**
 - C# 5, compiled by `csc.exe` of .NET Framework 4.8 with `/langversion:5`. That means no string interpolation, `?.`, `nameof` or expression-bodied members. Pull requests that don't build are caught by CI.
 - No NuGet packages and no new dependencies. The app uses WPF and the Windows APIs only; no WebView, no Electron.
-- Match the style of the surrounding code. Existing comments are in Italian; new comments may be in English.
+- Match the style of the surrounding code. Write comments in English, explaining behavior or constraints that are not obvious from the code. Translate existing comments when revising a file.
 - Keep it light. No tight polling loops and no timers under a second. Read files only when they change and large logs only from their tail. Never wake WSL: it is read only when it is already running.
 
 **Strings**

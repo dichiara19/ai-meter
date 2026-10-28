@@ -16,8 +16,8 @@ using System.Windows.Shell;
 namespace AIMeter
 {
     /// <summary>
-    /// Un servizio descritto da un file JSON (providers\*.json): dove trovare l'accesso, quale indirizzo interrogare e
-    /// come leggere la risposta. Il formato è documentato in docs/PROVIDERS.md.
+    /// A service defined in providers\*.json: authentication, usage endpoint and response mapping.
+    /// The definition format is documented in docs/PROVIDERS.md.
     /// </summary>
     internal sealed class ServiceDefinition
     {
@@ -27,7 +27,7 @@ namespace AIMeter
 
         public Dictionary<string, object> Auth { get { return Json.Obj(Raw, "auth"); } }
         public string AuthType { get { return Json.Str(Auth, "type") ?? "none"; } }
-        /// <summary>Il servizio usa una chiave API che l'utente incolla nelle impostazioni.</summary>
+        /// <summary>Whether the service authenticates with an API key.</summary>
         public bool UsesKey { get { return AuthType == "key"; } }
         public string KeyPage { get { return Json.Str(Auth, "page"); } }
 
@@ -47,7 +47,7 @@ namespace AIMeter
             uint c;
             if (ParseColor(Json.Str(color, "light"), out c)) def.ColorLight = c;
             if (ParseColor(Json.Str(color, "dark"), out c)) def.ColorDark = c;
-            // traduzioni dei testi della definizione: { "it": { "Credits": "Crediti" } }
+            // Register translations supplied by the definition.
             var i18n = Json.Obj(d, "i18n");
             if (i18n != null)
                 foreach (var lang in i18n)
@@ -66,13 +66,13 @@ namespace AIMeter
             return true;
         }
 
-        /// <summary>Trovato sul PC: un file o una cartella dell'app, un programma nel PATH, una variabile d'ambiente.</summary>
+        /// <summary>Detect installed files, commands on PATH, or environment variables.</summary>
         private bool? detected;
 
         public bool Detected()
         {
             if (detected == null) detected = DetectNow();
-            // una chiave in un programma del PC (OpenCode, Pi…) si cerca ogni volta: può comparire dopo, anche in WSL
+            // Recheck discovered credentials because another app or WSL may become available later.
             return detected.Value || KeyFinder.Find(this) != null;
         }
 
@@ -86,7 +86,7 @@ namespace AIMeter
             return false;
         }
 
-        /// <summary>Logo dell'app installata: un'immagine o l'icona di un eseguibile; null = monogramma.</summary>
+        /// <summary>Find an installed image or executable icon; null falls back to a monogram.</summary>
         public string LogoFile()
         {
             var logo = Json.Obj(Raw, "logo");
@@ -99,15 +99,15 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Logo incluso con la definizione ("logo": { "image": "x.png", "imageDark": "x-dark.png" }), accanto al file:
-        /// per quelle incluse una risorsa dell'eseguibile o la cartella providers, per quelle dell'utente la sua cartella.
+        /// Resolve the definition's logo image or dark-theme variant from its own directory.
+        /// Built-in definitions also support embedded resources and the bundled providers directory.
         /// </summary>
         public Stream LogoImage(bool dark)
         {
             var logo = Json.Obj(Raw, "logo");
             string name = (dark ? Json.Str(logo, "imageDark") : null) ?? Json.Str(logo, "image");
             if (string.IsNullOrEmpty(name)) return null;
-            name = Path.GetFileName(name);   // solo un file accanto alla definizione, mai un percorso altrove
+            name = Path.GetFileName(name);   // Only accept a filename beside the definition.
             try
             {
                 if (Origin == "built-in")
@@ -125,7 +125,7 @@ namespace AIMeter
             catch (ArgumentException) { return null; }
         }
 
-        // ------------------------------------------------------------ utilità condivise
+        // ------------------------------------------------------------ shared utilities
         public static IEnumerable<string> Strings(Dictionary<string, object> d, string key)
         {
             object v;
@@ -135,7 +135,7 @@ namespace AIMeter
             return list == null ? new string[0] : list.OfType<string>().ToArray();
         }
 
-        /// <summary>%VARIABILI% di Windows e ~ per la cartella dell'utente.</summary>
+        /// <summary>Expand Windows environment variables and the user's home directory.</summary>
         public static string Expand(string p)
         {
             if (string.IsNullOrEmpty(p)) return p;
@@ -162,11 +162,11 @@ namespace AIMeter
         }
     }
 
-    /// <summary>Le definizioni disponibili: quelle incluse in AI Meter e quelle dell'utente in %APPDATA%\AIMeter\providers.</summary>
+    /// <summary>Load built-in definitions and user definitions from %APPDATA%\AIMeter\providers.</summary>
     internal static class Definitions
     {
         private static List<ServiceDefinition> all;
-        /// <summary>Servizi gestiti dal codice: una definizione con lo stesso id viene ignorata.</summary>
+        /// <summary>Ignore definitions whose ids belong to providers implemented in code.</summary>
         private static readonly string[] Reserved = { "claude", "openai", "copilot", "antigravity", "local" };
 
         public static string UserFolder { get { return Path.Combine(Settings.Folder, "providers"); } }
@@ -183,9 +183,9 @@ namespace AIMeter
                 ServiceDefinition d;
                 try { d = ServiceDefinition.FromJson(text, origin); }
                 catch (Exception) { d = null; }
-                if (d != null && !Reserved.Contains(d.Id)) byId[d.Id] = d;   // l'ultima vince: quelle dell'utente sostituiscono le incluse
+                if (d != null && !Reserved.Contains(d.Id)) byId[d.Id] = d;   // User definitions override built-in definitions with the same id.
             };
-            // incluse: risorse dell'eseguibile, oppure la cartella providers accanto al sorgente
+            // Load embedded definitions first, followed by bundled and user files.
             var asm = typeof(Definitions).Assembly;
             foreach (var n in asm.GetManifestResourceNames().Where(n => n.StartsWith("providers.") && n.EndsWith(".json")).OrderBy(n => n))
                 using (var s = asm.GetManifestResourceStream(n))
@@ -206,7 +206,7 @@ namespace AIMeter
     }
 
     /// <summary>
-    /// Percorsi nelle risposte JSON: "data.usage", "items[0].name", "limits[type=session].used", "$" per la radice.
+    /// JSON paths support dotted fields, array indices, filters and "$" for the root.
     /// </summary>
     internal static class JPath
     {
@@ -240,7 +240,7 @@ namespace AIMeter
             return cur;
         }
 
-        /// <summary>Filtro "campo=valore" o "campo!=valore" su un elemento di un elenco.</summary>
+        /// <summary>Match an array item using field=value or field!=value.</summary>
         public static bool Matches(object item, string filter)
         {
             if (string.IsNullOrEmpty(filter)) return true;
@@ -282,7 +282,7 @@ namespace AIMeter
             return c == null || c.Count > 0;
         }
 
-        /// <summary>Data da testo ISO, secondi o millisecondi Unix (riconosciuti dalla grandezza).</summary>
+        /// <summary>Parse ISO dates or Unix timestamps, distinguishing seconds from milliseconds by magnitude.</summary>
         public static DateTime? Date(object v)
         {
             var n = Num(v);
@@ -291,7 +291,7 @@ namespace AIMeter
         }
     }
 
-    /// <summary>Chiavi API incollate dall'utente, cifrate con DPAPI per l'utente corrente.</summary>
+    /// <summary>Store user-supplied API keys encrypted with the current user's DPAPI protection.</summary>
     internal static class ApiKeys
     {
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("AIMeter.ApiKey");
@@ -319,14 +319,15 @@ namespace AIMeter
         public static void Remove(string id) { try { File.Delete(FilePath(id)); } catch (IOException) { } }
     }
 
-    /// <summary>Un servizio letto dalla sua definizione JSON.</summary>
+    /// <summary>Collect usage according to a JSON service definition.</summary>
     internal sealed class DefinedProvider : Provider
     {
         private readonly ServiceDefinition D;
         private Usage live;
         private string plan;
         private DateTime fetchedAt = DateTime.MinValue;
-        private string problem;   // avviso da mostrare (accesso mancante o scaduto)
+        private string problem;   // Authentication notice shown when access is missing or expired.
+        private string credentialScope, spendScope;
 
         public DefinedProvider(ServiceDefinition d) { D = d; }
 
@@ -351,7 +352,7 @@ namespace AIMeter
                 Fetch(req);
             }
             st.Plan = plan;
-            if (live != null) st.Usage = Decorate((DateTime.Now - live.At).TotalMinutes > interval + 2 ? live.AsCache() : live, p);
+            if (live != null) st.Usage = Decorate((DateTime.Now - live.At).TotalMinutes > interval + 2 ? live.AsCache() : live, p, DateTime.Now);
             if (problem != null && live == null)
             {
                 st.NeedsLogin = true;
@@ -360,9 +361,9 @@ namespace AIMeter
             return st;
         }
 
-        // ================================================================ spesa, budget, modelli usati
-        /// <summary>Spesa letta dal servizio ("spend" nella definizione): totale, saldo, e se ci sono giorno/settimana/mese.</summary>
-        private sealed class SpendIn { public double? Total, Balance, Day, Week, Month; public string Currency; }
+        // ================================================================ spending, budgets and models
+        /// <summary>Spending fields reported by the service, timestamped for period validation.</summary>
+        private sealed class SpendIn { public double? Total, Balance, Day, Week, Month; public string Currency; public DateTime At; }
         private SpendIn spend;
 
         private SpendIn ReadSpend(object doc)
@@ -371,15 +372,36 @@ namespace AIMeter
             if (s == null) return null;
             double scale = Json.Num(s, "scale") ?? 1;
             Func<string, double?> num = k => { var v = Number(doc, s, k); return v == null ? null : v * scale; };
-            var r = new SpendIn { Total = num("total"), Balance = num("balance"), Day = num("day"), Week = num("week"), Month = num("month"), Currency = Currency(doc, s) ?? "USD" };
-            return r.Total == null && r.Balance == null && r.Day == null ? null : r;
+            var r = new SpendIn { Total = num("total"), Balance = num("balance"), Day = num("day"), Week = num("week"), Month = num("month"), Currency = Currency(doc, s) ?? "USD", At = DateTime.Now };
+            return r.Total == null && r.Balance == null && r.Day == null && r.Week == null && r.Month == null ? null : r;
+        }
+
+        private double? ServiceSpend(string period)
+        {
+            return period == "day" ? spend.Day : period == "week" ? spend.Week : spend.Month;
+        }
+
+        private PeriodSpend Spending(string period, DateTime now)
+        {
+            var value = ServiceSpend(period);
+            if (!value.HasValue) return SpendTracker.Since(spendScope, SpendTracker.Start(period, now, false));
+            var start = SpendTracker.Start(period, now, true);
+            // A previous UTC period's response must never be relabelled as current spending.
+            if (SpendTracker.Start(period, spend.At, true) != start) return null;
+            return new PeriodSpend { Amount = value.Value, From = start };
+        }
+
+        private static string SpendText(PeriodSpend value, Money money)
+        {
+            if (value == null) return L.T("Spending unavailable");
+            return value.Estimated ? L.F("{0} estimated since {1}", money.Format(value.Amount), value.From.ToString("g", L.Culture)) : money.Format(value.Amount);
         }
 
         /// <summary>
-        /// La lettura del servizio più quello che calcola AI Meter: spesa di oggi, della settimana e del mese (per la pillola
-        /// e una riga nella scheda), il budget scelto nelle impostazioni come limite con barra, e i modelli usati oggi.
+        /// Combine provider usage with period spending, user budgets and today's models.
+        /// Only provider-reported period totals can establish remaining budget and threshold alerts.
         /// </summary>
-        private Usage Decorate(Usage u, Probe p)
+        private Usage Decorate(Usage u, Probe p, DateTime now)
         {
             var extra = new List<UsageWindow>();
             Func<string> note = null;
@@ -387,33 +409,36 @@ namespace AIMeter
             if (spend != null)
             {
                 var money = new Money { Currency = spend.Currency };
-                bool fromService = spend.Day != null || spend.Week != null || spend.Month != null;
-                var now = DateTime.Now;
-                Func<string, double?> spent = per => fromService
-                    ? (per == "day" ? spend.Day : per == "week" ? spend.Week : spend.Month)
-                    : SpendTracker.Since(D.Id, SpendTracker.Start(per, now, false));
-                var values = new Dictionary<string, double?> { { "day", spent("day") }, { "week", spent("week") }, { "month", spent("month") } };
+                var values = new Dictionary<string, PeriodSpend> { { "day", Spending("day", now) }, { "week", Spending("week", now) }, { "month", Spending("month", now) } };
                 var labels = new Dictionary<string, string> { { "day", "Spent today" }, { "week", "Spent this week" }, { "month", "Spent this month" } };
                 foreach (var kv in values)
-                    if (kv.Value.HasValue)
-                        extra.Add(new UsageWindow { Label = labels[kv.Key], Short = "$", NoBar = true, Hidden = true, RightText = money.Format(kv.Value.Value) });
-                if (values.Values.Any(v => v.HasValue))
-                    note = () => L.F("Spent: today {0} · this week {1} · this month {2}",
-                        values["day"].HasValue ? money.Format(values["day"].Value) : "–",
-                        values["week"].HasValue ? money.Format(values["week"].Value) : "–",
-                        values["month"].HasValue ? money.Format(values["month"].Value) : "–");
+                    extra.Add(new UsageWindow { Label = labels[kv.Key], Short = "$", NoBar = true, Hidden = true, RightText = SpendText(kv.Value, money) });
+                note = () => L.F("Spent: today {0} · this week {1} · this month {2}",
+                    SpendText(values["day"], money), SpendText(values["week"], money), SpendText(values["month"], money));
 
                 double amount;
                 string period;
                 if (SpendTracker.Budget(Settings.Current, D.Id, out amount, out period))
                 {
-                    double used = spent(period) ?? 0;
-                    extra.Add(new UsageWindow
+                    var value = values[period];
+                    bool fromService = ServiceSpend(period).HasValue;
+                    var budget = new UsageWindow
                     {
                         Label = period == "day" ? "Daily budget" : period == "week" ? "Weekly budget" : "Monthly budget", Short = "$", Budget = true,
-                        Used = Math.Min(100, used / amount * 100), Spent = new Money { Used = used, Limit = amount, Currency = spend.Currency },
                         StartedAt = SpendTracker.Start(period, now, fromService), ResetsAt = SpendTracker.End(period, now, fromService),
-                    });
+                    };
+                    if (value == null || value.Estimated)
+                    {
+                        budget.NoBar = true;
+                        budget.RightText = value == null ? "Spending unavailable" : L.F("{0} estimated of {1}", money.Format(value.Amount), money.Format(amount));
+                        budget.Detail = () => SpendText(value, money) + "\n" + L.T("Sampled spending can miss usage and top-ups. Remaining budget and threshold alerts require a provider-reported period total.");
+                    }
+                    else
+                    {
+                        budget.Used = Math.Max(0, Math.Min(100, value.Amount / amount * 100));
+                        budget.Spent = new Money { Used = value.Amount, Limit = amount, Currency = spend.Currency };
+                    }
+                    extra.Add(budget);
                 }
             }
             var result = u.With(extra);
@@ -429,8 +454,8 @@ namespace AIMeter
             return list == null ? new List<Dictionary<string, object>>() : list.OfType<Dictionary<string, object>>().ToList();
         }
 
-        // ================================================================ accesso
-        /// <summary>Il segreto da usare nella richiesta ("" se non serve), null se manca o è scaduto.</summary>
+        // ================================================================ authentication
+        /// <summary>Return the request secret, an empty string if none is required, or null if unavailable.</summary>
         private string Token()
         {
             var a = D.Auth;
@@ -440,7 +465,7 @@ namespace AIMeter
             foreach (var v in ServiceDefinition.Strings(a, "env")) { token = ServiceDefinition.Env(v); if (!string.IsNullOrEmpty(token)) return token.Trim(); }
             if (type == "key")
             {
-                // la chiave salvata in AI Meter, altrimenti quella di un programma del PC che usa lo stesso servizio
+                // Prefer the saved key, then credentials discovered in another app for this service.
                 token = ApiKeys.Get(D.Id);
                 if (token != null) return token;
                 var found = KeyFinder.Find(D);
@@ -458,7 +483,7 @@ namespace AIMeter
             if (string.IsNullOrEmpty(token)) return null;
             token = token.Trim();
 
-            // valore JSON: il token è un campo, e la scadenza un altro
+            // Extract the token and expiry fields from JSON credentials.
             string field = Json.Str(a, "field");
             if (field != null)
             {
@@ -487,7 +512,7 @@ namespace AIMeter
             catch (FormatException) { return null; }
         }
 
-        /// <summary>{token}, {jwt.campo}, {env:NOME}, con filtri |urlencode e |afterLast:X (X = un carattere).</summary>
+        /// <summary>Expand token, JWT and environment placeholders with optional URL and suffix filters.</summary>
         private static string Fill(string template, string token)
         {
             if (template == null) return null;
@@ -520,7 +545,7 @@ namespace AIMeter
             });
         }
 
-        // ================================================================ richiesta
+        // ================================================================ requests
         private void Fetch(Dictionary<string, object> req)
         {
             string token = Token();
@@ -528,21 +553,38 @@ namespace AIMeter
             {
                 problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "Add your API key in Settings to see your usage" : "Sign in to see your usage");
                 live = null;
+                spend = null;
                 return;
+            }
+            string scope = SpendTracker.Scope(D.Id, token, "");
+            if (scope != credentialScope)
+            {
+                credentialScope = scope;
+                live = null;
+                spend = null;
+                plan = null;
+                moreCache.Clear();
+                moreCredentials.Clear();
+                moreBlocked.Clear();
             }
             try
             {
                 string text = Send(req, token);
-                // risposta senza segreti, per diagnosi e per chi scrive una definizione
+                // Keep the usage response for diagnostics and definition authors.
                 try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + "-usage-raw.json"), text, new UTF8Encoding(false)); }
                 catch (IOException) { }
                 var doc = Json.ParseAny(text);
                 plan = JPath.Str(JPath.Get(doc, Json.Str(D.Raw, "plan")));
                 if (Json.Str(D.Raw, "plan") == null) plan = null;
                 live = Map(doc, D.Raw);
+                if (live != null) live.Identity = credentialScope;
                 problem = live == null ? "The service answered without usage data" : null;
                 spend = ReadSpend(doc);
-                if (spend != null) SpendTracker.Record(D.Id, spend.Total, spend.Balance);
+                if (spend != null)
+                {
+                    spendScope = SpendTracker.Scope(D.Id, token, spend.Currency);
+                    SpendTracker.Record(spendScope, spend.Total, spend.Balance);
+                }
                 if (live != null) FetchMore(token);
             }
             catch (WebException e)
@@ -558,13 +600,15 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Richieste aggiuntive ("more"): altri dati dello stesso servizio, come il credito dell'account di OpenRouter. Usano
-        /// la chiave aggiuntiva indicata ("key", salvata nella pagina del servizio) o, se manca, quella principale; se il
-        /// servizio la rifiuta si riprova dopo 6 ore. Un errore qui non tocca i dati principali.
+        /// Fetch additional usage with an optional separate credential; cache each response independently.
+        /// After authentication failures, retry the main credential after six hours or an extra key after one hour.
+        /// Changing either credential invalidates its cached response and authentication backoff.
         /// </summary>
         private readonly Dictionary<int, DateTime> moreBlocked = new Dictionary<int, DateTime>();
+        private readonly Dictionary<int, Usage> moreCache = new Dictionary<int, Usage>();
+        private readonly Dictionary<int, string> moreCredentials = new Dictionary<int, string>();
 
-        /// <summary>Chiavi aggiuntive ("&lt;id&gt;.&lt;slot&gt;") che servono perché il servizio ha rifiutato quella principale: le impostazioni le propongono.</summary>
+        /// <summary>Extra credential slots to offer in Settings after authentication is rejected.</summary>
         public static readonly HashSet<string> NeedsExtraKey = new HashSet<string>();
 
         private void FetchMore(string token)
@@ -577,15 +621,28 @@ namespace AIMeter
                 if (req == null) continue;
                 string slot = Json.Str(spec, "key");
                 string own = slot != null ? ApiKeys.Get(D.Id + "." + slot) : null;
+                string credential = SpendTracker.Scope(D.Id, own ?? token, "");
+                string previous;
+                if (!moreCredentials.TryGetValue(i, out previous) || previous != credential)
+                {
+                    moreCredentials[i] = credential;
+                    moreCache.Remove(i);
+                    moreBlocked.Remove(i);
+                }
                 DateTime until;
-                if (own == null && moreBlocked.TryGetValue(i, out until) && DateTime.Now < until) continue;
+                bool fresh = false;
+                if (moreBlocked.TryGetValue(i, out until) && DateTime.Now < until)
+                {
+                    AppendExtra(i, false);
+                    continue;
+                }
                 try
                 {
                     string text = Send(req, own ?? token);
                     try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + "-more" + i + "-raw.json"), text, new UTF8Encoding(false)); }
                     catch (IOException) { }
                     var extra = Map(Json.ParseAny(text), spec);
-                    if (extra != null) live.Windows.AddRange(extra.Windows);
+                    if (extra != null) { moreCache[i] = extra; fresh = true; }
                     moreBlocked.Remove(i);
                     if (slot != null && own == null) lock (NeedsExtraKey) NeedsExtraKey.Remove(D.Id + "." + slot);
                 }
@@ -599,10 +656,24 @@ namespace AIMeter
                     }
                 }
                 catch (IOException) { }
+                AppendExtra(i, fresh);
             }
         }
 
-        /// <summary>Una richiesta al servizio come la descrive la definizione; il testo della risposta.</summary>
+        private void AppendExtra(int index, bool fresh)
+        {
+            Usage cached;
+            if (!moreCache.TryGetValue(index, out cached) || (DateTime.Now - cached.At).TotalDays > 10) return;
+            foreach (var w in cached.Windows)
+                live.Windows.Add(new UsageWindow
+                {
+                    Label = w.Label, Suffix = w.Suffix, Short = w.Short, Used = w.Used, Spent = w.Spent,
+                    RightText = w.RightText, NoBar = w.NoBar, StartedAt = w.StartedAt, ResetsAt = w.ResetsAt,
+                    CachedAt = fresh ? (DateTime?)null : cached.At,
+                });
+        }
+
+        /// <summary>Send the configured request and return its response body.</summary>
         private string Send(Dictionary<string, object> req, string token)
         {
             {
@@ -634,8 +705,8 @@ namespace AIMeter
             }
         }
 
-        // ================================================================ lettura della risposta
-        /// <summary>Limiti e note di un blocco della definizione (quello principale o uno di "more") letti dalla risposta.</summary>
+        // ================================================================ response mapping
+        /// <summary>Map limits and notes from a main or additional response block.</summary>
         private Usage Map(object doc, Dictionary<string, object> block)
         {
             var u = new Usage { Source = "live", At = DateTime.Now };
@@ -665,7 +736,7 @@ namespace AIMeter
             return list == null ? new Dictionary<string, object>[0] : list.OfType<Dictionary<string, object>>().ToArray();
         }
 
-        /// <summary>"when": tutti i percorsi veri; "unless": nessuno.</summary>
+        /// <summary>Require all "when" paths and reject any truthy "unless" path.</summary>
         private static bool Applies(object doc, Dictionary<string, object> spec)
         {
             if (ServiceDefinition.Strings(spec, "when").Any(p => !JPath.Truthy(JPath.Get(doc, p)))) return false;
@@ -699,7 +770,7 @@ namespace AIMeter
             if (Json.Str(spec, "starts") == null) w.StartedAt = null;
             string currency = Currency(doc, spec);
 
-            // saldo senza un limite: solo l'importo, senza barra
+            // A standalone balance has an amount but no percentage bar.
             double? balance = Number(doc, spec, "balance");
             if (balance != null)
             {
@@ -737,14 +808,14 @@ namespace AIMeter
         }
     }
 
-    /// <summary>Finestra per incollare la chiave API di un servizio: resta cifrata su questo PC.</summary>
+    /// <summary>Prompt for a service API key and save it encrypted on this PC.</summary>
     internal sealed class ApiKeyWindow : Window
     {
         public event Action Saved;
 
         public ApiKeyWindow(ServiceDefinition d) : this(d, null) { }
 
-        /// <summary>slot: una chiave aggiuntiva della definizione ("keys"), salvata come &lt;id&gt;.&lt;slot&gt;; null = quella principale.</summary>
+        /// <summary>An optional slot saves an extra credential as &lt;id&gt;.&lt;slot&gt;; null selects the main key.</summary>
         public ApiKeyWindow(ServiceDefinition d, string slot)
         {
             var extra = slot == null ? null : Json.Obj(Json.Obj(d.Raw, "keys"), slot);
@@ -808,7 +879,7 @@ namespace AIMeter
         }
     }
 
-    /// <summary>Lettura di un valore da un database SQLite con la libreria inclusa in Windows (winsqlite3.dll), in sola lettura.</summary>
+    /// <summary>Read SQLite values using the Windows-provided winsqlite3.dll library in read-only mode.</summary>
     internal static class Sqlite
     {
         [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_open_v2(byte[] file, out IntPtr db, int flags, IntPtr vfs);
@@ -828,8 +899,8 @@ namespace AIMeter
         private const int SQLITE_OPEN_READONLY = 1, SQLITE_ROW = 100;
 
         /// <summary>
-        /// Righe di una query in sola lettura (al massimo maxRows): interi come long, decimali come double, testo come string,
-        /// NULL come null. null se il database non si apre o la query fallisce (es. tabella assente in una versione vecchia).
+        /// Return up to maxRows from a read-only query, preserving integer, float, text and null values.
+        /// Return null if the database cannot be opened or the query fails, including unsupported schemas.
         /// </summary>
         public static List<object[]> Rows(string path, string sql, int maxRows)
         {
@@ -875,7 +946,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Testo SQL tra apici, per inserire un identificativo letto dal database stesso.</summary>
+        /// <summary>Quote an identifier value read from the database for use in SQL.</summary>
         public static string Quote(string s) { return "'" + (s ?? "").Replace("'", "''") + "'"; }
 
         public static string ReadValue(string path, string sql)
@@ -893,7 +964,7 @@ namespace AIMeter
                 if (n <= 0 || p == IntPtr.Zero) return null;
                 var bytes = new byte[n];
                 Marshal.Copy(p, bytes, 0, n);
-                // VS Code e i suoi derivati salvano i valori come testo UTF-8, a volte come UTF-16
+                // VS Code and its derivatives store text as UTF-8 or, occasionally, UTF-16.
                 bool utf16 = n >= 2 && bytes[1] == 0;
                 return (utf16 ? Encoding.Unicode : Encoding.UTF8).GetString(bytes);
             }

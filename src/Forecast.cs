@@ -8,14 +8,14 @@ using System.Text;
 namespace AIMeter
 {
     /// <summary>
-    /// Previsione: a questo ritmo, quando finisce ogni limite. Il ritmo è quello dell'ultima ora e mezza (dalle letture
-    /// raccolte), oppure, finché non ce ne sono abbastanza, la media dall'inizio della finestra. Se il limite basta
-    /// fino all'azzeramento non si prevede nulla.
+    /// Forecast limit exhaustion from the last 90 minutes of samples, or from the window's average pace.
+    /// Require enough readings before using recent pace.
+    /// Do not predict exhaustion when the limit lasts until its reset.
     /// </summary>
     internal sealed class Forecaster
     {
         private sealed class Sample { public DateTime At; public double Used; }
-        private sealed class Track { public DateTime? Reset; public List<Sample> Samples = new List<Sample>(); }
+        private sealed class Track { public DateTime? Reset; public string Identity; public List<Sample> Samples = new List<Sample>(); }
         private readonly Dictionary<string, Track> tracks = new Dictionary<string, Track>();
 
         public void Apply(Snapshot s)
@@ -28,11 +28,12 @@ namespace AIMeter
                 {
                     w.RunsOutAt = null;
                     w.PacePerHour = null;
-                    if (w.NoBar || w.RightText != null || !w.ResetsAt.HasValue || w.Used >= 100) continue;
+                    if (!w.HasPercent || !w.ResetsAt.HasValue || w.Used >= 100) continue;
                     string key = p.Id + "|" + w.Label + "|" + w.Suffix;
                     Track t;
                     if (!tracks.TryGetValue(key, out t)) tracks[key] = t = new Track();
-                    // finestra nuova (azzerata): le letture di prima non contano più
+                    if (t.Identity != p.Usage.Identity) { t.Samples.Clear(); t.Identity = p.Usage.Identity; }
+                    // Discard previous samples when the limit enters a new window.
                     if (t.Reset.HasValue && Math.Abs((w.ResetsAt.Value - t.Reset.Value).TotalMinutes) > 10) t.Samples.Clear();
                     t.Reset = w.ResetsAt;
                     if (p.Usage.Source != "cache" && (t.Samples.Count == 0 || t.Samples[t.Samples.Count - 1].At != p.Usage.At))
@@ -48,11 +49,11 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Punti percentuali all'ora; null se non ci sono ancora abbastanza letture.</summary>
+        /// <summary>Percentage points used per hour, or null without enough data.</summary>
         private static double? Pace(List<Sample> samples, UsageWindow w, DateTime now)
         {
             double? perHour = null;
-            // ritmo recente: retta dei minimi quadrati sulle letture di almeno 10 minuti
+            // Fit recent pace with least squares over at least ten minutes of readings.
             if (samples.Count >= 2 && (samples[samples.Count - 1].At - samples[0].At).TotalMinutes >= 10)
             {
                 var t0 = samples[0].At;
@@ -65,7 +66,7 @@ namespace AIMeter
                 double den = n * sxx - sx * sx;
                 if (den > 1e-9) perHour = Math.Max(0, (n * sxy - sx * sy) / den);
             }
-            // altrimenti la media dall'inizio della finestra (dopo almeno 15 minuti e un uso non trascurabile)
+            // Otherwise use the window average after 15 minutes and a meaningful amount of usage.
             else if (w.StartedAt.HasValue && (now - w.StartedAt.Value).TotalMinutes >= 15 && w.Used >= 3)
                 perHour = w.Used / (now - w.StartedAt.Value).TotalHours;
             return perHour;
@@ -73,13 +74,13 @@ namespace AIMeter
     }
 
     /// <summary>
-    /// Notifiche di Windows: quando un limite scende sotto il 20% e il 5%, quando torna disponibile dopo essere stato
-    /// quasi esaurito, a ogni azzeramento dei limiti scelti, e i suggerimenti. Una volta sola per soglia e finestra,
-    /// anche dopo un riavvio (stato in alerts.json).
+    /// Notify at 20% and 5% remaining, on recovery, on selected resets, and for usage tips.
+    /// Deduplicate each threshold and window across restarts.
+    /// Persist notification state in alerts.json.
     /// </summary>
     internal sealed class Alerts
     {
-        private sealed class State { public string Reset; public int Level; public string Name, Label, Announced, Tip; }
+        private sealed class State { public string Reset; public int Level; public string Name, Label, Announced, Tip, Seen, Identity; }
         private readonly Dictionary<string, State> states;
         private static string FilePath { get { return Path.Combine(Settings.Folder, "alerts.json"); } }
         private const string Stamp = "yyyyMMddHHmm";
@@ -98,21 +99,21 @@ namespace AIMeter
                             states[kv.Key] = new State
                             {
                                 Reset = Json.Str(v, "reset"), Level = (int)(Json.Num(v, "level") ?? 0), Name = Json.Str(v, "name"), Label = Json.Str(v, "label"),
-                                Announced = Json.Str(v, "announced"), Tip = Json.Str(v, "tip"),
+                                Announced = Json.Str(v, "announced"), Tip = Json.Str(v, "tip"), Seen = Json.Str(v, "seen"), Identity = Json.Str(v, "identity"),
                             };
                     }
             }
             catch (Exception) { }
         }
 
-        /// <summary>Le notifiche da mostrare per questa raccolta: titolo e testo. Imposta anche i suggerimenti dei servizi.</summary>
+        /// <summary>Return notification titles and text for this snapshot, and update service tips.</summary>
         public List<Tuple<string, string>> Check(Snapshot s, Settings settings)
         {
             var result = new List<Tuple<string, string>>();
             bool changed = false;
             var now = DateTime.Now;
 
-            // azzeramenti dei limiti scelti: all'ora comunicata dal servizio, anche senza una lettura nuova
+            // Announce selected resets at their reported time, even without a new reading.
             foreach (var kv in states)
             {
                 var st = kv.Value;
@@ -121,10 +122,11 @@ namespace AIMeter
                 if (st.Announced == st.Reset || !Parse(st.Reset, out at) || at > now) continue;
                 if (!settings.NotifyResets.TryGetValue(kv.Key, out on) || !on) continue;
                 string id = kv.Key.Substring(0, Math.Max(0, kv.Key.IndexOf('|')));
-                if (!s.Providers.Any(p => p.Id == id)) continue;   // servizio spento
+                var provider = s.Providers.FirstOrDefault(p => p.Id == id);
+                if (provider == null || provider.Usage == null || st.Identity != provider.Usage.Identity) continue;
                 st.Announced = st.Reset;
                 changed = true;
-                // PC spento o bloccato all'ora dell'azzeramento: niente avviso in ritardo
+                // Avoid delayed reset notifications after a long shutdown or lock.
                 if ((now - at).TotalMinutes <= 30)
                     result.Add(Tuple.Create(L.F("{0} · {1} has reset", st.Name, st.Label), L.T("The full limit is available again.")));
             }
@@ -134,22 +136,32 @@ namespace AIMeter
                 if (p.Usage == null || p.Usage.Source == "cache") continue;
                 foreach (var w in p.Usage.Windows)
                 {
-                    if (!w.HasPercent || !w.ResetsAt.HasValue) continue;
+                    if (w.CachedAt.HasValue) continue;
                     string key = p.Id + "|" + w.Key;
-                    string reset = w.ResetsAt.Value.ToString(Stamp, CultureInfo.InvariantCulture);
                     State st;
                     states.TryGetValue(key, out st);
-                    // finestra nuova: se la precedente era quasi esaurita, il limite è di nuovo disponibile
-                    // (se l'azzeramento è già stato annunciato perché scelto nelle impostazioni, non si ripete).
-                    // Un orario che oscilla di qualche minuto tra le letture è la stessa finestra: si tiene il primo.
-                    if (st != null && !Same(st.Reset, reset))
+                    string seen = now.Date.AddHours(now.Hour).ToString(Stamp, CultureInfo.InvariantCulture);
+                    if (st == null) { st = new State(); states[key] = st; changed = true; }
+                    if (st.Identity != p.Usage.Identity)
+                    {
+                        st = new State { Identity = p.Usage.Identity };
+                        states[key] = st;
+                        changed = true;
+                    }
+                    if (st.Seen != seen) { st.Seen = seen; changed = true; }
+                    if (!w.HasPercent || !w.ResetsAt.HasValue) continue;
+                    string reset = w.ResetsAt.Value.ToString(Stamp, CultureInfo.InvariantCulture);
+                    // A new window makes a previously exhausted limit available again.
+                    // Do not repeat a reset already announced through an explicit notification preference.
+                    // Treat small reset-time fluctuations as the same window and retain its first timestamp.
+                    if (st.Reset != null && !Same(st.Reset, reset))
                     {
                         if (st.Level >= 80 && w.Used < 50 && settings.NotifyReset && st.Announced != st.Reset)
                             result.Add(Tuple.Create(L.F("{0} · {1}: available again", p.Name, Ui.LabelOf(w)),
                                 L.F("The limit has reset: {0}% left.", Math.Round(w.Remaining))));
-                        st = null;
+                        st = new State { Seen = seen, Identity = p.Usage.Identity }; states[key] = st;
                     }
-                    if (st == null) { st = new State { Reset = reset }; states[key] = st; changed = true; }
+                    if (st.Reset == null) { st.Reset = reset; changed = true; }
                     if (st.Name != p.Name || st.Label != Ui.LabelOf(w)) { st.Name = p.Name; st.Label = Ui.LabelOf(w); changed = true; }
                     int level = w.Used >= 95 ? 95 : w.Used >= 80 ? 80 : 0;
                     if (level > st.Level)
@@ -161,7 +173,7 @@ namespace AIMeter
                 }
             }
 
-            // suggerimenti: la riga nella scheda resta finché vale, la notifica una volta per finestra
+            // Keep an applicable tip in the card, but notify only once per window.
             foreach (var p in s.Providers)
             {
                 p.Tip = TipFor(p, settings, now);
@@ -173,14 +185,14 @@ namespace AIMeter
                 result.Add(Tuple.Create(p.Tip.Title, p.Tip.Text));
             }
 
-            // scelte su limiti che il servizio non comunica più da oltre 10 giorni (es. è cambiato il modello del limite
-            // settimanale): la pillola torna al predefinito, e lo si dice; l'avviso di azzeramento si toglie in silenzio
+            // Retire choices for limits missing from successful readings for more than ten days.
+            // Announce a pill fallback to Default; remove stale reset preferences silently.
             bool settingsChanged = false;
             foreach (var p in s.Providers)
             {
                 if (p.Usage == null || p.Usage.Source != "live") continue;
                 string choice;
-                if (settings.PillLimits.TryGetValue(p.Id, out choice) && choice != "auto" && !string.IsNullOrEmpty(choice) && Gone(p, choice))
+                if (settings.PillLimits.TryGetValue(p.Id, out choice) && choice != "auto" && !string.IsNullOrEmpty(choice) && Gone(p, choice, now, ref changed))
                 {
                     settings.PillLimits.Remove(p.Id);
                     settingsChanged = true;
@@ -188,7 +200,7 @@ namespace AIMeter
                         L.F("{0} is no longer reported by the service.", Ui.LabelOf(FromKey(choice)))));
                 }
                 foreach (var key in settings.NotifyResets.Keys.Where(k => k.StartsWith(p.Id + "|", StringComparison.Ordinal)).ToList())
-                    if (Gone(p, key.Substring(p.Id.Length + 1))) { settings.NotifyResets.Remove(key); settingsChanged = true; }
+                    if (Gone(p, key.Substring(p.Id.Length + 1), now, ref changed)) { settings.NotifyResets.Remove(key); settingsChanged = true; }
             }
             if (settingsChanged) settings.Save();
 
@@ -196,10 +208,22 @@ namespace AIMeter
             return result;
         }
 
-        /// <summary>Né nella lettura attuale né tra le finestre viste negli ultimi 10 giorni.</summary>
-        private bool Gone(ProviderState p, string windowKey)
+        /// <summary>Return true only after a missing limit's ten-day grace period expires.</summary>
+        private bool Gone(ProviderState p, string windowKey, DateTime now, ref bool changed)
         {
-            return !p.Usage.Windows.Any(w => w.Key == windowKey) && !states.ContainsKey(p.Id + "|" + windowKey);
+            if (p.Usage.Windows.Any(w => w.Key == windowKey)) return false;
+            string key = p.Id + "|" + windowKey;
+            State st;
+            DateTime seen;
+            if (!states.TryGetValue(key, out st)) { st = new State(); states[key] = st; }
+            if (!Parse(st.Seen, out seen))
+            {
+                // Existing preferences also get a grace period when upgrading or starting without extra data.
+                st.Seen = now.ToString(Stamp, CultureInfo.InvariantCulture);
+                changed = true;
+                return false;
+            }
+            return now - seen > TimeSpan.FromDays(10);
         }
 
         private static UsageWindow FromKey(string key)
@@ -210,17 +234,17 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Il suggerimento per un servizio, uguale per ogni servizio e ogni durata di limite.
-        /// - Aspettare: un limite esaurito si azzera a breve mentre si paga l'uso extra.
-        /// - Margine inutilizzato: all'azzeramento manca circa il 15% della finestra (tra mezz'ora e 4 giorni: 45 minuti
-        ///   per 5 ore, un giorno per la settimana, 4 giorni per il mese) e, al ritmo abituale, ne resterebbe inutilizzato
-        ///   almeno il 30%. Vale per i limiti più lunghi del servizio e per i crediti in denaro: quello che resta si perde.
-        ///   I limiti più brevi pesano su quelli lunghi, quindi solo se attivati e se quelli lunghi hanno spazio.
+        /// Apply the same tip policy to every provider and window duration.
+        /// Suggest waiting when a spent limit resets soon while extra usage is billed separately.
+        /// Suggest unused quota near the last 15% of a window, bounded between half an hour and four days.
+        ///   Use the normal spending pace to estimate quota that would otherwise expire.
+        ///   Require at least 30% unused quota for the longest windows or expiring monetary credits.
+        ///   Short-window tips also require opt-in and enough room in the enclosing long windows.
         /// </summary>
         public static Tip TipFor(ProviderState p, Settings settings, DateTime now)
         {
             if (p.Usage == null || p.Models != null) return null;
-            // i budget scelti dall'utente non sono crediti che scadono: niente suggerimenti su di loro
+            // User budgets do not expire, so they never receive unused-credit tips.
             var ws = p.Usage.Windows.Where(w => w.HasPercent && !w.Budget && w.ResetsAt.HasValue && w.ResetsAt.Value > now && w.Length.HasValue).ToList();
             if (ws.Count == 0) return null;
 
@@ -247,15 +271,15 @@ namespace AIMeter
             foreach (var w in ws)
             {
                 if (w.Used >= 100) continue;
-                // limite di un modello dentro uno generale (es. Settimana · Fable dentro Settimana): quello che resta
-                // davvero è del limite generale, ed è lui ad avere il suo suggerimento
+                // An enclosing general limit determines a model's effective remaining quota.
+                // Only that general limit should receive the corresponding tip.
                 if (p.Usage.ParentOf(w) != null) continue;
                 var left = w.ResetsAt.Value - now;
                 if (left > Lead(w)) continue;
                 double unused = Unused(w, left, now);
                 bool isLong = w.Spent != null || w.Length.Value.TotalHours >= longest * 0.9;
                 if (isLong ? unused < 30 : !settings.TipsShort || unused < 40) continue;
-                // un limite breve pesa su quelli lunghi: si suggerisce solo se quelli hanno spazio per assorbirlo
+                // Only recommend short-window usage when the long windows have room to absorb it.
                 if (!isLong && ws.Any(x => x.Spent == null && x.Length.Value.TotalHours >= longest * 0.9 && x.Remaining < unused)) continue;
                 if (unused > bestUnused) { best = w; bestUnused = unused; }
             }
@@ -280,7 +304,7 @@ namespace AIMeter
             return tip;
         }
 
-        /// <summary>Quanto prima dell'azzeramento si suggerisce: il 15% della finestra, tra mezz'ora e 4 giorni.</summary>
+        /// <summary>Tip lead time is 15% of the window, bounded between half an hour and four days.</summary>
         private static TimeSpan Lead(UsageWindow w)
         {
             double h = w.Length.Value.TotalHours * 0.15;
@@ -288,8 +312,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Percentuale che resterebbe all'azzeramento. Ritmo: quello recente se mancano poche ore (è il lavoro in corso),
-        /// altrimenti la media dall'inizio della finestra, che comprende notti e pause.
+        /// Estimate unused quota using recent pace for imminent resets.
+        /// For longer horizons, use the window average, including overnight and idle time.
         /// </summary>
         private static double Unused(UsageWindow w, TimeSpan left, DateTime now)
         {
@@ -309,7 +333,7 @@ namespace AIMeter
             var text = new StringBuilder();
             text.Append(L.F("Resets {0}.", When(w.ResetsAt.Value)));
             if (w.RunsOutAt.HasValue) text.Append(' ').Append(L.F("At this pace it runs out {0}.", When(w.RunsOutAt.Value)));
-            // un altro servizio con margine: il consiglio per continuare a lavorare
+            // Suggest another service with enough room to continue working.
             var other = s.Providers.Where(x => x != p && x.Models == null)
                 .Select(x => Tuple.Create(x, Ui.Primary(x)))
                 .Where(x => x.Item2 != null && x.Item1.Usage.Room(x.Item2) >= 40)
@@ -318,7 +342,7 @@ namespace AIMeter
             return Tuple.Create(title, text.ToString());
         }
 
-        /// <summary>"alle 15:40", "domani alle 09:00" o il giorno della settimana.</summary>
+        /// <summary>Format a local time as today, tomorrow or a weekday.</summary>
         public static string When(DateTime t)
         {
             if (t.Date == DateTime.Today) return L.F("at {0}", t.ToString("HH:mm", L.Culture));
@@ -331,7 +355,7 @@ namespace AIMeter
             return DateTime.TryParseExact(stamp, Stamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out t);
         }
 
-        /// <summary>Stessa finestra: azzeramenti a meno di 10 minuti l'uno dall'altro (come nella previsione).</summary>
+        /// <summary>Reset times within ten minutes belong to the same window, matching forecast handling.</summary>
         private static bool Same(string a, string b)
         {
             DateTime x, y;
@@ -343,15 +367,16 @@ namespace AIMeter
         {
             try
             {
-                // si tengono solo le finestre degli ultimi 10 giorni
+                // Retain recent sightings and reset windows for ten days.
                 var keep = states.Where(kv =>
                 {
-                    DateTime r;
-                    return Parse(kv.Value.Reset, out r) && r > DateTime.Now.AddDays(-10);
+                    DateTime r, seen;
+                    return (Parse(kv.Value.Reset, out r) && r > DateTime.Now.AddDays(-10))
+                        || (Parse(kv.Value.Seen, out seen) && seen >= DateTime.Now.AddDays(-10));
                 }).ToDictionary(kv => kv.Key, kv => (object)new Dictionary<string, object>
                 {
                     { "reset", kv.Value.Reset }, { "level", kv.Value.Level }, { "name", kv.Value.Name }, { "label", kv.Value.Label },
-                    { "announced", kv.Value.Announced }, { "tip", kv.Value.Tip },
+                    { "announced", kv.Value.Announced }, { "tip", kv.Value.Tip }, { "seen", kv.Value.Seen }, { "identity", kv.Value.Identity },
                 });
                 Directory.CreateDirectory(Settings.Folder);
                 File.WriteAllText(FilePath, Json.Serialize(keep), new UTF8Encoding(false));

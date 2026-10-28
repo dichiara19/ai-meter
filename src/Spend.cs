@@ -3,15 +3,19 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace AIMeter
 {
-    /// <summary>
-    /// Spesa dei servizi a credito per giorno, settimana e mese. Se il servizio la fornisce si usa quella; altrimenti la
-    /// ricava AI Meter da una cronologia delle letture (spend-history.json): differenza della spesa totale dall'inizio del
-    /// periodo, oppure somma dei cali del saldo (le ricariche non contano).
-    /// </summary>
+    internal sealed class PeriodSpend
+    {
+        public double Amount;
+        public DateTime From;
+        public bool Estimated;
+    }
+
+    /// <summary>Observed spending, isolated by credential and currency. Sampled totals and balances are estimates.</summary>
     internal static class SpendTracker
     {
         private sealed class Reading { public DateTime At; public double? Total, Balance; }
@@ -19,7 +23,14 @@ namespace AIMeter
         private static readonly object Gate = new object();
         private static string FilePath { get { return Path.Combine(Settings.Folder, "spend-history.json"); } }
 
-        /// <summary>Aggiunge una lettura: al massimo una ogni 10 minuti, se non cambia nulla; si tengono 40 giorni.</summary>
+        /// <summary>Hash credentials rather than persisting them or mixing unrelated accounts and currencies.</summary>
+        internal static string Scope(string id, string token, string currency)
+        {
+            using (var hash = SHA256.Create())
+                return id + "|" + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(token + "\0" + currency))).Replace("-", "");
+        }
+
+        /// <summary>Keep 40 days of readings; unchanged values need at most one sample every ten minutes.</summary>
         public static void Record(string id, double? total, double? balance) { Record(id, total, balance, DateTime.Now); }
 
         internal static void Record(string id, double? total, double? balance, DateTime now)
@@ -38,38 +49,33 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Speso dall'inizio del periodo; null se non c'è ancora nessuna lettura.</summary>
-        public static double? Since(string id, DateTime start)
+        /// <summary>Estimate only intervals wholly inside the period. A single sample cannot establish spending.</summary>
+        public static PeriodSpend Since(string id, DateTime start)
         {
             lock (Gate)
             {
                 Load();
                 List<Reading> list;
-                if (!history.TryGetValue(id, out list) || list.Count == 0) return null;
-                var now = list[list.Count - 1];
-                if (now.Total.HasValue)
-                {
-                    // l'ultima lettura prima dell'inizio, oppure la prima del periodo
-                    var withTotal = list.Where(r => r.Total.HasValue).ToList();
-                    var baseline = withTotal.LastOrDefault(r => r.At <= start) ?? withTotal.FirstOrDefault(r => r.At > start);
-                    return baseline == null ? (double?)null : Math.Max(0, now.Total.Value - baseline.Total.Value);
-                }
+                if (id == null || !history.TryGetValue(id, out list)) return null;
+                var samples = list.Where(r => r.At >= start).OrderBy(r => r.At).ToList();
+                if (samples.Count < 2) return null;
+                bool totals = samples[samples.Count - 1].Total.HasValue;
+                samples = samples.Where(r => totals ? r.Total.HasValue : r.Balance.HasValue).ToList();
+                if (samples.Count < 2) return null;
                 double spent = 0;
-                Reading prev = null;
-                foreach (var r in list.Where(x => x.Balance.HasValue))
+                for (int i = 1; i < samples.Count; i++)
                 {
-                    if (prev != null && r.At > start)
-                    {
-                        double drop = prev.Balance.Value - r.Balance.Value;
-                        if (drop > 0) spent += drop;
-                    }
-                    prev = r;
+                    var prev = samples[i - 1];
+                    var next = samples[i];
+                    double delta = totals ? next.Total.Value - prev.Total.Value : prev.Balance.Value - next.Balance.Value;
+                    // Counter resets and net top-ups cannot reveal consumption between the two samples.
+                    spent += Math.Max(0, delta);
                 }
-                return spent;
+                return new PeriodSpend { Amount = spent, From = samples[0].At, Estimated = true };
             }
         }
 
-        /// <summary>Inizio del periodo ("day", "week" da lunedì, "month"); utc = i periodi del servizio (es. OpenRouter).</summary>
+        /// <summary>Period boundary: day, Monday-based week, or month; optionally use the service's UTC calendar.</summary>
         public static DateTime Start(string period, DateTime now, bool utc)
         {
             var t = utc ? now.ToUniversalTime() : now;
@@ -88,14 +94,14 @@ namespace AIMeter
             return utc ? DateTime.SpecifyKind(e, DateTimeKind.Utc).ToLocalTime() : e;
         }
 
-        /// <summary>Budget di un servizio dalle impostazioni ("20|month"); false se non c'è.</summary>
+        /// <summary>Read a positive finite budget such as "20|month" from settings.</summary>
         public static bool Budget(Settings s, string id, out double amount, out string period)
         {
             amount = 0; period = "month";
             string v;
             if (s == null || s.Budgets == null || !s.Budgets.TryGetValue(id, out v) || string.IsNullOrEmpty(v)) return false;
             var parts = v.Split('|');
-            if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out amount) || amount <= 0) return false;
+            if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out amount) || double.IsNaN(amount) || double.IsInfinity(amount) || amount <= 0) return false;
             if (parts.Length > 1 && (parts[1] == "day" || parts[1] == "week" || parts[1] == "month")) period = parts[1];
             return true;
         }
@@ -110,6 +116,8 @@ namespace AIMeter
                 if (d == null) return;
                 foreach (var kv in d)
                 {
+                    // Legacy histories have no credential identity and cannot safely seed a new baseline.
+                    if (!kv.Key.Contains("|")) continue;
                     var rows = kv.Value as object[];
                     if (rows == null) continue;
                     history[kv.Key] = rows.OfType<object[]>().Where(r => r.Length >= 3).Select(r => new Reading
@@ -138,17 +146,21 @@ namespace AIMeter
         }
     }
 
-    /// <summary>
-    /// Modelli usati oggi dagli agenti del PC, per servizio: dai messaggi di OpenCode (e Kilo) e dai file di Pi, su Windows
-    /// e in WSL già acceso. Costi e token come li calcolano gli agenti. Una scansione al minuto, solo dei file scritti oggi.
-    /// </summary>
+    /// <summary>Today's costs reported by OpenCode, Kilo and Pi on Windows and already running WSL distributions.</summary>
     internal static class AgentCosts
     {
+        private sealed class PiCost
+        {
+            public string Provider, Model, Identity;
+            public double Cost;
+            public long Tokens;
+        }
+
         private static Dictionary<string, Dictionary<string, ModelCost>> today = new Dictionary<string, Dictionary<string, ModelCost>>();
         private static DateTime scannedAt = DateTime.MinValue;
         private static readonly object Gate = new object();
 
-        /// <summary>I modelli usati oggi con i nomi di servizio indicati, dal più costoso.</summary>
+        /// <summary>Merge provider aliases and order today's models by cost, then token count.</summary>
         public static List<ModelCost> For(Probe p, IEnumerable<string> ids)
         {
             lock (Gate)
@@ -161,7 +173,7 @@ namespace AIMeter
                     try { today = Scan(p, homes); } catch (Exception) { }
                 }
                 var merged = new Dictionary<string, ModelCost>(StringComparer.OrdinalIgnoreCase);
-                foreach (var id in ids)
+                foreach (var id in ids.Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     Dictionary<string, ModelCost> byModel;
                     if (!today.TryGetValue(id.ToLowerInvariant(), out byModel)) continue;
@@ -182,6 +194,7 @@ namespace AIMeter
         internal static Dictionary<string, Dictionary<string, ModelCost>> Scan(Probe p, List<string> homes)
         {
             var acc = new Dictionary<string, Dictionary<string, ModelCost>>();
+            var piResponses = new HashSet<string>(StringComparer.Ordinal);
             Action<string, string, double, long> add = (provider, model, cost, tokens) =>
             {
                 if (string.IsNullOrEmpty(provider)) return;
@@ -214,18 +227,18 @@ namespace AIMeter
                 foreach (var dir in Probe.SafeDirs(Path.Combine(home, @".pi\agent\sessions")))
                     foreach (var fi in Probe.SafeFiles(dir, "*.jsonl").Where(f => f.LastWriteTime >= DateTime.Today && f.Length < 32L * 1024 * 1024))
                     {
-                        var entries = (List<string[]>)p.Cached("costs:pi:" + fi.FullName + ":" + startMs, fi, () => PiToday(fi.FullName, startMs));
+                        var entries = (List<PiCost>)p.Cached("costs:pi:" + fi.FullName + ":" + startMs, fi, () => PiToday(fi.FullName, startMs));
                         foreach (var e in entries)
-                            add(e[0], e[1], double.Parse(e[2], CultureInfo.InvariantCulture), long.Parse(e[3], CultureInfo.InvariantCulture));
+                            if (piResponses.Add(e.Identity)) add(e.Provider, e.Model, e.Cost, e.Tokens);
                     }
             }
             return acc;
         }
 
-        /// <summary>Risposte di oggi in un file di Pi: provider, modello, costo, token.</summary>
-        private static List<string[]> PiToday(string path, long startMs)
+        /// <summary>Read today's Pi replies, retaining an identity shared by copies in forked sessions.</summary>
+        private static List<PiCost> PiToday(string path, long startMs)
         {
-            var list = new List<string[]>();
+            var list = new List<PiCost>();
             string text;
             try { text = File.ReadAllText(path, Encoding.UTF8); }
             catch (IOException) { return list; }
@@ -248,7 +261,11 @@ namespace AIMeter
                 string provider = JPath.Str(JPath.Get(e, "message.provider"));
                 string model = JPath.Str(JPath.Get(e, "message.model"));
                 if (provider == null || model == null) continue;
-                list.Add(new[] { provider, model, cost.ToString("R", CultureInfo.InvariantCulture), tokens.ToString(CultureInfo.InvariantCulture) });
+                // Pi preserves the message when forking, even when entry ids or parent links change.
+                string identity;
+                using (var hash = SHA256.Create())
+                    identity = ms.Value.ToString("R", CultureInfo.InvariantCulture) + ":" + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(Json.Serialize(JPath.Get(e, "message")))));
+                list.Add(new PiCost { Provider = provider, Model = model, Cost = cost, Tokens = tokens, Identity = identity });
             }
             return list;
         }

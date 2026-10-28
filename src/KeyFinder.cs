@@ -8,16 +8,16 @@ using System.Text.RegularExpressions;
 namespace AIMeter
 {
     /// <summary>
-    /// Chiavi API già sul PC, nei programmi che le usano (OpenCode, Pi, Crush) e nei profili della shell, su Windows e in
-    /// WSL già acceso. La definizione dice con quali nomi quei programmi conoscono il servizio ("auth": { "ids": [...] });
-    /// le variabili d'ambiente sono quelle di "auth.env". Un valore come "$NOME" o "{env:NOME}" si risolve con l'export
-    /// della stessa casa; i comandi ("!...") non si eseguono mai. La chiave trovata va solo al servizio stesso.
+    /// Discover existing API keys in OpenCode, Pi, Crush and shell profiles on Windows and running WSL.
+    /// Provider definitions declare the service aliases used by those apps in auth.ids.
+    /// Resolve environment references using auth.env and exports from the same home directory.
+    /// Never execute command values; discovered credentials are used only for their configured service.
     /// </summary>
     internal static class KeyFinder
     {
         internal sealed class Found { public string Key, Source; }
 
-        /// <summary>File dei programmi: nome, percorso dalla home, percorso del valore con {id} per il nome del servizio.</summary>
+        /// <summary>App name, home-relative path and JSON value path, with {id} standing for a service alias.</summary>
         private static readonly string[][] Sources =
         {
             new[] { "OpenCode", @".local\share\opencode\auth.json", "{id}.key" },
@@ -33,7 +33,7 @@ namespace AIMeter
         private sealed class Entry { public DateTime At; public Found Value; }
         private static readonly Dictionary<string, Entry> cache = new Dictionary<string, Entry>();
 
-        /// <summary>La prima chiave trovata per il servizio, o null. Rilegge i file al massimo una volta al minuto.</summary>
+        /// <summary>Return the first discovered key or null, rereading files at most once per minute.</summary>
         public static Found Find(ServiceDefinition d)
         {
             if (d == null || !d.UsesKey || Settings.Current == null || !Settings.Current.FindKeys) return null;
@@ -65,7 +65,7 @@ namespace AIMeter
                     if (v != null) return new Found { Key = v, Source = s[0] + where };
                 }
             }
-            // variabili d'ambiente esportate dai profili della shell (in WSL, o in Git Bash su Windows)
+            // Read exports from WSL or Windows Git Bash shell profiles.
             foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
             {
                 string v = FromProfiles(name, home);
@@ -74,7 +74,7 @@ namespace AIMeter
             return null;
         }
 
-        /// <summary>Il valore come chiave: letterale, oppure riferimento a una variabile; mai un comando.</summary>
+        /// <summary>Resolve a literal key or environment reference, without executing commands.</summary>
         private static string Resolve(string v, string home, bool wsl)
         {
             if (string.IsNullOrEmpty(v)) return null;
@@ -92,7 +92,7 @@ namespace AIMeter
 
         private static bool Plausible(string v) { return !string.IsNullOrEmpty(v) && v.Length >= 16 && !v.Any(char.IsWhiteSpace) && !v.Contains("$"); }
 
-        /// <summary>export NOME=valore (bash, zsh, profile) o set -gx NOME valore (fish); vale l'ultima assegnazione.</summary>
+        /// <summary>Read bash/zsh exports or fish set -gx assignments; the last assignment wins.</summary>
         private static string FromProfiles(string name, string home)
         {
             string found = null;
@@ -118,7 +118,7 @@ namespace AIMeter
             return text == null ? null : Json.ParseAny(text);
         }
 
-        /// <summary>Un file di configurazione: solo se c'è ed è piccolo (al massimo 1 MB).</summary>
+        /// <summary>Read an existing configuration file only if it is no larger than 1 MB.</summary>
         private static string ReadSmall(string path)
         {
             try

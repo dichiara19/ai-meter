@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace AIMeter
 {
-    /// <summary>Tabelle di traduzione: testo inglese → testo nella lingua. Una chiave mancante resta in inglese.</summary>
+    /// <summary>Translation tables keyed by English text; missing keys fall back to English.</summary>
     internal static partial class L
     {
         private static Dictionary<string, string> D(params string[] kv)
@@ -14,8 +14,15 @@ namespace AIMeter
 
         private static readonly Dictionary<string, Dictionary<string, string>> Tables = new Dictionary<string, Dictionary<string, string>>
         {
-            // ======================================================================== italiano
+            // ======================================================================== Italian
             { "it", D(
+                "Spending unavailable", "Spesa non disponibile",
+                "{0} estimated since {1}", "{0} stimati dal {1}",
+                "{0} estimated of {1}", "{0} stimati su {1}",
+                "Sampled spending can miss usage and top-ups. Remaining budget and threshold alerts require a provider-reported period total.", "La spesa ricavata dalle letture può non rilevare consumi e ricariche. Il budget residuo e gli avvisi di soglia richiedono un totale del periodo fornito dal servizio.",
+                "{0} (cached)", "{0} (in cache)",
+                "Last updated {0}", "Ultimo aggiornamento: {0}",
+                "Estimated spending is shown without remaining credit, forecasts or threshold alerts.", "La spesa stimata viene mostrata senza credito residuo, previsioni o avvisi di soglia.",
                 "Default ({0})", "Predefinito ({0})",
                 "In the panel", "Nel pannello",
                 "Spend today, this week and this month", "Spesa di oggi, della settimana e del mese",
@@ -240,8 +247,15 @@ namespace AIMeter
                 "Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off.", "Sessioni e limiti vengono letti dai file locali. Dal PC escono solo le richieste di utilizzo: Claude (Anthropic), Codex (tramite il programma codex), Copilot (GitHub) e ogni servizio che attivi, verso il suo sito. I modelli locali si leggono solo su questo PC. Ognuno si può disattivare.")
             },
 
-            // ======================================================================== español
+            // ======================================================================== Spanish
             { "es", D(
+                "Spending unavailable", "Gasto no disponible",
+                "{0} estimated since {1}", "{0} estimados desde {1}",
+                "{0} estimated of {1}", "{0} estimados de {1}",
+                "Sampled spending can miss usage and top-ups. Remaining budget and threshold alerts require a provider-reported period total.", "El gasto calculado a partir de lecturas puede omitir consumos y recargas. El presupuesto restante y las alertas requieren un total del período proporcionado por el servicio.",
+                "{0} (cached)", "{0} (en caché)",
+                "Last updated {0}", "Última actualización: {0}",
+                "Estimated spending is shown without remaining credit, forecasts or threshold alerts.", "El gasto estimado se muestra sin crédito restante, previsiones ni alertas de umbral.",
                 "Default ({0})", "Predeterminado ({0})",
                 "In the panel", "En el panel",
                 "Spend today, this week and this month", "Gasto de hoy, de la semana y del mes",
@@ -466,8 +480,15 @@ namespace AIMeter
                 "Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off.", "Las sesiones y los límites se leen de archivos locales. Del PC solo salen las solicitudes de uso: Claude (Anthropic), Codex (a través del programa codex), Copilot (GitHub) y cada servicio que actives, hacia su propio sitio. Los modelos locales solo se leen en este PC. Cada uno se puede desactivar.")
             },
 
-            // ======================================================================== français
+            // ======================================================================== French
             { "fr", D(
+                "Spending unavailable", "Dépenses indisponibles",
+                "{0} estimated since {1}", "{0} estimés depuis le {1}",
+                "{0} estimated of {1}", "{0} estimés sur {1}",
+                "Sampled spending can miss usage and top-ups. Remaining budget and threshold alerts require a provider-reported period total.", "Les relevés peuvent omettre des dépenses et des recharges. Le budget restant et les alertes nécessitent un total de la période fourni par le service.",
+                "{0} (cached)", "{0} (en cache)",
+                "Last updated {0}", "Dernière mise à jour : {0}",
+                "Estimated spending is shown without remaining credit, forecasts or threshold alerts.", "Les dépenses estimées sont affichées sans crédit restant, prévisions ni alertes de seuil.",
                 "Default ({0})", "Par défaut ({0})",
                 "In the panel", "Dans le panneau",
                 "Spend today, this week and this month", "Dépenses du jour, de la semaine et du mois",
@@ -692,8 +713,15 @@ namespace AIMeter
                 "Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off.", "Les sessions et les limites sont lues dans des fichiers locaux. Seules les demandes d'utilisation quittent ce PC : Claude (Anthropic), Codex (via le programme codex), Copilot (GitHub) et chaque service que vous activez, vers son propre site. Les modèles locaux sont lus uniquement sur ce PC. Chacun peut être désactivé.")
             },
 
-            // ======================================================================== deutsch
+            // ======================================================================== German
             { "de", D(
+                "Spending unavailable", "Ausgaben nicht verfügbar",
+                "{0} estimated since {1}", "{0} geschätzt seit {1}",
+                "{0} estimated of {1}", "{0} geschätzt von {1}",
+                "Sampled spending can miss usage and top-ups. Remaining budget and threshold alerts require a provider-reported period total.", "Aus Messwerten geschätzte Ausgaben können Verbrauch und Aufladungen übersehen. Restbudget und Schwellenwarnungen erfordern eine vom Dienst gemeldete Periodensumme.",
+                "{0} (cached)", "{0} (zwischengespeichert)",
+                "Last updated {0}", "Zuletzt aktualisiert: {0}",
+                "Estimated spending is shown without remaining credit, forecasts or threshold alerts.", "Geschätzte Ausgaben werden ohne Restguthaben, Prognosen oder Schwellenwarnungen angezeigt.",
                 "Default ({0})", "Standard ({0})",
                 "In the panel", "Im Bereich",
                 "Spend today, this week and this month", "Ausgaben heute, diese Woche und diesen Monat",
@@ -918,8 +946,15 @@ namespace AIMeter
                 "Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off.", "Sitzungen und Limits werden aus lokalen Dateien gelesen. Nur Nutzungsanfragen verlassen diesen PC: Claude (Anthropic), Codex (über das Programm codex), Copilot (GitHub) und jeder Dienst, den du einschaltest, an seine eigene Website. Lokale Modelle werden nur auf diesem PC gelesen. Jeder lässt sich ausschalten.")
             },
 
-            // ======================================================================== português
+            // ======================================================================== Portuguese
             { "pt", D(
+                "Spending unavailable", "Gastos indisponíveis",
+                "{0} estimated since {1}", "{0} estimados desde {1}",
+                "{0} estimated of {1}", "{0} estimados de {1}",
+                "Sampled spending can miss usage and top-ups. Remaining budget and threshold alerts require a provider-reported period total.", "Os gastos calculados a partir de leituras podem não incluir consumo e recargas. O orçamento restante e os alertas exigem um total do período fornecido pelo serviço.",
+                "{0} (cached)", "{0} (em cache)",
+                "Last updated {0}", "Última atualização: {0}",
+                "Estimated spending is shown without remaining credit, forecasts or threshold alerts.", "Os gastos estimados são exibidos sem crédito restante, previsões ou alertas de limite.",
                 "Default ({0})", "Padrão ({0})",
                 "In the panel", "No painel",
                 "Spend today, this week and this month", "Gasto de hoje, da semana e do mês",

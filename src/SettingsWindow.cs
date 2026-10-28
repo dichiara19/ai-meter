@@ -13,8 +13,8 @@ using System.Windows.Threading;
 namespace AIMeter
 {
     /// <summary>
-    /// Impostazioni nello stile dell'app Impostazioni di Windows 11: menu delle sezioni a sinistra, una pagina per sezione,
-    /// e per ogni servizio una pagina propria raggiunta dall'elenco ("Servizi › Claude").
+    /// Windows 11-style settings with section navigation and one page per section.
+    /// Each service has its own page reached from the service list.
     /// </summary>
     internal sealed class SettingsWindow : Window
     {
@@ -31,7 +31,7 @@ namespace AIMeter
         private DateTime lastCpuAt;
         private bool compact;
 
-        /// <summary>Pagina aperta: "services", "service:&lt;id&gt;", "display", "notifications", "general", "about".</summary>
+        /// <summary>Current page: services, service:&lt;id&gt;, display, notifications, general or about.</summary>
         private string current = "services";
 
         private static readonly string[][] Sections =
@@ -81,7 +81,7 @@ namespace AIMeter
             root.Children.Add(body);
             Content = root;
 
-            // finestra stretta: il menu resta con le sole icone, come in Impostazioni di Windows
+            // Collapse navigation to icons in narrow windows, matching Windows Settings.
             SizeChanged += (o, e) =>
             {
                 bool c2 = e.NewSize.Width < 820;
@@ -97,7 +97,7 @@ namespace AIMeter
             Build();
         }
 
-        /// <summary>Apre una pagina e torna in cima.</summary>
+        /// <summary>Open a page and scroll to its top.</summary>
         private void Open(string id)
         {
             current = id;
@@ -120,7 +120,7 @@ namespace AIMeter
             else BuildServices();
         }
 
-        // ------------------------------------------------------------ menu delle sezioni
+        // ------------------------------------------------------------ section navigation
         private void BuildNav()
         {
             nav.Children.Clear();
@@ -132,7 +132,7 @@ namespace AIMeter
                 var item = new Border { Height = 36, CornerRadius = new CornerRadius(4), Margin = new Thickness(0, 1, 0, 1), Background = Brushes.Transparent, Cursor = Cursors.Hand };
                 if (selected) item.SetResourceReference(Border.BackgroundProperty, "SubtleHover");
                 var g = new Grid();
-                // indicatore della sezione aperta: la barretta d'accento a sinistra
+                // Mark the active section with an accent bar on the left.
                 var mark = new Border { Width = 3, Height = 16, CornerRadius = new CornerRadius(1.5), HorizontalAlignment = HorizontalAlignment.Left, Visibility = selected ? Visibility.Visible : Visibility.Hidden };
                 mark.SetResourceReference(Border.BackgroundProperty, "Accent");
                 g.Children.Add(mark);
@@ -161,7 +161,7 @@ namespace AIMeter
             }
         }
 
-        // ------------------------------------------------------------ intestazione delle pagine
+        // ------------------------------------------------------------ page headings
         private void Header(string title)
         {
             var h = Ui.Text(title, 28, "Text", FontWeights.SemiBold);
@@ -170,7 +170,7 @@ namespace AIMeter
             page.Children.Add(h);
         }
 
-        /// <summary>"Servizi › Claude": la prima parte torna all'elenco, come il percorso in Impostazioni di Windows.</summary>
+        /// <summary>The Services breadcrumb returns to the list, matching Windows Settings navigation.</summary>
         private void Breadcrumb(string parent, string parentId, string title)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 20) };
@@ -192,8 +192,8 @@ namespace AIMeter
             page.Children.Add(row);
         }
 
-        // ------------------------------------------------------------ servizi: elenco
-        /// <summary>Un servizio dell'elenco: id, logo, nome, attivo, interruttore.</summary>
+        // ------------------------------------------------------------ service list
+        /// <summary>Service-list metadata: identity, logo, name, enabled state and toggle action.</summary>
         private sealed class Service
         {
             public string Id, Name;
@@ -236,10 +236,10 @@ namespace AIMeter
                      Button(L.T("Open folder"), () => { System.IO.Directory.CreateDirectory(Definitions.UserFolder); Process.Start("explorer.exe", "\"" + Definitions.UserFolder + "\""); }, false))));
         }
 
-        /// <summary>Stato breve nell'elenco: spento, da collegare, oppure il margine del limite mostrato nella barra.</summary>
+        /// <summary>Compact list status: off, authentication needed, or the pill's selected limit.</summary>
         private string StatusOf(Service s)
         {
-            // spento: l'interruttore lo dice già; qui se il servizio è sul PC
+            // The toggle already indicates off; use the subtitle to report local detection.
             if (!s.On)
             {
                 var def = Definitions.Get(s.Id);
@@ -263,7 +263,7 @@ namespace AIMeter
             return L.T("On");
         }
 
-        // ------------------------------------------------------------ servizi: pagina di ognuno
+        // ------------------------------------------------------------ service detail pages
         private void BuildService(string id)
         {
             var s = Services().FirstOrDefault(x => x.Id == id);
@@ -279,7 +279,7 @@ namespace AIMeter
                 Group(rows.ToArray());
             }
 
-            // cosa mostra la scheda del servizio: ogni limite letto, la spesa del periodo, i modelli di oggi
+            // Let users choose which limits, spending summaries and models appear in a service card.
             var prov = C.Last == null ? null : C.Last.Providers.FirstOrDefault(x => x.Id == s.Id);
             if (prov == null || prov.Usage == null || prov.Models != null) return;
             var vis = new List<FrameworkElement>();
@@ -328,7 +328,7 @@ namespace AIMeter
                    + (d.Origin != "built-in" ? " " + L.T("Added by you.") : "");
         }
 
-        /// <summary>Le opzioni di un servizio attivo: accesso, cosa mostrare, limite nella barra.</summary>
+        /// <summary>Build an enabled service's authentication, display and pill options.</summary>
         private List<FrameworkElement> Options(string id)
         {
             var rows = new List<FrameworkElement>();
@@ -372,7 +372,7 @@ namespace AIMeter
                         rows.Add(Row(null, L.T("API key"), text,
                             ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false)
                                               : Button(found != null ? L.T("Use another key…") : L.T("Add key…"), () => C.EnterApiKey(d), found == null)));
-                        // chiavi aggiuntive (es. di gestione di OpenRouter): solo se servono o se ne è già salvata una
+                        // Offer extra credentials only when needed or already saved.
                         var keys = Json.Obj(d.Raw, "keys");
                         if (keys != null)
                             foreach (var kv in keys)
@@ -397,7 +397,7 @@ namespace AIMeter
             return rows;
         }
 
-        /// <summary>Budget di spesa di un servizio a credito: importo e periodo; vuoto = nessun budget.</summary>
+        /// <summary>Edit a credit service's budget amount and period; an empty amount disables it.</summary>
         private FrameworkElement BudgetRow(ServiceDefinition d)
         {
             double amount;
@@ -433,11 +433,12 @@ namespace AIMeter
                 Tuple.Create("day", L.T("per day")), Tuple.Create("week", L.T("per week")), Tuple.Create("month", L.T("per month")),
             }, period, v => { chosen = v; save(); });
             return Row(null, L.T("Spending budget"),
-                L.T("An amount per day, week or month: the pill and the panel show how much of it is used, with a notification at 80% and 95%. Leave it empty for no budget."),
+                L.T("An amount per day, week or month: the pill and the panel show how much of it is used, with a notification at 80% and 95%. Leave it empty for no budget.") + " "
+                + L.T("Estimated spending is shown without remaining credit, forecasts or threshold alerts."),
                 Pair(frame, per));
         }
 
-        // ------------------------------------------------------------ dove vederlo
+        // ------------------------------------------------------------ display surfaces
         private void BuildDisplay()
         {
             Header(L.T("Where to see it"));
@@ -473,7 +474,7 @@ namespace AIMeter
             Hint(L.T("The full panel is always one click away from the AI Meter icon in the notification area."));
         }
 
-        // ------------------------------------------------------------ notifiche
+        // ------------------------------------------------------------ notifications
         private void BuildNotifications()
         {
             Header(L.T("Notifications"));
@@ -485,7 +486,7 @@ namespace AIMeter
                     L.T("After a limit you had almost used up resets."),
                     Toggle(S.NotifyReset, v => { S.NotifyReset = v; S.Save(); })));
 
-            // ogni limite che i servizi forniscono, per l'avviso a ogni azzeramento: una scheda per servizio
+            // Group reset-notification choices by service.
             Section(L.T("When a limit resets"));
             Hint(L.T("Every time these limits reset, at the time the service announces:"));
             var providers = C.Last == null ? new List<ProviderState>() : C.Last.Providers
@@ -520,7 +521,7 @@ namespace AIMeter
             Hint(L.T("Do not disturb and Focus in Windows hold these notifications like any other."));
         }
 
-        // ------------------------------------------------------------ generale
+        // ------------------------------------------------------------ general
         private void BuildGeneral()
         {
             Header(L.T("General"));
@@ -543,7 +544,7 @@ namespace AIMeter
                       v => { S.WslDistro = v; Changed(); })));
         }
 
-        // ------------------------------------------------------------ informazioni
+        // ------------------------------------------------------------ about
         private void BuildAbout()
         {
             Header(L.T("About"));
@@ -571,18 +572,18 @@ namespace AIMeter
         private void Changed() { S.Save(); C.ApplySettings(); }
 
         /// <summary>
-        /// "Limite nella barra" di un servizio, con i limiti che il servizio fornisce davvero. Solo se ce n'è più di uno:
-        /// con uno solo non c'è niente da scegliere.
+        /// Offer the service's available limit and value choices for the pill.
+        /// Skip the selector when there is only one choice and no saved preference.
         /// </summary>
         private void AddLimitRow(List<FrameworkElement> rows, string id)
         {
             var p = C.Last == null ? null : C.Last.Providers.FirstOrDefault(x => x.Id == id);
-            // i limiti con barra e, per i servizi a credito, anche la spesa del giorno, della settimana e del mese
-            var windows = p == null || p.Usage == null ? new List<UsageWindow>() : p.Usage.Windows.Where(w => w.HasPercent || w.Hidden).ToList();
+            // Include monetary values, estimated budgets and temporarily cached rows.
+            var windows = p == null || p.Usage == null ? new List<UsageWindow>() : p.Usage.Windows.Where(w => w.HasPercent || w.Hidden || w.Budget || w.NoBar || w.CachedAt.HasValue).ToList();
             string cur;
             S.PillLimits.TryGetValue(id, out cur);
             if (windows.Count < 2 && string.IsNullOrEmpty(cur)) return;
-            // "Predefinito" dice quale limite è: quello che la pillola mostra senza una scelta
+            // Name the limit selected by Default so its behavior is visible.
             var dflt = p == null ? null : Ui.Primary(p.Usage);
             var options = new List<Tuple<string, string>>
             {
@@ -610,7 +611,7 @@ namespace AIMeter
             return d != null && d.Detected();
         }
 
-        /// <summary>Ridisegna la pagina dopo un cambio che ne modifica altri interruttori.</summary>
+        /// <summary>Rebuild the page when a setting changes other controls.</summary>
         private void Rebuild() { Dispatcher.BeginInvoke(new Action(Build), System.Windows.Threading.DispatcherPriority.Background); }
 
         private void UpdateStats()
@@ -626,7 +627,7 @@ namespace AIMeter
                 proc.WorkingSet64 / 1048576.0, proc.PrivateMemorySize64 / 1048576.0, pct, C.CurrentInterval,
                 C.SavingPower ? " " + L.T("(energy saving)") : "", Controller.Version);
         }
-        // ------------------------------------------------------------ costruttori stile Impostazioni
+        // ------------------------------------------------------------ Settings-style controls
         private void Section(string title)
         {
             var t = Ui.Text(title, 14, "Text", FontWeights.SemiBold);
@@ -635,8 +636,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Testo di aiuto: vicino al titolo sopra (8 px, il margine del titolo) e alla scheda a cui si riferisce sotto (8 px);
-        /// dopo una scheda 12 px (4 della scheda + 8), così resta staccato da quella precedente.
+        /// Keep help text 8 px from its heading and associated card.
+        /// After a previous card, use 12 px of combined spacing to separate the groups.
         /// </summary>
         private void Hint(string text)
         {
@@ -667,8 +668,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Riga che apre una pagina (logo, nome, stato, interruttore, freccia), come le voci di Impostazioni di Windows:
-        /// tutta la riga è cliccabile tranne l'interruttore.
+        /// Build a Settings-style navigation row with a logo, name, status, toggle and chevron.
+        /// The entire row navigates except for the toggle.
         /// </summary>
         private static FrameworkElement Link(FrameworkElement icon, string title, string description, FrameworkElement control, Action open)
         {
@@ -683,7 +684,7 @@ namespace AIMeter
             host.MouseLeave += (o, e) => host.Background = Brushes.Transparent;
             host.MouseLeftButtonUp += (o, e) =>
             {
-                // il clic sull'interruttore non apre la pagina
+                // Do not navigate when the toggle is clicked.
                 var d = e.OriginalSource as DependencyObject;
                 while (d != null && d != host) { if (d is CheckBox) return; d = VisualTreeHelper.GetParent(d); }
                 open();
@@ -694,9 +695,9 @@ namespace AIMeter
 
         private static FrameworkElement Row(FrameworkElement icon, string title, string description, FrameworkElement control, FrameworkElement extra = null)
         {
-            // 68 px con l'icona e 56 senza, margini compresi, come le schede di Impostazioni di Windows
+            // Match Windows Settings card heights: 68 px with an icon, 56 px without, including margins.
             var g = new Grid { MinHeight = icon != null ? 48 : 36, Margin = new Thickness(16, 10, 16, 10) };
-            // colonna dell'icona: 44 px, di più per i loghi grandi (la pagina di un servizio)
+            // Reserve a 44 px icon column, widened for service-detail logos.
             double iw = icon != null && !double.IsNaN(icon.Width) ? icon.Width + 16 : 44;
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(44, iw)) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });

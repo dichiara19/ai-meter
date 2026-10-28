@@ -9,26 +9,27 @@ namespace AIMeter
 {
     internal sealed class UsageWindow
     {
-        public string Label;      // chiave inglese, tradotta al momento di mostrarla (Ui.LabelOf)
-        public string Suffix;     // aggiunta non tradotta, es. il nome del modello
-        public string Short;      // etichetta breve per la pillola: "5h", "7g"
-        public double Used;       // percentuale usata 0-100
-        public DateTime? ResetsAt; // ora locale
-        public DateTime? StartedAt; // inizio della finestra, se noto o ricavabile (fine − durata)
-        public Money Spent;       // per i crediti in denaro: speso e limite
-        public string RightText;  // chiave inglese al posto della percentuale (es. "unlimited")
-        public Func<string> Detail; // dettaglio per il suggerimento, calcolato nella lingua attiva
-        public bool NoBar;        // solo un valore (es. un saldo), senza barra né percentuale
-        public DateTime? RunsOutAt; // previsione: a questo ritmo il limite finisce prima dell'azzeramento
-        public double? PacePerHour; // previsione: punti percentuali usati all'ora, se ci sono abbastanza letture
-        public bool Budget;       // budget di spesa scelto dall'utente: non è un credito che scade (niente "usalo o lo perdi")
-        public bool Hidden;       // solo da scegliere per la pillola (es. "speso oggi"); nella scheda c'è la riga della spesa
+        public string Label;      // English translation key, resolved by Ui.LabelOf when displayed.
+        public string Suffix;     // Untranslated suffix, such as a model name.
+        public string Short;      // Compact pill label, such as "5h" or "7g".
+        public double Used;       // Percentage used, from 0 to 100.
+        public DateTime? ResetsAt; // Local time.
+        public DateTime? StartedAt; // Window start, when known or inferred from its duration.
+        public Money Spent;       // Amount spent and monetary limit.
+        public string RightText;  // Text or a translation key replacing the percentage, such as "unlimited".
+        public Func<string> Detail; // Tooltip details resolved in the active language.
+        public bool NoBar;        // A standalone value, without a percentage or bar.
+        public DateTime? RunsOutAt; // Forecast exhaustion time, when earlier than the reset.
+        public double? PacePerHour; // Estimated percentage points used per hour, when enough samples exist.
+        public bool Budget;       // A user spending budget; unused funds do not expire.
+        public bool Hidden;       // Pill-only metric; the card presents these values in its spending summary.
+        public DateTime? CachedAt; // Last successful extra response, when a later request failed.
         public double Remaining { get { return Math.Max(0, Math.Min(100, 100 - Used)); } }
 
-        /// <summary>Identità del limite nel suo servizio, stabile tra le letture (impostazioni, notifiche, previsioni).</summary>
+        /// <summary>Stable identity within a service for preferences, notifications and forecasts.</summary>
         public string Key { get { return Label + "|" + Suffix; } }
 
-        /// <summary>Durata della finestra: dall'inizio all'azzeramento, o dedotta dal tipo di limite. Null se non nota.</summary>
+        /// <summary>Window duration from its boundaries or known limit type; null if unknown.</summary>
         public TimeSpan? Length
         {
             get
@@ -42,11 +43,11 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Un limite in percentuale (con barra), non un saldo né un valore solo testuale.</summary>
-        public bool HasPercent { get { return !NoBar && RightText == null; } }
+        /// <summary>Whether a current percentage is available for bars, alerts and forecasts.</summary>
+        public bool HasPercent { get { return !NoBar && RightText == null && !CachedAt.HasValue; } }
     }
 
-    /// <summary>Un modello usato oggi da un agente del PC con un servizio: costo (nella valuta del servizio) e token.</summary>
+    /// <summary>Today's model usage reported by a local agent, including its computed cost and tokens.</summary>
     internal sealed class ModelCost
     {
         public string Model;
@@ -55,16 +56,16 @@ namespace AIMeter
         public int Replies;
     }
 
-    /// <summary>Suggerimento attivo per un servizio: una riga nella scheda e, una volta per finestra, una notifica.</summary>
+    /// <summary>A service tip displayed in its card and notified once per window.</summary>
     internal sealed class Tip
     {
-        public string Key;        // servizio|limite a cui si riferisce: una notifica sola per ogni finestra
-        public string Kind;       // "unused" o "wait"
+        public string Key;        // Provider and limit identity for notification deduplication.
+        public string Kind;       // "unused" or "wait".
         public string Title, Text;
-        public string Line;       // testo breve per la scheda del servizio
+        public string Line;       // Short text for the service card.
     }
 
-    /// <summary>Importo speso su un limite, nella valuta del servizio.</summary>
+    /// <summary>Spending against a limit, expressed in the service's currency.</summary>
     internal sealed class Money
     {
         public double Used;
@@ -74,7 +75,7 @@ namespace AIMeter
         public string Format(double v)
         {
             string sym = Currency == "EUR" ? "€" : Currency == "USD" ? "$" : Currency == "GBP" ? "£" : Currency == "CNY" ? "¥" : Currency;
-            // formato valuta della lingua attiva (es. $226.72 in inglese, 226,72 $ in italiano), con il simbolo del servizio
+            // Use the active locale's currency formatting with the service's currency symbol.
             var nf = (NumberFormatInfo)L.Culture.NumberFormat.Clone();
             nf.CurrencySymbol = sym;
             return v.ToString("C2", nf);
@@ -85,30 +86,31 @@ namespace AIMeter
     {
         public List<UsageWindow> Windows = new List<UsageWindow>();
         public string Source;     // "live", "cache", "log"
-        public DateTime At;       // quando il dato è stato rilevato
-        /// <summary>Come si ripartisce l'uso settimanale (es. Claude Code 98%, Cowork 2%).</summary>
+        public DateTime At;       // Time the data was collected.
+        public string Identity;   // Opaque credential identity for forecast and alert isolation.
+        /// <summary>Weekly usage breakdown, such as Claude Code versus Cowork.</summary>
         public List<KeyValuePair<string, double>> Breakdown = new List<KeyValuePair<string, double>>();
-        /// <summary>Riga di stato dei crediti extra / a consumo, calcolata nella lingua attiva al momento di mostrarla.</summary>
+        /// <summary>Extra-credit or pay-as-you-go status resolved in the active language.</summary>
         public Func<string> CreditsNote;
-        /// <summary>L'uso oltre i limiti del piano è attivo e si paga a consumo (es. extra usage di Claude).</summary>
+        /// <summary>Whether paid usage beyond the plan's limits is enabled.</summary>
         public bool ExtraActive;
-        /// <summary>Spesa di oggi, della settimana e del mese, nella lingua attiva (servizi a credito).</summary>
+        /// <summary>Today's, this week's and this month's spending in the active language.</summary>
         public Func<string> SpendNote;
-        /// <summary>Modelli usati oggi con questo servizio dagli agenti del PC (OpenCode, Pi): costo e token.</summary>
+        /// <summary>Today's models used through this service, as reported by OpenCode and Pi.</summary>
         public List<ModelCost> TodayModels;
 
-        /// <summary>Copia con altre finestre (budget, spesa del periodo), senza toccare quella letta dal servizio.</summary>
+        /// <summary>Copy usage with additional windows, preserving the original provider response.</summary>
         public Usage With(IEnumerable<UsageWindow> extra)
         {
-            var u = new Usage { Source = Source, At = At, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
+            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
             u.Windows.AddRange(Windows);
             u.Windows.AddRange(extra);
             return u;
         }
 
         /// <summary>
-        /// Il limite generale che contiene questo: stessa etichetta senza modello o gruppo (es. "Settimana" per
-        /// "Settimana · Fable"). L'uso del modello conta anche lì, quindi il margine vero è il più basso dei due.
+        /// Find the enclosing limit with the same label and no model or group suffix.
+        /// Model usage also consumes that limit, so available room is the smaller of the two.
         /// </summary>
         public UsageWindow ParentOf(UsageWindow w)
         {
@@ -117,17 +119,17 @@ namespace AIMeter
             return null;
         }
 
-        /// <summary>Margine reale di un limite: il suo, o quello del limite generale che lo contiene se è più basso.</summary>
+        /// <summary>Effective room, capped by the enclosing limit when necessary.</summary>
         public double Room(UsageWindow w)
         {
             var p = ParentOf(w);
             return p == null ? w.Remaining : Math.Min(w.Remaining, p.Remaining);
         }
 
-        /// <summary>Stessi dati, marcati come non più in tempo reale.</summary>
+        /// <summary>Return the same data marked as cached.</summary>
         public Usage AsCache()
         {
-            return new Usage { Windows = Windows, Source = "cache", At = At, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
+            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
         }
     }
 
@@ -138,7 +140,7 @@ namespace AIMeter
         public string Status;     // "busy", "idle", "app"
         public string Model;
         public DateTime Updated;
-        public string Note;       // dettaglio aggiuntivo nella riga (es. contesto occupato)
+        public string Note;       // Additional row details, such as context usage.
     }
 
     internal sealed class ProviderState
@@ -149,29 +151,29 @@ namespace AIMeter
         public bool Running;
         public List<Session> Sessions = new List<Session>();
         public Usage Usage;
-        public string Notice;     // messaggio di stato del collegamento, se serve
+        public string Notice;     // Connection status message, when needed.
         public bool NeedsLogin;
-        public bool CanSignIn;    // l'avviso offre il collegamento "Accedi" (accesso gestito da AI Meter)
-        public List<LocalModel> Models;   // solo per i modelli locali: i modelli caricati in memoria
-        public long GpuUsed, GpuTotal;    // solo per i modelli locali: memoria video della scheda (byte), letta nella raccolta
-        public Tip Tip;           // suggerimento attivo (calcolato a ogni lettura)
+        public bool CanSignIn;    // Whether the notice offers a sign-in action managed by AI Meter.
+        public List<LocalModel> Models;   // Loaded models, for local providers only.
+        public long GpuUsed, GpuTotal;    // GPU memory in bytes, for local providers only.
+        public Tip Tip;           // Active tip, evaluated for each snapshot.
 
         public int Active { get { int n = 0; foreach (var s in Sessions) if (s.Status != "app") n++; return n; } }
         public int Busy { get { int n = 0; foreach (var s in Sessions) if (s.Status == "busy") n++; return n; } }
     }
 
-    /// <summary>Un modello caricato da un server locale (Ollama, LM Studio, llama.cpp…), su Windows o in WSL.</summary>
+    /// <summary>A model loaded by a local server on Windows or WSL.</summary>
     internal sealed class LocalModel
     {
         public string Name;
         public string Server;      // "Ollama", "LM Studio", "llama.cpp"…
-        public string Where;       // "Windows" o "WSL"
-        public string Detail;      // parametri e quantizzazione, se noti
-        public long Vram, Ram;     // byte in memoria video e di sistema, 0 = sconosciuto
-        public int Context;        // finestra di contesto caricata (token), 0 = sconosciuta
-        public int ContextUsed;    // token nella richiesta più lunga in corso, 0 = sconosciuto
-        public int Busy, Slots;    // richieste in corso e posti disponibili (0 = sconosciuti)
-        public List<Session> Sessions = new List<Session>();   // sessioni delle CLI che lo usano
+        public string Where;       // "Windows" or "WSL".
+        public string Detail;      // Parameter count and quantization, when known.
+        public long Vram, Ram;     // GPU and system memory in bytes; zero means unknown.
+        public int Context;        // Loaded context size in tokens; zero means unknown.
+        public int ContextUsed;    // Tokens in the largest active request; zero means unknown.
+        public int Busy, Slots;    // Active requests and available slots; zero means unknown.
+        public List<Session> Sessions = new List<Session>();   // CLI sessions using this model.
 
         public string Key { get { return Server + "|" + Where + "|" + Name; } }
     }
@@ -181,7 +183,7 @@ namespace AIMeter
         public DateTime Taken = DateTime.Now;
         public List<ProviderState> Providers = new List<ProviderState>();
 
-        /// <summary>Firma compatta: l'interfaccia si ridisegna solo se cambia (o cambia il minuto).</summary>
+        /// <summary>Compact render signature, including the current minute for time-sensitive text.</summary>
         public string Signature()
         {
             var sb = new StringBuilder();
@@ -192,7 +194,12 @@ namespace AIMeter
                 if (p.Usage != null)
                 {
                     sb.Append(p.Usage.Source);
-                    foreach (var w in p.Usage.Windows) sb.Append(w.Label).Append((int)w.Used).Append(w.RightText).Append(w.ResetsAt).Append(w.RunsOutAt.HasValue ? w.RunsOutAt.Value.Ticks / TimeSpan.TicksPerMinute / 5 : 0);
+                    foreach (var w in p.Usage.Windows)
+                    {
+                        sb.Append(w.Key).Append((int)w.Used).Append(w.RightText).Append(w.CachedAt).Append(w.ResetsAt);
+                        if (w.Spent != null) sb.Append(w.Spent.Used.ToString("R", CultureInfo.InvariantCulture)).Append('/').Append(w.Spent.Limit.ToString("R", CultureInfo.InvariantCulture));
+                        sb.Append(w.RunsOutAt.HasValue ? w.RunsOutAt.Value.Ticks / TimeSpan.TicksPerMinute / 5 : 0);
+                    }
                     if (p.Usage.TodayModels != null) foreach (var m in p.Usage.TodayModels) sb.Append(m.Model).Append((int)(m.Cost * 100)).Append(m.Tokens >> 10);
                 }
                 foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
@@ -219,7 +226,7 @@ namespace AIMeter
             catch (InvalidOperationException) { return null; }
         }
 
-        /// <summary>Byte letti da disco dall'ultima compattazione della memoria.</summary>
+        /// <summary>Bytes read since the last memory compaction.</summary>
         public static long BytesRead;
 
         public static Dictionary<string, object> ParseFile(string path)
@@ -229,7 +236,7 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { return null; }
         }
 
-        /// <summary>Qualsiasi valore JSON (oggetto, elenco, numero…), null se non valido.</summary>
+        /// <summary>Parse any JSON value; return null for invalid input.</summary>
         public static object ParseAny(string text)
         {
             try { return Ser.DeserializeObject(text); }
