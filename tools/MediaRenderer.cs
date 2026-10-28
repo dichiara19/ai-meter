@@ -13,15 +13,15 @@ using IOPath = System.IO.Path;
 namespace AIMeter
 {
     /// <summary>
-    /// Immagini del README con i componenti veri dell'interfaccia e i dati dimostrativi: pannello (tema scuro e chiaro),
-    /// pillola nella barra, notifica, anteprima per i social e i fotogrammi della GIF. Avvio: tools\render-media.ps1.
+    /// README images composed from actual UI controls and synthetic data: panels in both themes,
+    /// taskbar pill, notifications, social preview and GIF frames. Run tools\render-media.ps1.
     /// </summary>
     public static class MediaRenderer
     {
         private static Settings S;
         private static BitmapSource wallpaper, wallpaperBlur;
         private const int DeskW = 1920, DeskH = 1080, BarH = 48;
-        // ora vera al minuto: gli "in 2 h 50 min" dell'interfaccia si calcolano sull'ora attuale
+        // Use the current minute because relative reset times depend on the actual clock.
         private static readonly DateTime Now = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, DateTime.Now.Hour, DateTime.Now.Minute, 0);
 
         public static string Run(string outDir, string framesDir, string lang)
@@ -56,9 +56,9 @@ namespace AIMeter
             Theme.Apply(S);
         }
 
-        // ================================================================ sfondo
-        /// <summary>Fondale astratto in stile Windows 11 (forme sfumate su blu notte), generato qui: nessuna immagine di terzi.</summary>
-        private static BitmapSource Wallpaper(bool blurred)
+        // Desktop backdrop.
+        /// <summary>Generate an abstract Windows-style backdrop locally, without third-party imagery.</summary>
+        internal static BitmapSource Wallpaper(bool blurred)
         {
             var c = new Canvas { Width = DeskW, Height = DeskH, ClipToBounds = true };
             c.Background = new LinearGradientBrush(Color.FromRgb(0x08, 0x0C, 0x1C), Color.FromRgb(0x14, 0x1B, 0x3A), 35);
@@ -74,7 +74,7 @@ namespace AIMeter
             blob(-200, -150, 900, 700, Color.FromArgb(0x70, 0x3A, 0x2A, 0x9E));
             blob(1500, 650, 700, 600, Color.FromArgb(0x90, 0xD9, 0x77, 0x57));
             c.Effect = new BlurEffect { Radius = blurred ? 140 : 60, KernelType = KernelType.Gaussian };
-            // la sfocatura schiarisce i bordi: si disegna più grande e si tiene il centro
+            // Render beyond the crop to avoid light edges introduced by the blur.
             const int pad = 200;
             var host = new Canvas { Width = DeskW + 2 * pad, Height = DeskH + 2 * pad, Background = c.Background };
             c.Width = DeskW + 2 * pad; c.Height = DeskH + 2 * pad;
@@ -92,8 +92,8 @@ namespace AIMeter
             return new Image { Source = cb, Width = r.Width, Height = r.Height, Stretch = Stretch.Fill };
         }
 
-        // ================================================================ componenti
-        /// <summary>Il pannello come la finestra vera (Flyout): intestazione, schede, piè di pagina; vetro simulato.</summary>
+        // Shared scene components.
+        /// <summary>Compose the actual flyout controls with a simulated compositor backdrop.</summary>
         private static FrameworkElement Panel(Snapshot s, bool dark, Rect onDesk)
         {
             var root = new DockPanel { Margin = new Thickness(12, 10, 12, 12) };
@@ -126,7 +126,7 @@ namespace AIMeter
             return Glass(root, dark, onDesk, 344);
         }
 
-        /// <summary>Vetro acrilico simulato: lo sfondo sfocato sotto la finestra, una tinta, bordo, angoli e ombra.</summary>
+        /// <summary>Simulate acrylic with the blurred desktop, tint, border, rounded corners and shadow.</summary>
         private static FrameworkElement Glass(FrameworkElement content, bool dark, Rect onDesk, double width)
         {
             content.Measure(new Size(width, double.PositiveInfinity));
@@ -144,7 +144,7 @@ namespace AIMeter
             return grid;
         }
 
-        /// <summary>La pillola come nella barra: pulsante alto 40 con la riga di loghi e percentuali, tema della barra.</summary>
+        /// <summary>The taskbar pill uses the actual logo and percentage row in a 40-pixel container.</summary>
         private static FrameworkElement Pill(Snapshot s, bool hover)
         {
             var row = Ui.PillRow(s, "5h", true);
@@ -153,7 +153,7 @@ namespace AIMeter
             return chip;
         }
 
-        /// <summary>L'angolo destro della barra delle applicazioni: pillola, icone di sistema, orologio.</summary>
+        /// <summary>Compose the taskbar corner with the pill, system icons and clock.</summary>
         private static FrameworkElement Taskbar(Snapshot s, double width, bool hover)
         {
             var bar = new DockPanel { Width = width, Height = BarH, LastChildFill = false };
@@ -176,7 +176,7 @@ namespace AIMeter
             var g2 = new Grid { Width = width, Height = BarH };
             g2.Children.Add(bar);
             g2.Children.Add(top);
-            // tema scuro della barra per la pillola (come TaskbarPill, che usa i colori di sistema)
+            // Match the dark taskbar palette used by TaskbarPill.
             g2.Resources.MergedDictionaries.Add(Theme.BuildPalette(true));
             return g2;
         }
@@ -184,7 +184,7 @@ namespace AIMeter
         private static TextBlock Plain(string t, double size) { return new TextBlock { Text = t, FontSize = size, Foreground = Brushes.White, FontFamily = Theme.Font }; }
         private static TextBlock Icon(string g, double size) { return new TextBlock { Text = g, FontSize = size, Foreground = Brushes.White, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), VerticalAlignment = VerticalAlignment.Center }; }
 
-        /// <summary>La notifica di Windows come la mostra il sistema (scheda scura con nome e icona dell'app).</summary>
+        /// <summary>Reconstruct a Windows notification card with the app name and icon.</summary>
         private static FrameworkElement Toast(Snapshot s, Rect onDesk)
         {
             var claude = s.Providers[0].Usage.Windows[0];
@@ -222,8 +222,37 @@ namespace AIMeter
             return p;
         }
 
-        // ================================================================ scene
-        /// <summary>Angolo in basso a destra dello schermo: sfondo, barra, e a richiesta notifica, pannello e puntatore.</summary>
+        // Scene composition.
+        /// <summary>Place the actual dashboard on the same synthetic desktop used by the existing release images.</summary>
+        internal static FrameworkElement HistoryShot(FrameworkElement content, bool dark)
+        {
+            if (wallpaper == null) wallpaper = Wallpaper(false);
+            if (wallpaperBlur == null) wallpaperBlur = Wallpaper(true);
+            const int sceneWidth = 1280, sceneHeight = 1000, windowWidth = 1160, windowHeight = 860;
+            var scene = new Canvas { Width = sceneWidth, Height = sceneHeight, ClipToBounds = true };
+            scene.Children.Add(Crop(wallpaper, new Rect(320, 40, sceneWidth, sceneHeight)));
+            content.Width = windowWidth; content.Height = windowHeight;
+            var frame = new Grid { Width = windowWidth, Height = windowHeight, Clip = new RectangleGeometry(new Rect(0, 0, windowWidth, windowHeight), 8, 8) };
+            frame.Children.Add(Crop(wallpaperBlur, new Rect(380, 100, windowWidth, windowHeight)));
+            frame.Children.Add(new Border { Background = new SolidColorBrush(dark ? Color.FromArgb(0xE8, 0x20, 0x20, 0x20) : Color.FromArgb(0xED, 0xF3, 0xF3, 0xF3)), CornerRadius = new CornerRadius(8) });
+            frame.Children.Add(content);
+            // Caption buttons are drawn by DWM in the app, outside WPF's render target.
+            var captionButtons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Height = 48 };
+            foreach (string glyph in new[] { "\uE921", "\uE922", "\uE8BB" })
+            {
+                var icon = Ui.Glyph(glyph, 10, "Text"); icon.Width = 46; icon.TextAlignment = TextAlignment.Center; captionButtons.Children.Add(icon);
+            }
+            frame.Children.Add(captionButtons);
+            var outline = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Child = frame };
+            outline.SetResourceReference(Border.BorderBrushProperty, "CardStroke");
+            outline.Effect = new DropShadowEffect { BlurRadius = 32, ShadowDepth = 8, Direction = 270, Opacity = dark ? 0.55 : 0.28, Color = Colors.Black };
+            Canvas.SetLeft(outline, 60); Canvas.SetTop(outline, 60); scene.Children.Add(outline);
+            var caption = Plain("AI Meter " + Controller.Version + " · Usage history · Sample data", 13); caption.Opacity = 0.8;
+            Canvas.SetLeft(caption, 64); Canvas.SetTop(caption, 958); scene.Children.Add(caption);
+            return scene;
+        }
+
+        /// <summary>Compose the desktop corner, optionally adding the notification, panel and pointer.</summary>
         private sealed class Scene
         {
             public const int W = 640, H = 1080;
@@ -298,7 +327,7 @@ namespace AIMeter
             return c;
         }
 
-        /// <summary>Il suggerimento della pillola (il testo vero di TaskbarPill), nello stile dei suggerimenti di Windows 11.</summary>
+        /// <summary>Use the actual TaskbarPill tooltip text in a Windows-style container.</summary>
         private static FrameworkElement Tooltip(Snapshot s)
         {
             var text = Plain(Ui.Summary(s) + "\n" + L.T("Click for details · right-click for options"), 12);
@@ -314,8 +343,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// La pillola chiusa nella barra, come si vede tutto il giorno: angolo della barra con il puntatore sopra
-        /// e il suo suggerimento. È la prima immagine del README e il fondo dell'anteprima per i social.
+        /// Show the collapsed taskbar pill with its pointer and tooltip for the README hero
+        /// and the background of the social preview.
         /// </summary>
         private static FrameworkElement HeroTaskbar(Snapshot s, double w, double h, bool tooltip)
         {
@@ -342,11 +371,11 @@ namespace AIMeter
             return c;
         }
 
-        /// <summary>Anteprima per i link (GitHub, social): 1280×640, la pillola nella barra e la frase.</summary>
+        /// <summary>Compose a 1280-by-640 social preview with the taskbar scene and product description.</summary>
         private static FrameworkElement SocialPreview(Snapshot s)
         {
             var c = new Canvas { Width = 1280, Height = 640, ClipToBounds = true };
-            // la scena della barra, ingrandita, fa da fondo
+            // Use an enlarged taskbar scene as the background.
             var hero = HeroTaskbar(s, 800, 400, true);
             hero.RenderTransform = new ScaleTransform(1.6, 1.6);
             c.Children.Add(hero);
@@ -366,8 +395,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// GIF: la pillola nella barra, una notifica sul limite in esaurimento, il clic sulla pillola e il pannello.
-        /// 15 fotogrammi al secondo, circa 9 secondi.
+        /// Animate the taskbar pill, a low-quota notification, the pointer click and the open panel.
+        /// Render at 15 frames per second for approximately nine seconds.
         /// </summary>
         private static int GifFrames(Snapshot s, string dir)
         {
@@ -376,7 +405,7 @@ namespace AIMeter
             var toast = Toast(s, new Rect(DeskW - 376, DeskH - BarH - 160, 364, 0));
             var timeline = new List<Scene>();
             Func<double, double> ease = t => 1 - Math.Pow(1 - Math.Max(0, Math.Min(1, t)), 3);
-            // posizione della pillola nella scena (dalla misura della barra)
+            // Derive the pill position from the taskbar measurement.
             var bar = Taskbar(s, Scene.W, false);
             bar.Measure(new Size(Scene.W, BarH)); bar.Arrange(new Rect(0, 0, Scene.W, BarH)); bar.UpdateLayout();
             var pillEl = ((DockPanel)((Grid)bar).Children[0]).Children.OfType<Border>().First();
@@ -385,11 +414,11 @@ namespace AIMeter
             var target = new Point(pillRect.X + pillRect.Width * 0.35, pillRect.Y + pillRect.Height * 0.45);
             var start = new Point(Scene.W * 0.45, Scene.H * 0.55);
 
-            for (int i = 0; i < 15; i++) timeline.Add(new Scene());                                          // 1 s: la barra
+            for (int i = 0; i < 15; i++) timeline.Add(new Scene());                                          // Hold the taskbar for one second.
             for (int i = 0; i < 8; i++) timeline.Add(new Scene { ToastOffset = 380 * (1 - ease(i / 7.0)), ToastOpacity = ease(i / 7.0) });
-            for (int i = 0; i < 40; i++) timeline.Add(new Scene { ToastOffset = 0, ToastOpacity = 1 });     // la notifica si legge
+            for (int i = 0; i < 40; i++) timeline.Add(new Scene { ToastOffset = 0, ToastOpacity = 1 });     // Keep the notification readable.
             for (int i = 0; i < 8; i++) timeline.Add(new Scene { ToastOffset = 380 * ease(i / 7.0), ToastOpacity = 1 - ease(i / 7.0) });
-            for (int i = 0; i <= 14; i++)                                                                      // il puntatore va sulla pillola
+            for (int i = 0; i <= 14; i++)                                                                      // Move the pointer towards the pill.
             {
                 double t = ease(i / 14.0);
                 timeline.Add(new Scene { Mouse = new Point(start.X + (target.X - start.X) * t, start.Y + (target.Y - start.Y) * t), Hover = i > 10 });
@@ -403,12 +432,12 @@ namespace AIMeter
             {
                 var frame = (Canvas)Compose(s, sc, panel, toast);
                 Save(frame, IOPath.Combine(dir, "f" + (n++).ToString("D3") + ".png"), 1);
-                frame.Children.Clear();   // pannello e notifica si riusano nel fotogramma successivo
+                frame.Children.Clear();   // Reuse the panel and notification in the following frame.
             }
             return n;
         }
 
-        // ================================================================ disegno
+        // Rendering and encoding.
         private static BitmapSource Render(FrameworkElement el, double w, double h, double scale)
         {
             el.Measure(new Size(w, h));
@@ -420,7 +449,7 @@ namespace AIMeter
             return bmp;
         }
 
-        private static void Save(FrameworkElement el, string path, double scale)
+        internal static void Save(FrameworkElement el, string path, double scale)
         {
             el.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             double w = double.IsNaN(el.Width) ? el.DesiredSize.Width : el.Width;

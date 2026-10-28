@@ -8,9 +8,9 @@ using System.Text;
 namespace AIMeter
 {
     /// <summary>
-    /// Claude: sessioni di Claude Code (Windows e WSL) e Cowork, app aperta, limiti dall'API di utilizzo
-    /// con l'accesso di Claude Code. Il token lo rinnova la CLI stessa: non tocchiamo mai il refresh token.
-    /// API: GET /api/oauth/usage con anthropic-beta oauth-2025-04-20.
+    /// Claude Code and Cowork sessions on Windows and running WSL, app presence and usage API limits.
+    /// Claude Code manages sign-in and token renewal; this provider never touches the refresh token.
+    /// API: GET /api/oauth/usage with anthropic-beta oauth-2025-04-20.
     /// </summary>
     internal sealed class ClaudeProvider : Provider
     {
@@ -28,7 +28,7 @@ namespace AIMeter
 
         public override string Id { get { return "claude"; } }
 
-        /// <summary>Claude Code o l'app Claude sono presenti su questo PC.</summary>
+        /// <summary>Whether Claude Code or the Claude app is installed on this PC.</summary>
         public static bool Detected()
         {
             return Directory.Exists(Path.Combine(Probe.Home, ".claude")) || Directory.Exists(Path.Combine(Probe.AppData, "Claude"));
@@ -54,7 +54,7 @@ namespace AIMeter
             return st;
         }
 
-        // ================================================================ sessioni
+        // Session discovery.
         private static readonly Dictionary<string, string> EntryLabels = new Dictionary<string, string>
         {
             { "claude-desktop", "Code · Desktop" }, { "cli", "Code · CLI" }, { "claude-vscode", "Code · VS Code" },
@@ -77,7 +77,7 @@ namespace AIMeter
                     var pidN = Json.Num(d, "pid");
                     if (pidN == null) continue;
                     uint pid = (uint)pidN.Value;
-                    // processi di WSL: un solo elenco di /proc per giro, invece di un controllo per file sulla condivisione
+                    // Read WSL process IDs once per collection, avoiding a share request for every session file.
                     if (f.Value && wslPids == null) wslPids = WslPids(p);
                     bool alive = f.Value ? wslPids.Contains(pid) : p.Procs.ContainsKey(pid);
                     if (!alive) continue;
@@ -113,7 +113,7 @@ namespace AIMeter
             return set;
         }
 
-        /// <summary>cliSessionId → metadati (titolo, modello) delle sessioni Code aperte dall'app desktop.</summary>
+        /// <summary>Map cliSessionId to the title and model of Code sessions opened by the desktop app.</summary>
         private static Dictionary<string, Dictionary<string, object>> DesktopSessionMeta(Probe p)
         {
             var map = new Dictionary<string, Dictionary<string, object>>();
@@ -155,7 +155,7 @@ namespace AIMeter
             return list;
         }
 
-        // ================================================================ limiti
+        // Usage limits.
         private void Limits(Probe p, ProviderState st)
         {
             string creds = CredentialsPath(p);
@@ -229,10 +229,19 @@ namespace AIMeter
                 using (var r = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                 {
                     string body = r.ReadToEnd();
-                    // ultima risposta così com'è (solo percentuali e date, nessun token): diagnosi, nuovi campi, ripartenza
+                    // Keep the latest response (usage and dates, no authentication tokens) for diagnostics and restart.
                     try { File.WriteAllText(RawFile, body, new UTF8Encoding(false)); }
                     catch (IOException) { }
-                    return Parse(Json.Parse(body));
+                    var usage = Parse(Json.Parse(body));
+                    if (usage != null)
+                    {
+                        string home = Path.GetDirectoryName(Path.GetDirectoryName(credsPath));
+                        var account = Json.Obj(Json.ParseFile(Path.Combine(home, ".claude.json")), "oauthAccount");
+                        string accountId = Json.Str(account, "accountUuid"), organisationId = Json.Str(account, "organizationUuid");
+                        // Profile IDs survive token renewal. Without them, isolate this credential instead.
+                        usage.Identity = HistoryStore.Hash(accountId != null ? accountId + "|" + organisationId : token);
+                    }
+                    return usage;
                 }
             }
             catch (WebException e)
@@ -246,8 +255,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Interpreta la risposta di /api/oauth/usage. Usa l'elenco "limits" (sessione, settimana, settimana per modello)
-        /// e, se manca, i campi storici five_hour / seven_day. Aggiunge crediti cloud, crediti extra e ripartizione.
+        /// Parse /api/oauth/usage using limits for session, week and model-specific weekly windows,
+        /// falling back to legacy five_hour / seven_day fields. Include cloud credits and usage breakdowns.
         /// </summary>
         private static Usage Parse(Dictionary<string, object> d)
         {
@@ -281,8 +290,8 @@ namespace AIMeter
                 AddWindow(u, d, "seven_day_sonnet", "Week", "Sonnet", "m", TimeSpan.FromDays(7));
             }
 
-            // crediti in dollari con rinnovo: iguana_necktie sono i crediti per le sessioni cloud;
-            // altri crediti promozionali hanno la stessa forma
+            // Dollar credits with resets: iguana_necktie covers cloud sessions;
+            // other promotional credits share this shape.
             foreach (var kv in d)
             {
                 var g = kv.Value as Dictionary<string, object>;
@@ -296,7 +305,7 @@ namespace AIMeter
                 });
             }
 
-            // crediti extra a consumo (oltre i limiti del piano); gli importi sono in centesimi
+            // Pay-as-you-go credits beyond plan limits; amounts are in cents.
             var extra = Json.Obj(d, "extra_usage");
             if (extra != null && (Json.Bool(extra, "is_enabled") || Json.Bool(extra, "credits_ever_enabled")))
             {
@@ -308,7 +317,7 @@ namespace AIMeter
                 u.ExtraActive = Json.Bool(extra, "is_enabled");
             }
 
-            // come si ripartisce la settimana tra Claude Code, chat, Cowork…
+            // Weekly usage split across Claude Code, chat and Cowork.
             var bd = Json.Obj(d, "seven_day_breakdown");
             var rows = bd != null && bd.ContainsKey("rows") ? bd["rows"] as object[] : null;
             if (rows != null)
@@ -344,7 +353,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>La CLI di Claude Code installata con l'app desktop (la versione più recente).</summary>
+        /// <summary>The latest Claude Code CLI installed by the desktop app.</summary>
         public static string CliPath()
         {
             string root = Path.Combine(Probe.AppData, @"Claude\claude-code");
@@ -358,7 +367,7 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { return null; }
         }
 
-        /// <summary>Ultimo campione salvato dall'app Claude (aggiornato dall'app, non da noi).</summary>
+        /// <summary>Latest sample saved and updated by the Claude app.</summary>
         private static Usage AppCachedUsage(Probe p)
         {
             var fi = new FileInfo(Path.Combine(Probe.AppData, @"Claude\plan-usage-history.json"));
@@ -377,7 +386,7 @@ namespace AIMeter
             }) as Usage;
         }
 
-        /// <summary>Ricorda il piano (serve anche quando WSL è spento); i limiti restano nella risposta grezza salvata.</summary>
+        /// <summary>Remember the plan whilst WSL is off; limits remain in the saved raw response.</summary>
         private void SavePlan()
         {
             try
@@ -389,7 +398,7 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { }
         }
 
-        /// <summary>All'avvio riparte dall'ultima risposta salvata, marcata come non in tempo reale.</summary>
+        /// <summary>At startup, restore the last saved response marked as cached.</summary>
         private void LoadPersisted()
         {
             plan = Json.Str(Json.ParseFile(PlanFile), "plan");

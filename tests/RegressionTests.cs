@@ -47,6 +47,7 @@ namespace AIMeter
             Test("Money changes invalidate the render signature", MoneySignature);
             Test("Every supported language describes estimates and cached data", Translations);
             Test("Budgets reject non-finite amounts", InvalidBudget);
+            HistoryRegressionTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated storage and loopback HTTP only.");
         }
 
