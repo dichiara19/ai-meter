@@ -16,14 +16,14 @@ using Forms = System.Windows.Forms;
 namespace AIMeter
 {
     /// <summary>
-    /// Punto d'ingresso pubblico per l'avvio da PowerShell (AIMeter.ps1): con Smart App Control attivo un eseguibile
-    /// non firmato viene bloccato, mentre PowerShell (firmato da Microsoft) può compilare ed eseguire il sorgente.
+    /// Public entry point for the PowerShell launcher (AIMeter.ps1). Smart App Control blocks unsigned
+    /// executables, whilst Microsoft-signed PowerShell can compile and execute the sources.
     /// </summary>
     public static class Entry
     {
         public static void Run(string[] args)
         {
-            // senza il manifest dell'eseguibile: DPI per monitor impostati qui, prima che WPF si inizializzi
+            // Configure per-monitor DPI before WPF initialises when the executable manifest is unavailable.
             Native.EnablePerMonitorDpi();
             Native.SetAppId("AIMeter.App");
             AppContext.SetSwitch("Switch.System.Windows.DoNotScaleForDpiChanges", false);
@@ -33,13 +33,13 @@ namespace AIMeter
 
     internal static class Program
     {
-        /// <summary>Cartella dell'installazione: quella dell'eseguibile, o quella indicata dal launcher PowerShell.</summary>
+        /// <summary>Installation directory, provided by the PowerShell launcher or containing the executable.</summary>
         public static string Home
         {
             get { return Environment.GetEnvironmentVariable("AIMETER_HOME") ?? AppDomain.CurrentDomain.BaseDirectory; }
         }
 
-        /// <summary>Comando con cui Windows deve avviare l'app (avvio automatico).</summary>
+        /// <summary>Command Windows uses to launch the app at sign-in.</summary>
         public static string LaunchCommand
         {
             get
@@ -49,7 +49,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>LaunchCommand diviso in programma (percorso completo) e argomenti, per i collegamenti.</summary>
+        /// <summary>Split LaunchCommand into an absolute executable path and shortcut arguments.</summary>
         public static void SplitLaunch(out string target, out string args)
         {
             string cmd = LaunchCommand.Trim();
@@ -58,8 +58,8 @@ namespace AIMeter
             if (!Path.IsPathRooted(target)) target = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), target);
         }
 
-        /// <summary>Risorsa incorporata nell'eseguibile, oppure il file corrispondente in assets\ (avvio da sorgente).</summary>
-        /// <summary>Icona dell'app come "percorso,indice": l'eseguibile, o assets\app.ico nell'avvio da sorgente.</summary>
+        /// <summary>Assets are embedded in the executable or loaded from assets when running from source.</summary>
+        /// <summary>App icon as path,index: the executable or assets\app.ico when running from source.</summary>
         public static string IconPath
         {
             get
@@ -70,15 +70,15 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Le finestre con un pulsante nella barra si presentano come AI Meter, con la sua icona.</summary>
+        /// <summary>Windows shown in the taskbar use the AI Meter name and icon.</summary>
         public static void Brand(Window w)
         {
-            if (Native.IsPackaged) return;   // il pacchetto MSIX dà già nome e icona alle finestre
+            if (Native.IsPackaged) return;   // The MSIX package already supplies the window identity.
             w.SourceInitialized += (o, e) =>
                 Native.SetWindowAppId(new System.Windows.Interop.WindowInteropHelper(w).Handle, "AIMeter.App", IconPath, "AI Meter", LaunchCommand);
         }
 
-        /// <summary>--demo: dati dimostrativi al posto di quelli veri (per provare l'aspetto o fare screenshot), niente rete né notifiche.</summary>
+        /// <summary>--demo uses sample data for previews and screenshots, without network access or notifications.</summary>
         public static bool Demo { get; private set; }
 
         public static Stream OpenAsset(string name)
@@ -92,7 +92,7 @@ namespace AIMeter
         [STAThread]
         private static void Main(string[] args) { Native.SetAppId("AIMeter.App"); Run(args); }
 
-        /// <summary>Registro degli errori gestiti (%APPDATA%\AIMeter\errors.log, al massimo 256 KB): eccezione completa con lo stack.</summary>
+        /// <summary>Handled-error log (%APPDATA%\AIMeter\errors.log, rotated at 256 KB), including exception stacks.</summary>
         internal static void LogError(string where, Exception ex)
         {
             try
@@ -115,19 +115,19 @@ namespace AIMeter
                 var settingsSignal = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\AIMeter.Settings");
                 if (!created)
                 {
-                    // già in esecuzione: apre il pannello (o le impostazioni) dell'istanza attiva
+                    // An existing instance handles requests to open the panel or settings.
                     (args.Contains("--settings") ? settingsSignal : showSignal).Set();
                     return;
                 }
 
                 Demo = args.Contains("--demo");
                 ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
-                // Disegno in software: nessun dispositivo Direct3D (circa -60 MB) e nessun lavoro sulla GPU.
-                // La composizione (Mica, Acrilico, ombre) resta a carico di Windows. --gpu per il disegno in hardware.
+                // Software rendering avoids a Direct3D device (roughly 60 MB) and GPU work.
+                // Windows still composites Mica, acrylic and shadows. --gpu enables hardware rendering.
                 if (!args.Contains("--gpu")) System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-                // un errore imprevisto nell'interfaccia (es. Windows che rifiuta una finestra mentre la barra si ricrea)
-                // finisce nel registro e l'app resta aperta, invece di chiudersi
+                // Log unexpected UI errors, such as Windows refusing a window during taskbar recreation,
+                // and keep the app running.
                 app.DispatcherUnhandledException += (o, e) => { LogError("ui", e.Exception); e.Handled = true; };
                 bool atLogin = args.Contains("--startup");
 #if MSIX
@@ -153,13 +153,18 @@ namespace AIMeter
         private Collector collector;
         private readonly Forecaster forecaster = new Forecaster();
         private Alerts alerts;
-        private Action balloonAction;   // cosa fa il clic sulla notifica mostrata
+        private Action balloonAction;   // Action for the currently displayed notification.
         private Dispatcher ui;
         private DesktopWidget desktop;
         private OverlayPill pill;
         private TaskbarPill dock;
         private Flyout flyout;
         private SettingsWindow settingsWindow;
+        private HistoryWindow historyWindow;
+        private HistoryStore historyStore;
+        private HistoryCollector historyCollector;
+        private string pendingFeedback;
+        public string HistoryError { get; private set; }
         private Window menuHost;
         private Forms.NotifyIcon tray;
         private string lastSignature;
@@ -167,13 +172,15 @@ namespace AIMeter
         private DateTime flyoutHiddenAt;
         private readonly DispatcherTimer hideDetails = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         private DispatcherTimer loginWatch;
-        private Native.WinEventProc foregroundProc;   // tenuto in vita: il hook lo richiama
+        private Native.WinEventProc foregroundProc;   // Keep the delegate alive whilst the hook can call it.
         private bool fullscreenBusy;
 
         private readonly AutoResetEvent wake = new AutoResetEvent(false);
         private volatile bool paused;
+        private volatile bool sessionLocked, suspended;
+        private long collectionPausedAt;
         private volatile bool anyVisible = true;
-        private volatile bool detailsVisible;   // pannello o impostazioni aperti: dati più freschi
+        private volatile bool detailsVisible;   // Open detail surfaces request fresher data.
         private volatile bool stopping;
 
         public Controller(bool startup, EventWaitHandle showSignal, EventWaitHandle settingsSignal)
@@ -199,6 +206,8 @@ namespace AIMeter
             else try { Settings.RefreshStartup(); } catch (Exception) { }
             L.Init(Settings.Language);
             collector = new Collector(Settings);
+            historyStore = new HistoryStore(Path.Combine(Settings.Folder, "history.sqlite3"));
+            historyCollector = new HistoryCollector(historyStore);
             Theme.Apply(Settings);
 
             CreateFlyout();
@@ -208,7 +217,7 @@ namespace AIMeter
             Native.RegisterAppIdentity("AIMeter.App", "AI Meter", NotificationIcon());
             EnsureShortcut();
             ApplySettings();
-            // primo avvio con una barra dove la pillola non può stare (es. verticale): si mostra il widget sul desktop
+            // On first launch, use the desktop widget if the taskbar cannot host the pill, for example when vertical.
             if (firstRun && Settings.TaskbarDock && (dock == null || !dock.Usable))
             {
                 Settings.DesktopWidget = true;
@@ -230,11 +239,11 @@ namespace AIMeter
             worker.Start();
         }
 
-        // ================================================================ raccolta dati in background
+        // ================================================================ background collection
         private void WorkerLoop()
         {
             Native.EnableEcoQoSForCurrentThread();
-            if (startup) Thread.Sleep(15000);   // all'accesso lascia prima partire il desktop
+            if (startup) Thread.Sleep(15000);   // Allow the desktop to settle after sign-in.
             int ticks = 0;
             while (!stopping)
             {
@@ -244,13 +253,34 @@ namespace AIMeter
                 try
                 {
                     if (Program.Demo) snap = DemoData.Build(DateTime.Now);
-                    else { snap = collector.Collect(anyVisible || ticks == 0, saving); forecaster.Apply(snap); }
+                    else
+                    {
+                        snap = collector.Collect(anyVisible || Settings.HistoryEnabled || ticks == 0, saving);
+                        forecaster.Apply(snap);
+                        if (Settings.HistoryEnabled)
+                        {
+                            try
+                            {
+                                long pauseTicks = paused ? 0 : Interlocked.Read(ref collectionPausedAt);
+                                historyCollector.Collect(snap, Settings, pauseTicks == 0 ? (DateTime?)null : new DateTime(pauseTicks, DateTimeKind.Utc));
+                                Interlocked.CompareExchange(ref collectionPausedAt, 0, pauseTicks);
+                                HistoryError = null;
+                                if (!paused && Settings.SessionFeedback && pendingFeedback == null && !snap.Providers.Any(provider => provider.Busy > 0))
+                                    pendingFeedback = historyStore.ClaimFeedback(snap.Taken, Settings.FeedbackEnabledSince);
+                            }
+                            catch (Exception exception)
+                            {
+                                if (HistoryError == null) Program.LogError("history-collection", exception);
+                                HistoryError = exception.Message;
+                            }
+                        }
+                    }
                 }
                 catch (Exception ex) { Trace.WriteLine(ex); }
                 if (snap != null) ui.BeginInvoke(DispatcherPriority.Background, new Action(() => Apply(snap)));
                 if (Json.BytesRead > 8 << 20)
                 {
-                    // dopo letture grosse (primo avvio, log nuovi) restituisce la memoria al sistema
+                    // Return memory after large initial or changed-log reads.
                     Json.BytesRead = 0;
                     System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
                     GC.Collect(2, GCCollectionMode.Forced, true, true);
@@ -260,8 +290,8 @@ namespace AIMeter
                 int interval;
                 if (!anyVisible) interval = 120;
                 else if (Settings.Refresh == "low") interval = saving ? 60 : 30;
-                // pannello aperto: ogni 10 s; solo pillola, widget o sovrimpressione: ogni 30 s (bastano per percentuali
-                // che cambiano lentamente, e un terzo dei risvegli). A batteria il doppio.
+                // Refresh open details every 10 seconds; pills and widgets need only 30 seconds.
+                // Double the interval on battery to reduce wake-ups.
                 else if (detailsVisible) interval = saving ? 30 : 10;
                 else interval = saving ? 60 : 30;
                 CurrentInterval = interval;
@@ -274,7 +304,7 @@ namespace AIMeter
         {
             Last = s;
             Notify(s);
-            // le impostazioni elencano i limiti dei servizi: se cambiano (primo aggiornamento, servizio acceso) si ridisegnano
+            // Rebuild settings when the available service limits change.
             string keys = string.Join(",", s.Providers.Where(p => p.Usage != null).SelectMany(p => p.Usage.Windows.Where(w => w.HasPercent).Select(w => p.Id + "|" + w.Key)));
             if (keys != limitKeys)
             {
@@ -283,7 +313,7 @@ namespace AIMeter
             }
             string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed + string.Join(",", Settings.PillLimits.Select(kv => kv.Key + kv.Value)) + string.Join(",", Settings.HiddenRows.Where(kv => kv.Value).Select(kv => kv.Key));
             UpdateTrayText(s);
-            if (sig == lastSignature) return;   // niente è cambiato: nessun ridisegno
+            if (sig == lastSignature) return;   // Skip rendering when nothing has changed.
             lastSignature = sig;
             if (desktop != null) desktop.Render(s);
             if (pill != null) pill.Render(s, Settings.OverlayMetric);
@@ -293,7 +323,7 @@ namespace AIMeter
 
         private void Rerender() { lastSignature = null; if (Last != null) Apply(Last); }
 
-        /// <summary>Ricalcola subito i suggerimenti (dopo un cambio nelle impostazioni), senza aspettare la lettura successiva.</summary>
+        /// <summary>Recalculate tips immediately after settings change, without waiting for another collection.</summary>
         public void RefreshTips()
         {
             if (Last == null) return;
@@ -303,7 +333,7 @@ namespace AIMeter
 
         public void RefreshNow() { collector.InvalidateNetwork(); wake.Set(); }
 
-        // ================================================================ impostazioni
+        // Settings and surface lifecycle.
         public void ApplySettings()
         {
             if (Settings.DesktopWidget)
@@ -342,9 +372,10 @@ namespace AIMeter
         public void ApplyTheme()
         {
             Theme.Apply(Settings);
-            foreach (Window w in new Window[] { desktop, pill, flyout, settingsWindow })
+            foreach (Window w in new Window[] { desktop, pill, flyout, settingsWindow, historyWindow })
                 if (w != null) Ui.ApplyBackdrop(w, w == flyout ? 3 : 2, false);
             if (settingsWindow != null) settingsWindow.Build();
+            if (historyWindow != null) historyWindow.Reload();
             Rerender();
         }
 
@@ -354,18 +385,19 @@ namespace AIMeter
             flyout.IsVisibleChanged += (o, e) => { if (!flyout.IsVisible) flyoutHiddenAt = DateTime.Now; UpdateVisibility(); };
         }
 
-        /// <summary>Cambio lingua al volo: ricrea finestre e menu con i nuovi testi e rilegge i limiti.</summary>
+        /// <summary>Recreate surfaces and menus after a language change and request fresh limits.</summary>
         public void ApplyLanguage()
         {
             L.Init(Settings.Language);
+            if (historyWindow != null) historyWindow.Close();
             if (desktop != null) { desktop.Close(); desktop = null; }
             if (pill != null) { pill.Close(); pill = null; }
             if (dock != null) { dock.Close(); dock = null; }
             flyout.Close();
             CreateFlyout();
-            ApplySettings();   // etichette, note e dettagli si traducono al momento di mostrarli: basta ridisegnare
+            ApplySettings();   // Labels and details resolve translations when rendered.
             if (settingsWindow != null) settingsWindow.Build();
-            wake.Set();        // gli avvisi dei servizi vengono riscritti alla prossima raccolta, subito
+            wake.Set();        // Refresh translated provider notices immediately.
         }
 
         public bool IsExpanded(string id)
@@ -394,7 +426,7 @@ namespace AIMeter
             else Settings.ExpandedServices[id] = v;
         }
 
-        /// <summary>Accesso del servizio indicato: login di Claude Code nel terminale, o accesso a GitHub per Copilot.</summary>
+        /// <summary>Sign in through Claude Code, GitHub for Copilot, or the selected service's own mechanism.</summary>
         public void Login(string id)
         {
             var def = Definitions.Get(id);
@@ -416,10 +448,10 @@ namespace AIMeter
             githubLogin.Activate();
         }
 
-        /// <summary>Chiave API di un servizio descritto da una definizione: finestra per incollarla.</summary>
+        /// <summary>Open the API key entry window for a definition-based service.</summary>
         public void EnterApiKey(ServiceDefinition d) { EnterApiKey(d, null); }
 
-        /// <summary>slot: una chiave aggiuntiva della definizione (es. "management" per OpenRouter); null = quella principale.</summary>
+        /// <summary>An optional slot selects an extra key, such as OpenRouter management; null selects the primary key.</summary>
         public void EnterApiKey(ServiceDefinition d, string slot)
         {
             var w = new ApiKeyWindow(d, slot);
@@ -440,7 +472,7 @@ namespace AIMeter
             RefreshNow();
         }
 
-        /// <summary>Accesso di Antigravity CLI: la CLI si apre in un terminale (su Windows se c'è, altrimenti in WSL) e lo chiede lei.</summary>
+        /// <summary>Open Antigravity CLI sign-in in a terminal, preferring Windows when installed.</summary>
         public void LoginAntigravity()
         {
             try
@@ -461,6 +493,20 @@ namespace AIMeter
             else { Settings.DesktopX = double.MinValue; Settings.DesktopY = double.MinValue; Settings.Save(); }
         }
 
+        public void OpenHistory()
+        {
+            if (Program.Demo) return;
+            if (historyWindow == null)
+            {
+                historyWindow = new HistoryWindow(this, historyStore);
+                historyWindow.Closed += (sender, args) => { historyWindow = null; UpdateVisibility(); };
+                historyWindow.Show();
+            }
+            if (historyWindow.WindowState == WindowState.Minimized) historyWindow.WindowState = WindowState.Normal;
+            historyWindow.Activate();
+            UpdateVisibility();
+        }
+
         public void OpenSettings()
         {
             if (settingsWindow == null)
@@ -473,7 +519,7 @@ namespace AIMeter
             settingsWindow.Activate();
         }
 
-        /// <summary>Apre un terminale con il login di Claude Code: l'accesso lo fa l'utente, poi resta valido.</summary>
+        /// <summary>Open Claude Code sign-in in a terminal; the CLI handles authentication.</summary>
         public void LoginClaude()
         {
             try
@@ -489,7 +535,7 @@ namespace AIMeter
             }
             catch (System.ComponentModel.Win32Exception) { return; }
 
-            // controlla a intervalli brevi finché il login non risulta completato (al massimo 5 minuti)
+            // Check briefly for completed sign-in, for at most five minutes.
             if (loginWatch != null) loginWatch.Stop();
             int checks = 0;
             loginWatch = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
@@ -502,7 +548,7 @@ namespace AIMeter
             loginWatch.Start();
         }
 
-        /// <summary>Il login va dove vive la CLI di Claude Code: WSL se configurato (l'avvio qui è voluto dall'utente), altrimenti Windows.</summary>
+        /// <summary>Sign in where Claude Code is installed: configured WSL (explicitly requested here), otherwise Windows.</summary>
         private bool UseWslForLogin()
         {
             if (string.IsNullOrEmpty(Settings.WslDistro)) return false;
@@ -510,11 +556,11 @@ namespace AIMeter
             return Directory.Exists(@"\\wsl.localhost\" + Settings.WslDistro + @"\home\" + Settings.WslUser + @"\.claude");
         }
 
-        // ================================================================ pannello e pillola
+        // ================================================================ panel and pill
         public void ToggleFlyout()
         {
             if (flyout.IsVisible && !flyout.HoverMode) { flyout.Hide(); return; }
-            if ((DateTime.Now - flyoutHiddenAt).TotalMilliseconds < 300) return; // chiuso proprio da questo clic
+            if ((DateTime.Now - flyoutHiddenAt).TotalMilliseconds < 300) return; // This click has just closed the panel.
             if (Last != null) flyout.Render(Last);
             flyout.ShowFromTray();
             UpdateVisibility();
@@ -552,16 +598,16 @@ namespace AIMeter
         private void UpdateVisibility()
         {
             anyVisible = (desktop != null && desktop.IsVisible) || (pill != null && pill.IsVisible) || (dock != null && dock.IsVisible) || flyout.IsVisible
-                         || settingsWindow != null;
-            bool details = flyout.IsVisible || settingsWindow != null;
-            if (details && !detailsVisible) wake.Set();   // all'apertura del pannello si aggiorna subito
+                         || settingsWindow != null || historyWindow != null;
+            bool details = flyout.IsVisible || settingsWindow != null || historyWindow != null;
+            if (details && !detailsVisible) wake.Set();   // Refresh immediately when details open.
             detailsVisible = details;
         }
 
         private void OnForegroundChanged(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time)
         {
 
-            if (flyout.IsVisible && flyout.TaskbarMode && !Native.IsOwnWindow(hwnd)) flyout.Hide();   // clic altrove
+            if (flyout.IsVisible && flyout.TaskbarMode && !Native.IsOwnWindow(hwnd)) flyout.Hide();   // A click outside the app closes the taskbar flyout.
             bool busy = Native.UserIsBusyFullscreen();
             if (busy == fullscreenBusy) return;
             fullscreenBusy = busy;
@@ -578,7 +624,7 @@ namespace AIMeter
             }
             if (dock != null)
             {
-                // la pillola è dentro la barra: a schermo intero o con la barra a scomparsa segue la barra da sola
+                // The docked pill follows the taskbar automatically in fullscreen and auto-hide modes.
                 dock.Place();
             }
             UpdateVisibility();
@@ -587,14 +633,14 @@ namespace AIMeter
         public void ToggleFlyoutFromTaskbar(TaskbarPill anchor)
         {
             if (flyout.IsVisible && !flyout.HoverMode) { flyout.Hide(); return; }
-            if ((DateTime.Now - flyoutHiddenAt).TotalMilliseconds < 300) return; // chiuso proprio da questo clic
+            if ((DateTime.Now - flyoutHiddenAt).TotalMilliseconds < 300) return; // This click has just closed the panel.
             if (Last != null) flyout.Render(Last);
             flyout.ShowFromTaskbar(anchor.OnLeft);
             UpdateVisibility();
             RefreshNow();
         }
 
-        /// <summary>Pillola nella barra e sovrimpressione sono alternative: attivarne una spegne l'altra.</summary>
+        /// <summary>The taskbar pill and floating overlay are mutually exclusive.</summary>
         public void SetTaskbarDock(bool on)
         {
             Settings.TaskbarDock = on;
@@ -603,7 +649,7 @@ namespace AIMeter
             ApplySettings();
         }
 
-        // ================================================================ area di notifica e menu
+        // ================================================================ notification area and menu
         private void CreateTray()
         {
             tray = new Forms.NotifyIcon { Text = "AI Meter", Visible = true };
@@ -618,23 +664,34 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Al primo avvio dice chiaramente quale dato esce dal PC e come spegnerlo
-        /// (unico accesso alla rete: i limiti Claude in tempo reale).
+        /// On first launch, explain which data leaves this PC and how to disable network collection.
+        /// Only enabled services' own usage endpoints are contacted.
         /// </summary>
-        /// <summary>Notifiche dei limiti (una alla volta: Windows mostra comunque solo l'ultima). Il clic apre il pannello.</summary>
+        /// <summary>Show limit notifications together because Windows displays only the latest balloon. Clicking opens the panel.</summary>
         private void Notify(Snapshot s)
         {
             if (Program.Demo) { foreach (var p in s.Providers) p.Tip = Alerts.TipFor(p, Settings, DateTime.Now); return; }
             if (alerts == null) alerts = new Alerts();
             var list = alerts.Check(s, Settings);
-            if (list.Count == 0) return;
+            if (list.Count == 0) { NotifyFeedback(); return; }
             var n = list[list.Count - 1];
             string text = list.Count > 1 ? n.Item2 + "\n" + L.N(list.Count - 1, "+{0} other notice", "+{0} other notices") : n.Item2;
             balloonAction = () => { if (!flyout.IsVisible) ToggleFlyout(); };
             tray.ShowBalloonTip(15000, n.Item1, text, Forms.ToolTipIcon.None);
         }
 
-        /// <summary>Collegamento "AI Meter" nel menu Start, con l'identità dell'app: senza, le notifiche non hanno nome né icona.</summary>
+        private void NotifyFeedback()
+        {
+            if (!Settings.SessionFeedback || !Settings.HistoryEnabled) { pendingFeedback = null; return; }
+            if (pendingFeedback == null || Native.UserIsBusyFullscreen()) return;
+            string session = Interlocked.Exchange(ref pendingFeedback, null);
+            if (session == null) return;
+            balloonAction = () => { OpenHistory(); if (historyWindow != null) historyWindow.FocusSession(session); };
+            tray.ShowBalloonTip(15000, L.T("Was the result worth this session's consumption?"),
+                L.T("Rate the useful work obtained relative to the quota or money consumed.") + "\n" + L.T("Optional feedback · open to choose Yes, Partly or No."), Forms.ToolTipIcon.None);
+        }
+
+        /// <summary>Create a Start shortcut with the app identity so notifications have a name and icon.</summary>
         private static void EnsureShortcut()
         {
             string lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "AI Meter.lnk");
@@ -645,7 +702,7 @@ namespace AIMeter
             Native.EnsureStartShortcut(lnk, target, args, Program.Home, icon.Substring(0, comma), 0, "AIMeter.App");
         }
 
-        /// <summary>L'icona dell'app come file, per le notifiche: quella in assets\ o una copia di quella incorporata.</summary>
+        /// <summary>Notification icon file, taken from assets or extracted from the embedded resource.</summary>
         private static string NotificationIcon()
         {
             try
@@ -699,6 +756,7 @@ namespace AIMeter
         {
             var menu = new ContextMenu();
             menu.Items.Add(Item(L.T("Open panel"), "\uE8A7", () => ToggleFlyout()));
+            if (!Program.Demo) menu.Items.Add(Item(L.T("Usage history"), "\uE9D9", OpenHistory));
             menu.Items.Add(new Separator());
             menu.Items.Add(Item(L.T("Desktop widget"), "\uE7F4", () => { Settings.DesktopWidget = !Settings.DesktopWidget; Settings.Save(); ApplySettings(); }, Settings.DesktopWidget));
             menu.Items.Add(Item(L.T("In the taskbar"), "\uE7C4", () => SetTaskbarDock(!Settings.TaskbarDock), Settings.TaskbarDock));
@@ -732,14 +790,14 @@ namespace AIMeter
                 return;
             }
 
-            // dall'area di notifica: serve una finestra in primo piano perché il menu si chiuda cliccando altrove
+            // Tray menus need a foreground owner to dismiss when the user clicks elsewhere.
             if (menuHost == null)
             {
                 menuHost = new Window { Width = 0, Height = 0, WindowStyle = WindowStyle.None, ShowInTaskbar = false, Topmost = true, AllowsTransparency = true, Background = Brushes.Transparent, ResizeMode = ResizeMode.NoResize };
                 menuHost.SourceInitialized += (o, e) => Native.AddExStyle(new WindowInteropHelper(menuHost).Handle, Native.WS_EX_TOOLWINDOW, 0);
             }
-            // la finestra (larga zero) va sotto il cursore, non fuori schermo: il menu prende la scala del monitor
-            // su cui si apre. Fuori schermo valeva quella del monitor più vicino, magari un altro a scala diversa.
+            // Place the zero-width owner under the pointer so the menu uses that monitor's DPI.
+            // An off-screen owner may select a different monitor's scale.
             var pos = Forms.Cursor.Position;
             var h = new WindowInteropHelper(menuHost).EnsureHandle();
             Native.SetWindowPos(h, IntPtr.Zero, pos.X, pos.Y, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
@@ -781,20 +839,29 @@ namespace AIMeter
             }
         }
 
-        // ================================================================ eventi di sistema
+        // ================================================================ system events
         private void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
         {
             if (e.Reason == SessionSwitchReason.SessionLock || e.Reason == SessionSwitchReason.ConsoleDisconnect || e.Reason == SessionSwitchReason.RemoteDisconnect)
-                paused = true;   // PC bloccato: nessun lavoro finché non torni
+                sessionLocked = true;
             else if (e.Reason == SessionSwitchReason.SessionUnlock || e.Reason == SessionSwitchReason.ConsoleConnect || e.Reason == SessionSwitchReason.RemoteConnect)
-            { paused = false; wake.Set(); }
+                sessionLocked = false;
+            UpdateCollectionPause();
         }
 
         private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
         {
-            if (e.Mode == PowerModes.Suspend) paused = true;
-            else if (e.Mode == PowerModes.Resume) { paused = false; collector.InvalidateNetwork(); wake.Set(); }
-            else wake.Set();   // cambio alimentazione: ricalcola l'intervallo
+            if (e.Mode == PowerModes.Suspend) { suspended = true; UpdateCollectionPause(); }
+            else if (e.Mode == PowerModes.Resume) { suspended = false; collector.InvalidateNetwork(); UpdateCollectionPause(); }
+            else wake.Set();   // Recalculate the interval when the power source changes.
+        }
+
+        private void UpdateCollectionPause()
+        {
+            bool shouldPause = sessionLocked || suspended;
+            if (shouldPause) Interlocked.CompareExchange(ref collectionPausedAt, DateTime.UtcNow.Ticks, 0);
+            paused = shouldPause;
+            if (!paused) wake.Set();
         }
 
         private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)

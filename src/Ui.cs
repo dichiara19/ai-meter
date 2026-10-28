@@ -977,6 +977,19 @@ namespace AIMeter
         }
 
         // ------------------------------------------------------------ Fluent windows
+        /// <summary>Shared chrome for persistent settings and history windows, including the full Mica glass frame.</summary>
+        public static void MakeSettingsWindow(Window window)
+        {
+            window.FontFamily = Theme.Font;
+            window.UseLayoutRounding = true;
+            WindowChrome.SetWindowChrome(window, new WindowChrome
+            {
+                CaptionHeight = 48, GlassFrameThickness = new Thickness(-1), ResizeBorderThickness = new Thickness(6),
+                UseAeroCaptionButtons = true, CornerRadius = new CornerRadius(0),
+            });
+            window.SourceInitialized += (sender, args) => ApplyBackdrop(window, 2, false);
+        }
+
         /// <summary>
         /// Apply native window chrome with DWM corners, shadows and a compositor-managed backdrop.
         /// Fall back to a solid background if Mica or Acrylic is unavailable.

@@ -80,6 +80,9 @@ namespace AIMeter
         public string Language { get; set; }        // "system" or a language code from L.Languages.
         public string Refresh { get; set; }         // "auto", "low"
         public bool FirstRunDone { get; set; }
+        public bool HistoryEnabled { get; set; }
+        public bool SessionFeedback { get; set; }
+        public DateTime FeedbackEnabledSince { get; set; }
 
         public Settings()
         {
@@ -95,6 +98,7 @@ namespace AIMeter
             Budgets = new System.Collections.Generic.Dictionary<string, string>();
             HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
+            HistoryEnabled = true;
         }
 
         /// <summary>Whether every reset of this limit should be announced.</summary>

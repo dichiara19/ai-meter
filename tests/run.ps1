@@ -11,7 +11,7 @@ $parameters.CompilerOptions = '/langversion:5 /define:AIMETER_TEST'
     "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
 ) | ForEach-Object { [void]$parameters.ReferencedAssemblies.Add($_) }
 $source = @(Get-ChildItem (Join-Path $root 'src\*.cs') | ForEach-Object { $_.FullName })
-$source += Join-Path $PSScriptRoot 'RegressionTests.cs'
+$source += @(Get-ChildItem (Join-Path $PSScriptRoot '*.cs') | ForEach-Object { $_.FullName })
 Add-Type -Path $source -CompilerParameters $parameters
 $testData = Join-Path ([IO.Path]::GetTempPath()) ('AIMeter-tests-' + [Guid]::NewGuid().ToString('N'))
 try {

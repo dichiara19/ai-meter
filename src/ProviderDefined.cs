@@ -412,7 +412,9 @@ namespace AIMeter
                 var values = new Dictionary<string, PeriodSpend> { { "day", Spending("day", now) }, { "week", Spending("week", now) }, { "month", Spending("month", now) } };
                 var labels = new Dictionary<string, string> { { "day", "Spent today" }, { "week", "Spent this week" }, { "month", "Spent this month" } };
                 foreach (var kv in values)
-                    extra.Add(new UsageWindow { Label = labels[kv.Key], Short = "$", NoBar = true, Hidden = true, RightText = SpendText(kv.Value, money) });
+                    extra.Add(new UsageWindow { Label = labels[kv.Key], Short = "$", NoBar = true, Hidden = true, RightText = SpendText(kv.Value, money),
+                        Amount = kv.Value == null ? (double?)null : kv.Value.Amount, AmountUnit = spend.Currency,
+                        IsEstimated = kv.Value != null && kv.Value.Estimated });
                 note = () => L.F("Spent: today {0} · this week {1} · this month {2}",
                     SpendText(values["day"], money), SpendText(values["week"], money), SpendText(values["month"], money));
 
@@ -426,6 +428,8 @@ namespace AIMeter
                     {
                         Label = period == "day" ? "Daily budget" : period == "week" ? "Weekly budget" : "Monthly budget", Short = "$", Budget = true,
                         StartedAt = SpendTracker.Start(period, now, fromService), ResetsAt = SpendTracker.End(period, now, fromService),
+                        Amount = value == null ? (double?)null : value.Amount, AmountUnit = spend.Currency,
+                        IsEstimated = value != null && value.Estimated,
                     };
                     if (value == null || value.Estimated)
                     {
@@ -670,6 +674,7 @@ namespace AIMeter
                     Label = w.Label, Suffix = w.Suffix, Short = w.Short, Used = w.Used, Spent = w.Spent,
                     RightText = w.RightText, NoBar = w.NoBar, StartedAt = w.StartedAt, ResetsAt = w.ResetsAt,
                     CachedAt = fresh ? (DateTime?)null : cached.At,
+                    MeasuredAt = cached.At, Amount = w.Amount, AmountUnit = w.AmountUnit, IsEstimated = w.IsEstimated,
                 });
         }
 
@@ -777,6 +782,8 @@ namespace AIMeter
                 var m = new Money { Currency = currency ?? "USD" };
                 w.RightText = currency != null ? m.Format(balance.Value * scale) : balance.Value.ToString("0.##", CultureInfo.InvariantCulture);
                 w.NoBar = true;
+                w.Amount = balance.Value * scale;
+                w.AmountUnit = currency ?? "credits";
                 return w;
             }
             if (JPath.Truthy(JPath.Get(doc, Json.Str(spec, "unlimited"))) && Json.Str(spec, "unlimited") != null)

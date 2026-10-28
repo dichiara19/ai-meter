@@ -110,4 +110,6 @@ jobs:
           files: |
             AIMeter.zip
             AIMeter-script.zip
+            docs/media/history-dark.png
+            docs/media/history-light.png
           body_path: RELEASE_NOTES.md

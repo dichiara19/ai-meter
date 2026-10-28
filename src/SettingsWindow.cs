@@ -39,6 +39,7 @@ namespace AIMeter
             new[] { "services", "", "Services" },
             new[] { "display", "", "Where to see it" },
             new[] { "notifications", "", "Notifications" },
+            new[] { "history", "", "Usage history" },
             new[] { "general", "", "General" },
             new[] { "about", "", "About" },
         };
@@ -53,12 +54,7 @@ namespace AIMeter
             UseLayoutRounding = true;
             Icon = Controller.AppIconImage();
             Program.Brand(this);
-            WindowChrome.SetWindowChrome(this, new WindowChrome
-            {
-                CaptionHeight = 48, GlassFrameThickness = new Thickness(-1), ResizeBorderThickness = new Thickness(6),
-                UseAeroCaptionButtons = true, CornerRadius = new CornerRadius(0),
-            });
-            SourceInitialized += (o, e) => Ui.ApplyBackdrop(this, 2, false);
+            Ui.MakeSettingsWindow(this);
 
             var root = new DockPanel();
             var titleBar = new StackPanel { Orientation = Orientation.Horizontal, Height = 48, Margin = new Thickness(16, 0, 0, 0) };
@@ -115,6 +111,7 @@ namespace AIMeter
             if (current.StartsWith("service:", StringComparison.Ordinal)) BuildService(current.Substring(8));
             else if (current == "display") BuildDisplay();
             else if (current == "notifications") BuildNotifications();
+            else if (current == "history") BuildHistory();
             else if (current == "general") BuildGeneral();
             else if (current == "about") BuildAbout();
             else BuildServices();
@@ -157,6 +154,13 @@ namespace AIMeter
                     item.MouseLeave += (o, e) => item.Background = Brushes.Transparent;
                 }
                 item.MouseLeftButtonUp += (o, e) => Open(id);
+                item.Focusable = true;
+                item.KeyDown += (o, e) =>
+                {
+                    if (e.Key == Key.Enter || e.Key == Key.Space) { Open(id); e.Handled = true; }
+                };
+                item.GotKeyboardFocus += (o, e) => { item.SetResourceReference(Border.BorderBrushProperty, "Accent"); item.BorderThickness = new Thickness(1); };
+                item.LostKeyboardFocus += (o, e) => item.BorderThickness = new Thickness(0);
                 nav.Children.Add(item);
             }
         }
@@ -522,6 +526,18 @@ namespace AIMeter
         }
 
         // ------------------------------------------------------------ general
+        private void BuildHistory()
+        {
+            Header(L.T("Usage history"));
+            Group(Row(null, L.T("Keep local usage history"), L.T("Save quota readings and supported session metrics on this PC, including while the panel is closed. No prompts, titles or credentials are archived."),
+                Toggle(S.HistoryEnabled, value => { S.HistoryEnabled = value; Changed(); })),
+                Row(null, L.T("Usage history"), L.T("Explore consumption, quota cycles, models and value for consumption. Export or delete the archive from the dashboard."),
+                    Button(L.T("Open dashboard"), C.OpenHistory, true)));
+            Group(Row(null, L.T("Ask for session feedback"), L.T("Optional: after 30 minutes without a logged response, ask whether the result was worth the consumption. At most once per hour; ignoring a request leaves the session unrated."),
+                Toggle(S.SessionFeedback, value => { S.SessionFeedback = value; S.FeedbackEnabledSince = DateTime.Now; S.Save(); })),
+                Row(null, L.T("Value for consumption"), L.T("Rate the useful work obtained relative to the quota or money consumed."), null));
+        }
+
         private void BuildGeneral()
         {
             Header(L.T("General"));

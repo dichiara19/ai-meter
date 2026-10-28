@@ -7,12 +7,12 @@ using System.Windows;
 namespace AIMeter
 {
     /// <summary>
-    /// Traduzioni. Il testo sorgente è l'inglese e fa da chiave: L.T("Settings") restituisce la traduzione
-    /// nella lingua attiva, o l'inglese se manca. Le tabelle sono in StringsTable.cs.
+    /// English source text is the translation key. L.T("Settings") resolves the active language,
+    /// falling back to English. Core tables are defined in StringsTable.cs.
     /// </summary>
     internal static partial class L
     {
-        /// <summary>Lingue supportate: codice → nome nella lingua stessa.</summary>
+        /// <summary>Supported language codes and their native names.</summary>
         public static readonly KeyValuePair<string, string>[] Languages =
         {
             new KeyValuePair<string, string>("en", "English"),
@@ -27,16 +27,16 @@ namespace AIMeter
         public static CultureInfo Culture { get; private set; }
         private static Dictionary<string, string> table;
 
-        static L() { Init("system"); }
+        static L() { RegisterHistoryStrings(); Init("system"); }
 
-        /// <summary>"system" segue la lingua di Windows; altrimenti un codice di Languages.</summary>
+        /// <summary>Use the Windows language for "system", otherwise a supported language code.</summary>
         public static void Init(string setting)
         {
             var ui = CultureInfo.CurrentUICulture;
             string code = string.IsNullOrEmpty(setting) || setting == "system" ? ui.TwoLetterISOLanguageName : setting;
             if (!Languages.Any(l => l.Key == code)) code = "en";
             Lang = code;
-            // formati regionali dell'utente se la lingua coincide (es. it-CH), altrimenti quelli tipici della lingua
+            // Preserve regional formats when the language matches, otherwise use that language’s usual culture.
             var current = CultureInfo.CurrentCulture;
             Culture = current.TwoLetterISOLanguageName == code ? current
                 : CultureInfo.CreateSpecificCulture(code == "pt" ? "pt-BR" : code == "en" ? "en-US" : code);
@@ -57,7 +57,7 @@ namespace AIMeter
             return Extra.TryGetValue(Lang, out more) && more.TryGetValue(en, out s) ? s : en;
         }
 
-        /// <summary>Traduzioni portate dai file di definizione dei servizi (campo "i18n").</summary>
+        /// <summary>Additional translations from service definitions and feature-specific tables.</summary>
         private static readonly Dictionary<string, Dictionary<string, string>> Extra = new Dictionary<string, Dictionary<string, string>>();
 
         public static void Register(string lang, string en, string text)
@@ -69,7 +69,7 @@ namespace AIMeter
 
         public static string F(string en, params object[] args) { return string.Format(Culture, T(en), args); }
 
-        /// <summary>Singolare o plurale secondo n, con n come {0}.</summary>
+        /// <summary>Choose the singular or plural form, formatting n as {0}.</summary>
         public static string N(int n, string one, string many) { return F(n == 1 ? one : many, n); }
     }
 }

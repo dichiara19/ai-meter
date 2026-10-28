@@ -4,7 +4,7 @@
 
 # AI Meter
 
-**AI limits, local models and coding agents, quietly in the Windows 11 taskbar.**
+**AI limits in your taskbar. A local history of what you use.**
 
 [![Latest release](https://img.shields.io/github/v/release/dichiara19/ai-meter?label=download&color=2563eb)](https://github.com/dichiara19/ai-meter/releases/latest)
 [![Windows 11](https://img.shields.io/badge/Windows-11-0078d4)](#install)
@@ -18,6 +18,7 @@
 That's all of it, most of the time: a pill **inside** the taskbar. No widget to arrange, no window stuck on top of your work. Hover for the summary, click for everything.
 
 - **Lives in the taskbar.** The pill is part of the taskbar, not a window floating on it: it hides with an auto-hiding taskbar and with full-screen apps, follows the taskbar's light or dark mode and finds the free space for your layout. A desktop widget and a compact overlay are there if you want them.
+- **Understand your usage over time.** A local dashboard shows quota cycles, daily activity, models and tools, and signals when recorded consumption changes. Optional session feedback asks whether the useful result was worth the quota or money consumed. [Explore usage history](#your-usage-over-time).
 - **Looks like Windows made it.** Fluent design, Mica and Acrylic, your accent color, Windows fonts and notifications, a Settings page built like Windows 11 Settings. Six languages.
 - **Practically free to run.** About 0.02% CPU and 120 MB at rest. No Electron, no WebView, no runtime to install: WPF on the .NET Framework already in Windows. Efficiency cores, slower refresh on battery and when nothing is visible, nothing at all while the PC is locked.
 - **Windows and WSL, one view.** Claude Code, Codex and other coding agents running in WSL, model servers inside WSL (NAT or mirrored networking), the video memory of the WSL VM: shown next to their Windows counterparts. WSL is never started, and nothing runs inside it except, when a sign-in has expired, the agent's own CLI to renew it.
@@ -37,6 +38,25 @@ That's all of it, most of the time: a pill **inside** the taskbar. No widget to 
 </tr>
 </table>
 
+## Your usage, over time
+
+Open **Usage history** from the notification-area menu or **Settings → Usage history**. AI Meter starts collecting when you first run this version and continues with the panel closed. It keeps the data on your PC, so you can look back without saving prompts or conversation text.
+
+<p align="center"><img src="docs/media/history-dark.png" alt="The usage history dashboard with daily activity, recorded sessions and optional session ratings, composed from the real interface with sample data"></p>
+
+- **See what you use.** Daily charts and model/tool summaries separate responses, input, output, cache reads, cache writes and tool-computed API costs. Session token records come from Claude Code, Codex, Pi, OpenCode and Kilo on Windows and already-running WSL.
+- **Compare quota cycles.** Account identities, limits and resets stay separate. The dashboard shows observed peaks and remaining quota at the last reading; it does not assign an account's consumption to a single session or add overlapping limits together.
+- **Spot changes with enough evidence.** Consumption signals compare recorded rates against your own active history. A new archive, a first reading, a missing value and a reported zero have different states. Until there is enough comparable data, the dashboard says so. A signal cannot prove that a provider changed its billing rules.
+- **Reflect on value, optionally.** Rate whether the useful result justified the consumption: yes, partly or no. Feedback requests are off by default; you can rate manually, edit or clear a rating. Ignoring a request leaves the session unrated.
+- **Keep control of the archive.** Disable collection, inspect storage size, export the retained measurements or delete the history. There is no telemetry, and the archive contains no prompts, response text, session titles or credentials.
+
+<details>
+<summary>See the light theme</summary>
+<p align="center"><img src="docs/media/history-light.png" alt="The same usage history dashboard in light mode, with sample data"></p>
+</details>
+
+Screenshots use sample data. Your archive starts from collection time; it cannot recover unobserved provider-side activity. Computed API costs are not subscription charges, and missing counters are not zero. See [data sources, collection limits and feedback behaviour](docs/HISTORY.md).
+
 ## Install
 
 1. Download **AIMeter-script.zip** from the [latest release](https://github.com/dichiara19/ai-meter/releases/latest) and unzip it anywhere.
@@ -45,7 +65,7 @@ That's all of it, most of the time: a pill **inside** the taskbar. No widget to 
 
 Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now, see [Code signing policy](#code-signing-policy)). A Microsoft Store version is on the way.
 
-<a id="languages"></a>Available in English, Italian, Spanish, French, German and Portuguese. It follows the Windows display language, or you can pick one in Settings. Translations live in `src/StringsTable.cs`: new languages are welcome.
+<a id="languages"></a>Available in English, Italian, Spanish, French, German and Portuguese. It follows the Windows display language, or you can pick one in Settings. Translations live in `src/StringsTable.cs` and `src/StringsHistory.cs`: new languages are welcome.
 
 ## What you get
 
@@ -56,14 +76,17 @@ Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now,
 | **Desktop widget** | Off by default. Always stays *below* your windows, like part of the wallpaper. Compact cards; click a card header to show its sessions. Drag it by its header. |
 | **Compact overlay** | A tiny always-on-top pill (off by default) with two micro buttons: collapse to a live ring icon, or close. Never steals focus, hides itself during full-screen games, videos and presentations, shows details on hover. |
 | **Settings** | Built like Windows 11 Settings: connected services, what to show, where, start with Windows, theme, refresh rate, live resource usage. |
+| **Usage history** | Local quota cycles, spending, session tokens, models and tools, daily totals and consumption signals. Optional feedback records whether the result was worth the consumption. Open from the notification-area menu or Settings → Usage history. |
 
 For each service: remaining share of the **5-hour** and **weekly** limits with reset times, plus the active sessions with title, model and status.
 
 **Forecast and notifications.** At the current pace, AI Meter tells you when a limit will run out if that happens before it resets ("At this pace it runs out at 15:40"), in the panel, in tooltips and with a yellow bar in the pill. The pace is the trend of the last hour and a half of readings, or the average since the window started. Windows notifications arrive when a limit drops below 20% and 5%, with the forecast and the other service that still has room ("ChatGPT still has 80% left"), and when a limit you had almost used up is available again. Each one comes once per window, follows Do not disturb, and can be turned off in Settings.
 
+**Local history.** Collection starts when AI Meter first runs this version and continues with the panel closed. Readings retain their source, time, account scope and data quality; cached snapshots do not become new measurements. Supported local logs supply input/output/cache counters and tool-computed costs, while provider quotas stay account-wide. Feedback is off by default and measures useful output relative to consumption; ignoring it leaves a session unrated. Export, deletion, storage size and collection controls are in the dashboard and settings. See [history behaviour and limitations](docs/HISTORY.md) and [history architecture](docs/ARCHITECTURE.md).
+
 ## Where the data comes from
 
-Everything is read locally from files the official apps already write. Nothing is sent anywhere, with one exception you can turn off.
+Session information is read from files and databases the AI apps already write. Live quota and balance readings use each enabled service's own usage endpoint. You can turn those connections off; nothing is sent to AI Meter's authors.
 
 - **Claude**
   - Claude Code sessions (desktop app, CLI, also inside WSL, VS Code): `~/.claude/sessions`, titles and models from the Claude desktop app metadata.
@@ -84,13 +107,15 @@ Everything is read locally from files the official apps already write. Nothing i
 
 ## Resource usage
 
-Measured on a Windows 11 laptop:
+Taskbar-view baseline measured on a Windows 11 laptop before the history dashboard was added:
 
 | | |
 |---|---|
 | RAM | ~100 MB as executable, ~125 MB private with the PowerShell launcher |
 | CPU at rest | ~0.016% of the machine (0.26% of one core) with the taskbar pill, Claude, Codex and a local model server in WSL |
 | GPU | 0% (software drawing; Mica/Acrylic composed by Windows) |
+
+These figures are a baseline for the taskbar view. Opening the dashboard or processing newly written session logs adds work; memory and query time also depend on the retained history. Collection remains incremental and uses the existing background worker.
 
 How:
 - WPF on .NET Framework 4.8, already part of Windows: no runtime to install, no browser engine.
@@ -149,6 +174,13 @@ src/ProviderLocal.cs   local model servers: discovery on Windows and WSL, loaded
 src/CodingAgents.cs    sessions of terminal coding agents (OpenCode, Pi, Gemini CLI, Qwen Code, …)
 src/GpuMemory.cs       video memory per process from the Windows GPU counters
 src/Forecast.cs        when each limit runs out at the current pace; low-limit and reset notifications, tips
+src/HistoryCollector.cs incremental, read-only local usage capture
+src/HistoryStore.cs    transactional history, feedback, export and deletion
+src/HistoryDatabase.cs parameterised Windows SQLite connection
+src/HistoryAnalysis.cs read-only history summaries and quota-rate signals
+src/HistoryWindow.cs   native history dashboard
+src/HistoryVisuals.cs  settings-style cards, charts and explicit data states
+src/StringsHistory.cs  history translations
 providers/*.json       built-in service definitions
 tools/render-media.ps1 regenerates the README images (docs/media) from the real UI with demo data
 src/Settings.cs        preferences and start with Windows
@@ -178,6 +210,8 @@ assets/app.ico         app icon (generated by build.ps1)
 AI Meter does not collect, store or send any data to its authors, and contains no telemetry, analytics or update checks.
 
 It reads local files written by the AI apps and coding agents on your PC and keeps its own settings in `%APPDATA%\AIMeter`, on your PC only.
+
+Local usage history is enabled by default. Its SQLite archive contains quota/spending readings, supported session token metrics, tool-computed costs and optional feedback. It stores no prompts, response text, source code, session titles, raw identifiers or authentication tokens. Account/session fingerprints remain local. Disable collection in Settings → Usage history; export or delete retained history from the dashboard. [Storage, data sources and limits](docs/HISTORY.md).
 
 Network connections are limited to reading your own usage:
 

@@ -7,7 +7,7 @@ Thanks for helping! AI Meter is a small, native Windows 11 app, and contribution
 - **Report a bug** or **ask for a feature**: open an [issue](https://github.com/dichiara19/ai-meter/issues/new/choose) with the matching form.
 - **Questions, ideas, your setup**: use [Discussions](https://github.com/dichiara19/ai-meter/discussions).
 - **Add a service**: most services are a small JSON file, no code needed. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
-- **Translate**: strings live in [`src/StringsTable.cs`](src/StringsTable.cs). Improving an existing language or adding a new one are both welcome.
+- **Translate**: strings live in [`src/StringsTable.cs`](src/StringsTable.cs) and [`src/StringsHistory.cs`](src/StringsHistory.cs). Improving an existing language or adding a new one are both welcome.
 - **Security issues**: please don't open a public issue, see [SECURITY.md](SECURITY.md).
 
 For anything bigger than a small fix, open an issue first so we can agree on the approach before you write code.
@@ -27,6 +27,7 @@ Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypas
 - **Close the installed copy first.** Only one instance runs at a time: exit any installed AI Meter from its menu before starting your build.
 - **`--demo`** shows demo data, handy for UI work and screenshots.
 - **`tools\render-media.ps1`** regenerates the README images in `docs\media` from the real interface (the GIF needs ffmpeg).
+- **`tools\render-history.ps1`** renders the history dashboard from isolated sample data, including both themes, empty states and release compositions. Copy the two `history-*-release.png` images to `docs/media/history-dark.png` and `docs/media/history-light.png` when updating release screenshots.
 - **`build.ps1 -Package`** also builds the Microsoft Store MSIX (needs the Windows SDK, which GitHub Actions has).
 
 ## Guidelines
@@ -39,7 +40,7 @@ Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypas
 
 **Strings**
 - Write user-facing text in English through `L.T`, `L.F` or `L.N`.
-- Add the translations to `src/StringsTable.cs` for the other five languages. If you can't, say so in the pull request and we'll fill them in.
+- Add the translations to `src/StringsTable.cs` (or `src/StringsHistory.cs` for history features) for the other five languages. If you can't, say so in the pull request and we'll fill them in.
 
 **Privacy rules** (non-negotiable)
 - **No telemetry.** No analytics and no update checks.

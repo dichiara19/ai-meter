@@ -24,6 +24,10 @@ namespace AIMeter
         public bool Budget;       // A user spending budget; unused funds do not expire.
         public bool Hidden;       // Pill-only metric; the card presents these values in its spending summary.
         public DateTime? CachedAt; // Last successful extra response, when a later request failed.
+        public DateTime? MeasuredAt; // Original response time for an independently fetched extra metric.
+        public double? Amount;    // Numeric standalone balance or spending; never parse a translated caption.
+        public string AmountUnit;
+        public bool IsEstimated;
         public double Remaining { get { return Math.Max(0, Math.Min(100, 100 - Used)); } }
 
         /// <summary>Stable identity within a service for preferences, notifications and forecasts.</summary>

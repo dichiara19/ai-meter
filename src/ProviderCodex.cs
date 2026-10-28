@@ -10,9 +10,9 @@ using System.Threading.Tasks;
 namespace AIMeter
 {
     /// <summary>
-    /// ChatGPT / Codex: thread Codex attivi dai log locali, app ChatGPT aperta, limiti in tempo reale chiedendoli
-    /// al programma codex installato (JSON-RPC "app-server"). È Codex a usare il proprio
-    /// accesso: noi non leggiamo né rinnoviamo token. Se codex non risponde, si ripiega sull'ultimo dato nei log.
+    /// ChatGPT / Codex: active threads from local logs, ChatGPT app presence and live limits obtained
+    /// through the installed codex app-server. Codex handles its own authentication;
+    /// this provider never reads or renews tokens. Fall back to the latest logged limits when unavailable.
     /// </summary>
     internal sealed class CodexProvider : Provider
     {
@@ -25,7 +25,7 @@ namespace AIMeter
 
         public override string Id { get { return "openai"; } }
 
-        /// <summary>Codex (app o CLI) è presente su questo PC.</summary>
+        /// <summary>Whether Codex (app or CLI) is installed on this PC.</summary>
         public static bool Detected()
         {
             return Directory.Exists(Path.Combine(Probe.Home, ".codex")) || CodexPath() != null;
@@ -65,7 +65,7 @@ namespace AIMeter
             }
             st.Running = app || p.IsRunning("codex.exe") || st.Sessions.Count > 0;
 
-            // limiti: in tempo reale da codex, altrimenti l'ultimo evento nei log
+            // Prefer live Codex limits, otherwise use the latest logged event.
             double interval = p.SavingPower ? 15 : 5;
             if (p.AllowNetwork && (DateTime.Now - fetchedAt).TotalMinutes >= interval)
             {
@@ -86,8 +86,8 @@ namespace AIMeter
             return st;
         }
 
-        // ================================================================ tempo reale (codex app-server)
-        /// <summary>L'eseguibile codex: quello dell'app ChatGPT/Codex, altrimenti quello nel PATH.</summary>
+        // Live limits through codex app-server.
+        /// <summary>Find the ChatGPT/Codex bundled executable, falling back to PATH.</summary>
         public static string CodexPath()
         {
             try
@@ -131,15 +131,20 @@ namespace AIMeter
                 proc = Process.Start(psi);
                 proc.StandardError.ReadToEndAsync();
                 var input = new StreamWriter(proc.StandardInput.BaseStream, new UTF8Encoding(false)) { NewLine = "\n", AutoFlush = true };
-                // .NET Framework apre lo stdin con un BOM UTF-8: una riga vuota lo isola, così codex legge pulito il resto
+                // Isolate the .NET Framework stdin UTF-8 BOM with a blank line before sending JSON.
                 input.WriteLine();
                 input.WriteLine("{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"ai-meter\",\"version\":\"" + Controller.Version + "\"}}}");
                 if (ReadResponse(proc, 1, 10000) == null) return null;
                 input.WriteLine("{\"method\":\"initialized\",\"params\":{}}");
+                input.WriteLine("{\"id\":3,\"method\":\"account/read\",\"params\":{\"refreshToken\":false}}");
+                var account = Json.Obj(Json.Obj(ReadResponse(proc, 3, 5000), "result"), "account");
                 input.WriteLine("{\"id\":2,\"method\":\"account/rateLimits/read\",\"params\":{}}");
                 var result = Json.Obj(ReadResponse(proc, 2, 10000), "result");
                 input.Close();
-                return Parse(result, out plan);
+                var usage = Parse(result, out plan);
+                string identity = Json.Str(account, "id") ?? Json.Str(account, "email");
+                if (usage != null && identity != null) usage.Identity = HistoryStore.Hash(identity);
+                return usage;
             }
             catch (System.ComponentModel.Win32Exception) { return null; }
             catch (InvalidOperationException) { return null; }
@@ -155,7 +160,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Legge righe JSON finché arriva la risposta con l'id atteso (le notifiche senza id si saltano).</summary>
+        /// <summary>Read JSON lines until the matching response arrives, skipping notifications without an ID.</summary>
         private static Dictionary<string, object> ReadResponse(Process proc, int id, int timeoutMs)
         {
             var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
@@ -179,7 +184,7 @@ namespace AIMeter
             var u = new Usage { Source = "live", At = DateTime.Now };
             AddWindows(u, rl, null);
 
-            // limiti aggiuntivi (es. modelli con quota propria), oltre a quello principale "codex"
+            // Include additional model-specific limits beyond the primary codex limit.
             var byId = Json.Obj(r, "rateLimitsByLimitId");
             if (byId != null)
                 foreach (var kv in byId)
@@ -235,14 +240,14 @@ namespace AIMeter
             };
         }
 
-        // ================================================================ log locali
+        // Local logs.
         private static IEnumerable<string> Homes(Probe p)
         {
             yield return Path.Combine(Probe.Home, ".codex");
             if (p.WslUp && Directory.Exists(p.WslHome + @"\.codex")) yield return p.WslHome + @"\.codex";
         }
 
-        /// <summary>I log degli ultimi giorni, dal più recente. Solo enumerazione di cartelle: niente letture.</summary>
+        /// <summary>Enumerate recent log files, newest first, without reading their contents.</summary>
         private static List<FileInfo> Rollouts(Probe p, int days)
         {
             var files = new List<FileInfo>();
