@@ -1,13 +1,10 @@
-<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.7.0/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/dichiara19/ai-meter/v0.7.1/docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip" width="720"></p>
 
-## What's new in 0.7.0
+## What's new in 0.7.1
 
-- **API keys found automatically.** If OpenCode, Pi or Crush already use your OpenRouter, DeepSeek, Kimi, Vercel or Experiential Labs key, or it is exported in your shell profile, AI Meter uses it from there, on Windows and in WSL. Each key is sent only to its own service, and this can be turned off.
-- **Budgets and spend per period.** See what you spent today, this week and this month, and set a spending budget per day, week or month with its bar and notifications.
-- **Today's models.** The models your agents used today with each service, with cost and tokens, from OpenCode and Pi.
-- **OpenRouter account credits.** The credits left on your account, with the same API key.
-- **Choose what each card shows.** Every service page has an "In the panel" section to show or hide each row.
-- **Model limits.** A model's weekly limit (for example Week · Fable) shows its own share as a faint bar behind the real room left.
+- **No more "AI Meter could not start" at sign-in.** When Windows refused the taskbar pill while the taskbar was being recreated (at sign-in, on resume or when Explorer restarts), AI Meter closed with "Access is denied". It now tries again two seconds later, and any unexpected error is written to `errors.log` instead of closing the app.
+
+Everything new in 0.7 (API keys found from your agents, budgets and spend per period, today's models, OpenRouter account credits) is in the [0.7.0 notes](https://github.com/dichiara19/ai-meter/releases/tag/v0.7.0).
 
 ## Download
 
