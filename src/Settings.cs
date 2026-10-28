@@ -188,16 +188,33 @@ namespace AIMeter
             catch (Exception) { return ""; }
         }
 
-        // --- automatic startup through the AI Meter shortcut ------------------------------
+        // Automatic startup through the AI Meter shortcut.
         // Windows lists the app's own name and icon under Apps > Startup and opens it at sign-in.
-        // The legacy Run entry showed conhost.exe instead of the app and could be skipped at sign-in.
-        // Migrate that entry to the startup shortcut automatically.
-        private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        private const string ApprovedKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder";
-
-        private static string StartupLink
+        internal static string StartupRegistryRoot
         {
-            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "AI Meter.lnk"); }
+            get
+            {
+#if AIMETER_TEST
+                return @"Software\" + Path.GetFileName(Path.GetDirectoryName(Folder)) + "-startup-" + Path.GetFileName(Folder);
+#else
+                return @"Software\Microsoft\Windows\CurrentVersion";
+#endif
+            }
+        }
+
+        private static string RunKey { get { return StartupRegistryRoot + @"\Run"; } }
+        private static string ApprovedKey { get { return StartupRegistryRoot + @"\Explorer\StartupApproved\StartupFolder"; } }
+
+        internal static string StartupLink
+        {
+            get
+            {
+#if AIMETER_TEST
+                return Path.Combine(Folder, "AI Meter.lnk");
+#else
+                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "AI Meter.lnk");
+#endif
+            }
         }
 
         public static bool StartsWithWindows
@@ -237,14 +254,16 @@ namespace AIMeter
             }
         }
 
-        /// <summary>At launch, migrate the legacy Run entry and align the shortcut with the current installation.</summary>
-        public static void RefreshStartup()
+        /// <summary>Enable startup on first use only when no registration already exists.</summary>
+        internal static void InitialiseStartup(bool firstRun)
         {
-            if (Native.IsPackaged) return;
-            bool legacy;
-            using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) legacy = k != null && k.GetValue("AI Meter") != null;
-            if (legacy) StartsWithWindows = true;
-            else if (File.Exists(StartupLink)) WriteStartupLink();
+            if (!firstRun) return;
+            if (Native.IsPackaged) { StartsWithWindows = true; return; }
+            if (File.Exists(StartupLink)) return;
+            using (var k = Registry.CurrentUser.OpenSubKey(RunKey))
+                if (k != null && k.GetValue("AI Meter") != null) return;
+            // Only installation and an explicit preference change may replace an existing launch command.
+            StartsWithWindows = true;
         }
 
         private static void WriteStartupLink()

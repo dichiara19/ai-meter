@@ -1,4 +1,4 @@
-# Compile the real application sources in memory, with storage isolated from the installed app.
+# Compile the real application sources in memory, with files and registry keys isolated from the installed app.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
