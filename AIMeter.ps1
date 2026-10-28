@@ -35,7 +35,9 @@ try {
 catch {
     $log = Join-Path $env:APPDATA 'AIMeter\launcher.log'
     New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
-    "$(Get-Date -Format s)  $($_ | Out-String)" | Add-Content $log -Encoding UTF8
+    # l'eccezione completa, con lo stack e quella interna: senza, "Accesso negato" non dice dove
+    $detail = if ($_.Exception.InnerException) { $_.Exception.InnerException.ToString() } else { $_.Exception.ToString() }
+    "$(Get-Date -Format s)  $detail" | Add-Content $log -Encoding UTF8
     Add-Type -AssemblyName System.Windows.Forms
     [void][System.Windows.Forms.MessageBox]::Show("AI Meter non è riuscito ad avviarsi. Dettagli in:`n$log", 'AI Meter')
     exit 1

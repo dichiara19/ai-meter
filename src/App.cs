@@ -92,6 +92,20 @@ namespace AIMeter
         [STAThread]
         private static void Main(string[] args) { Native.SetAppId("AIMeter.App"); Run(args); }
 
+        /// <summary>Registro degli errori gestiti (%APPDATA%\AIMeter\errors.log, al massimo 256 KB): eccezione completa con lo stack.</summary>
+        internal static void LogError(string where, Exception ex)
+        {
+            try
+            {
+                string f = Path.Combine(Settings.Folder, "errors.log");
+                Directory.CreateDirectory(Settings.Folder);
+                if (File.Exists(f) && new FileInfo(f).Length > 256 * 1024) File.Delete(f);
+                File.AppendAllText(f, DateTime.Now.ToString("s", System.Globalization.CultureInfo.InvariantCulture) + "  [" + where + "] " + ex + Environment.NewLine + Environment.NewLine);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
         internal static void Run(string[] args)
         {
             bool created;
@@ -112,6 +126,9 @@ namespace AIMeter
                 // La composizione (Mica, Acrilico, ombre) resta a carico di Windows. --gpu per il disegno in hardware.
                 if (!args.Contains("--gpu")) System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                // un errore imprevisto nell'interfaccia (es. Windows che rifiuta una finestra mentre la barra si ricrea)
+                // finisce nel registro e l'app resta aperta, invece di chiudersi
+                app.DispatcherUnhandledException += (o, e) => { LogError("ui", e.Exception); e.Handled = true; };
                 bool atLogin = args.Contains("--startup");
 #if MSIX
                 atLogin = atLogin || (Native.IsPackaged && PackageStartup.LaunchedAtLogin);

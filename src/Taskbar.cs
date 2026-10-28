@@ -142,7 +142,16 @@ namespace AIMeter
                 UsesPerPixelTransparency = true,   // finestra figlia "layered": sfondo trasparente sopra la barra
                 PositionX = 0, PositionY = 0,
             };
-            source = new HwndSource(prm) { SizeToContent = SizeToContent.WidthAndHeight, RootVisual = root };
+            // la barra può rifiutare la finestra figlia mentre viene ricreata (accesso, risveglio, riavvio di Esplora
+            // risorse): "Accesso negato". Si riprova al controllo successivo, tra 2 secondi, senza chiudere l'app.
+            try { source = new HwndSource(prm) { SizeToContent = SizeToContent.WidthAndHeight, RootVisual = root }; }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                Program.LogError("taskbar pill", ex);
+                source = null;
+                bar = IntPtr.Zero;
+                return;
+            }
             source.CompositionTarget.BackgroundColor = Colors.Transparent;
             source.SizeToContentChanged += (o, e) => Place();
             lastRect = default(Native.RECT);
