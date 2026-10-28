@@ -21,10 +21,11 @@ You need Windows 10 or 11; no SDK and no Visual Studio are required.
 powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstall
 ```
 
-Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypass -File tests/run.ps1`. They compile the application sources in memory, use temporary storage, and contact only local HTTP fixtures. They do not start AI Meter or use your saved accounts. CI runs them before building.
+Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypass -File tests/run.ps1`. They compile the application sources in memory, use temporary files and isolated registry keys that are removed afterwards, and contact only local HTTP fixtures. They do not start AI Meter or use your saved accounts. CI runs them before building.
 
 - **Run the build:** start `bin\AIMeter.exe`. If Smart App Control blocks unsigned executables on your PC, run `AIMeter.ps1` from the repository instead (`Start AI Meter.cmd` does the same).
 - **Close the installed copy first.** Only one instance runs at a time: exit any installed AI Meter from its menu before starting your build.
+- Launching a test build preserves existing startup registrations, including entries disabled in Windows. Use `build.ps1` without `-NoInstall` to update the installation and its shortcuts; changing *Start with Windows* explicitly in the app applies to the copy currently running.
 - **`--demo`** shows demo data, handy for UI work and screenshots.
 - **`tools\render-media.ps1`** regenerates the README images in `docs\media` from the real interface (the GIF needs ffmpeg).
 - **`tools\render-history.ps1`** renders the history dashboard from isolated sample data, including both themes, empty states and release compositions. Copy the two `history-*-release.png` images to `docs/media/history-dark.png` and `docs/media/history-light.png` when updating release screenshots.

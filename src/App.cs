@@ -201,9 +201,8 @@ namespace AIMeter
             {
                 Settings.FirstRunDone = true;
                 Settings.Save();
-                try { Settings.StartsWithWindows = true; } catch (Exception) { }
             }
-            else try { Settings.RefreshStartup(); } catch (Exception) { }
+            try { Settings.InitialiseStartup(firstRun); } catch (Exception) { }
             L.Init(Settings.Language);
             collector = new Collector(Settings);
             historyStore = new HistoryStore(Path.Combine(Settings.Folder, "history.sqlite3"));
