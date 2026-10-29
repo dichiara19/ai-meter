@@ -8,8 +8,8 @@ using Windows.Foundation;
 namespace AIMeter
 {
     /// <summary>
-    /// Avvio automatico nel pacchetto MSIX: la chiave Run del registro è virtualizzata, quindi si usa l'attività di avvio
-    /// dichiarata nel manifest (windows.startupTask), la stessa che l'utente vede in Impostazioni > App > Avvio.
+    /// Start-up in the MSIX package: the registry Run key is virtualised, so the startup task declared in the manifest
+    /// (windows.startupTask) is used, the same one the user sees in Settings > Apps > Startup.
     /// </summary>
     internal static class PackageStartup
     {
@@ -28,13 +28,13 @@ namespace AIMeter
                 if (t == null) return;
                 if (!value) { t.Disable(); return; }
                 var state = Wait(t.RequestEnableAsync());
-                // disattivata dall'utente in Impostazioni: solo lui può riattivarla, da lì
+                // Disabled by the user in Settings: only the user can re-enable it, from there.
                 if (state == StartupTaskState.DisabledByUser)
                     Process.Start(new ProcessStartInfo("ms-settings:startupapps") { UseShellExecute = true });
             }
         }
 
-        /// <summary>Vero se Windows ha avviato l'app all'accesso tramite l'attività di avvio.</summary>
+        /// <summary>True if Windows started the app at sign-in through the startup task.</summary>
         public static bool LaunchedAtLogin
         {
             get

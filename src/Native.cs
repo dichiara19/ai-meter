@@ -5,7 +5,7 @@ using System.Text;
 
 namespace AIMeter
 {
-    /// <summary>Chiamate Win32 usate dall'app. Tutto ciò che è costoso è evitato o messo in cache.</summary>
+    /// <summary>Win32 calls used by the app. Anything expensive is avoided or cached.</summary>
     internal static class Native
     {
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -26,7 +26,7 @@ namespace AIMeter
         [DllImport("kernel32.dll")] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageNameW(IntPtr h, uint flags, StringBuilder buf, ref uint size);
 
-        /// <summary>pid → nome eseguibile in minuscolo. Una sola istantanea Toolhelp: ~1 ms, nessuna WMI.</summary>
+        /// <summary>PID → lower-case executable name. A single Toolhelp snapshot: ~1 ms, no WMI.</summary>
         public static Dictionary<uint, string> Processes()
         {
             var map = new Dictionary<uint, string>();
@@ -47,10 +47,10 @@ namespace AIMeter
             return map;
         }
 
-        // --- porte TCP in ascolto, con il processo che le possiede (IPv4 e IPv6) -------------------
+        // --- listening TCP ports with their owning process (IPv4 and IPv6) -------------------
         [DllImport("iphlpapi.dll")] private static extern uint GetExtendedTcpTable(IntPtr table, ref int size, bool sort, int af, int tableClass, uint reserved);
 
-        /// <summary>Porte TCP in ascolto su questo PC: porta → PID del processo.</summary>
+        /// <summary>TCP ports listening on this PC: port → owning process PID.</summary>
         public static Dictionary<int, uint> ListeningPorts()
         {
             var map = new Dictionary<int, uint>();
@@ -69,7 +69,7 @@ namespace AIMeter
                     {
                         IntPtr row = buf + 4 + i * rowSize;
                         int raw = Marshal.ReadInt32(row, portOffset);
-                        int port = ((raw & 0xFF) << 8) | ((raw >> 8) & 0xFF);   // ordine di rete
+                        int port = ((raw & 0xFF) << 8) | ((raw >> 8) & 0xFF);   // Network byte order.
                         if (!map.ContainsKey(port)) map[port] = (uint)Marshal.ReadInt32(row, pidOffset);
                     }
                 }
@@ -78,7 +78,7 @@ namespace AIMeter
             return map;
         }
 
-        /// <summary>Processo padre di ogni processo: PID → PID del padre.</summary>
+        /// <summary>Parent of every process: PID → parent PID.</summary>
         public static Dictionary<uint, uint> ProcessParents()
         {
             var map = new Dictionary<uint, uint>();
@@ -108,14 +108,14 @@ namespace AIMeter
             finally { CloseHandle(h); }
         }
 
-        // --- risparmio energetico ------------------------------------------------
+        // --- power saving ------------------------------------------------
         [StructLayout(LayoutKind.Sequential)]
         private struct POWER_THROTTLING_STATE { public uint Version, ControlMask, StateMask; }
 
         [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentThread();
         [DllImport("kernel32.dll")] private static extern bool SetThreadInformation(IntPtr h, int cls, ref POWER_THROTTLING_STATE info, int size);
 
-        /// <summary>EcoQoS sul thread corrente: Windows lo esegue sui core efficienti a bassa frequenza.</summary>
+        /// <summary>EcoQoS on the current thread: Windows runs it on the efficient, low-frequency cores.</summary>
         public static void EnableEcoQoSForCurrentThread()
         {
             try
@@ -130,7 +130,7 @@ namespace AIMeter
         private struct SYSTEM_POWER_STATUS { public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag; public int BatteryLifeTime, BatteryFullLifeTime; }
         [DllImport("kernel32.dll")] private static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS s);
 
-        /// <summary>Vero se il PC va a batteria o il Risparmio energia è attivo.</summary>
+        /// <summary>True if the PC is on battery or Battery Saver is on.</summary>
         public static bool SavingPower()
         {
             SYSTEM_POWER_STATUS s;
@@ -140,14 +140,14 @@ namespace AIMeter
 
         [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
 
-        /// <summary>DPI per monitor (V2). Serve quando manca il manifest dell'eseguibile, cioè nell'avvio da PowerShell.</summary>
+        /// <summary>Per-monitor DPI (V2). Needed when the executable manifest is missing, i.e. when launched from PowerShell.</summary>
         public static void EnablePerMonitorDpi()
         {
             try { SetProcessDpiAwarenessContext(new IntPtr(-4)); }
             catch (EntryPointNotFoundException) { }
         }
 
-        // --- finestre e DWM -------------------------------------------------------
+        // --- windows and DWM -------------------------------------------------------
         [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
 
         public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
@@ -191,10 +191,10 @@ namespace AIMeter
             SetWindowLong(hwnd, GWL_EXSTYLE, (ex | add) & ~remove);
         }
 
-        // --- schermo intero / presentazioni -------------------------------------
+        // --- full screen and presentations -------------------------------------
         [DllImport("shell32.dll")] private static extern int SHQueryUserNotificationState(out int state);
 
-        /// <summary>Vero quando l'utente gioca, presenta o guarda un video a schermo intero.</summary>
+        /// <summary>True when the user is gaming, presenting or watching a video full screen.</summary>
         public static bool UserIsBusyFullscreen()
         {
             int st;
@@ -206,13 +206,13 @@ namespace AIMeter
         [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr mod, WinEventProc proc, uint pid, uint tid, uint flags);
         public const uint EVENT_SYSTEM_FOREGROUND = 3;
 
-        // --- area di notifica ----------------------------------------------------
+        // --- notification area ----------------------------------------------------
         [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)]
         private struct APPBARDATA { public int cbSize; public IntPtr hWnd; public uint uCallbackMessage, uEdge; public RECT rc; public IntPtr lParam; }
         [DllImport("shell32.dll")] private static extern IntPtr SHAppBarMessage(uint msg, ref APPBARDATA data);
 
-        /// <summary>Rettangolo (pixel fisici), lato e nascondimento automatico della barra del monitor principale.</summary>
+        /// <summary>Rectangle (physical pixels), edge and auto-hide state of the primary monitor's taskbar.</summary>
         public static void TaskbarPos(out RECT rect, out int edge, out bool autoHide)
         {
             var d = new APPBARDATA();
@@ -230,12 +230,12 @@ namespace AIMeter
         [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
         public const int WS_CHILD = 0x40000000, WS_VISIBLE = 0x10000000, WS_CLIPSIBLINGS = 0x04000000;
 
-        /// <summary>La barra delle applicazioni del monitor principale.</summary>
+        /// <summary>The primary monitor's taskbar.</summary>
         public static IntPtr FindTaskbar() { return FindWindowW("Shell_TrayWnd", null); }
 
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 
-        // --- identità della finestra nella barra (proprietà System.AppUserModel.*) ------------------
+        // --- window identity in the taskbar (System.AppUserModel.* properties) ------------------
         [StructLayout(LayoutKind.Sequential, Pack = 4)]
         private struct PROPERTYKEY { public Guid fmtid; public uint pid; }
 
@@ -255,8 +255,8 @@ namespace AIMeter
         [DllImport("shell32.dll")] private static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
 
         /// <summary>
-        /// Dà alla finestra l'identità di AI Meter nella barra: pulsante e icona propri invece di quelli del processo
-        /// che la ospita (PowerShell, nell'avvio da sorgente). icon = "percorso,indice" dell'icona da mostrare.
+        /// Gives the window AI Meter's identity in the taskbar: its own button and icon instead of those of the host
+        /// process (PowerShell, when launched from source). icon = "path,index" of the icon to show.
         /// </summary>
         public static void SetWindowAppId(IntPtr hwnd, string id, string icon, string name, string command)
         {
@@ -266,7 +266,7 @@ namespace AIMeter
                 IPropertyStore store;
                 if (SHGetPropertyStoreForWindow(hwnd, ref iid, out store) != 0 || store == null) return;
                 var fmt = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
-                // prima comando, nome e icona di rilancio, l'identità per ultima (come raccomanda la documentazione)
+                // Relaunch command, name and icon first, the identity last (as the documentation recommends).
                 SetString(store, fmt, 2, command);
                 SetString(store, fmt, 4, name);
                 SetString(store, fmt, 3, icon);
@@ -287,17 +287,17 @@ namespace AIMeter
             finally { Marshal.FreeCoTaskMem(v.p); }
         }
 
-        /// <summary>Identità dell'app per la barra: le finestre di AI Meter si raggruppano col suo nome e la sua icona, non con PowerShell.</summary>
+        /// <summary>App identity for the taskbar: AI Meter windows group under its name and icon, not under PowerShell.</summary>
         public static void SetAppId(string id)
         {
-            if (IsPackaged) return;   // nel pacchetto MSIX l'identità è già quella del pacchetto
+            if (IsPackaged) return;   // In the MSIX package the identity is already the package's.
             try { SetCurrentProcessExplicitAppUserModelID(id); }
             catch (EntryPointNotFoundException) { }
         }
 
         /// <summary>
-        /// Nome e icona con cui Windows mostra le notifiche dell'app (registro dell'utente, come per le app non pacchettizzate):
-        /// senza, le notifiche avviate da PowerShell comparirebbero come "Windows PowerShell".
+        /// Name and icon Windows uses for the app's notifications (per-user registry, as for unpackaged apps):
+        /// without them, notifications started from PowerShell would appear as "Windows PowerShell".
         /// </summary>
         public static void RegisterAppIdentity(string id, string name, string iconPath)
         {
@@ -315,7 +315,7 @@ namespace AIMeter
             catch (System.Security.SecurityException) { }
         }
 
-        // --- collegamento nel menu Start con l'identità dell'app (nome e icona delle notifiche) -----------
+        // --- Start menu shortcut carrying the app identity (notification name and icon) -----------
         [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         private interface IShellLinkW
         {
@@ -351,8 +351,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Crea (o aggiorna) il collegamento nel menu Start con l'identità dell'app: Windows ne prende nome e icona per le
-        /// notifiche e per la barra. Senza, le notifiche compaiono con l'identificativo tecnico e senza icona.
+        /// Creates (or updates) the Start menu shortcut carrying the app identity: Windows takes the name and icon of
+        /// notifications and taskbar buttons from it. Without it, notifications show the technical identifier and no icon.
         /// </summary>
         public static void EnsureStartShortcut(string lnk, string target, string args, string workDir, string icon, int iconIndex, string appId)
         {
@@ -388,7 +388,7 @@ namespace AIMeter
             catch (InvalidCastException) { }
         }
 
-        /// <summary>Scrive da capo un collegamento semplice, senza identità (Esecuzione automatica).</summary>
+        /// <summary>Rewrites a plain shortcut from scratch, without an identity (Startup folder).</summary>
         public static void SaveShortcut(string lnk, string target, string args, string workDir, string icon, int iconIndex)
         {
             if (IsPackaged) return;
@@ -414,7 +414,7 @@ namespace AIMeter
 
         private static int packaged = -1;
 
-        /// <summary>Vero se l'app gira dal pacchetto MSIX (Microsoft Store): ha un'identità di pacchetto.</summary>
+        /// <summary>True if the app runs from the MSIX package (Microsoft Store), i.e. it has a package identity.</summary>
         public static bool IsPackaged
         {
             get
@@ -432,14 +432,14 @@ namespace AIMeter
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT r);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
 
-        /// <summary>Posizione e dimensione di una finestra in forma di testo, per accorgersi se è cambiata.</summary>
+        /// <summary>Position and size of a window as text, to detect whether it has changed.</summary>
         public static string RectKey(IntPtr h)
         {
             RECT r;
             return GetWindowRect(h, out r) ? r.Left + "," + r.Top + "," + r.Right + "," + r.Bottom : "";
         }
 
-        /// <summary>Bordo sinistro dell'area di notifica della barra principale (pixel fisici), 0 se non rilevabile.</summary>
+        /// <summary>Left edge of the primary taskbar's notification area (physical pixels), 0 if it cannot be found.</summary>
         public static int TrayLeft()
         {
             IntPtr bar = FindWindowW("Shell_TrayWnd", null);
@@ -448,7 +448,7 @@ namespace AIMeter
             return tray != IntPtr.Zero && GetWindowRect(tray, out r) && r.Right > r.Left ? r.Left : 0;
         }
 
-        /// <summary>Vero se la finestra è la barra delle applicazioni (principale o secondaria).</summary>
+        /// <summary>True if the window is a taskbar (primary or secondary).</summary>
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
 
         public static bool IsOwnWindow(IntPtr hwnd)
@@ -467,7 +467,7 @@ namespace AIMeter
             return c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd";
         }
 
-        /// <summary>Lato della barra delle applicazioni: 0 sinistra, 1 alto, 2 destra, 3 basso.</summary>
+        /// <summary>Taskbar edge: 0 left, 1 top, 2 right, 3 bottom.</summary>
         public static int TaskbarEdge()
         {
             var d = new APPBARDATA();

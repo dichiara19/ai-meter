@@ -10,10 +10,10 @@ using System.Text.RegularExpressions;
 namespace AIMeter
 {
     /// <summary>
-    /// Google Antigravity (abbonamenti Google AI): quote a gruppi di modelli, ognuno con una finestra di 5 ore e una
-    /// settimanale, dall'API interna che usa Antigravity (cloudcode-pa, retrieveUserQuotaSummary). L'accesso è quello di
-    /// Antigravity CLI sul PC (Windows o WSL già acceso); quando scade lo rinnova la CLI stessa ("agy models"), mai AI Meter.
-    /// L'app Gemini non espone i suoi limiti: qui non ci sono.
+    /// Google Antigravity (Google AI subscriptions): quotas per model group, each with a 5-hour and a weekly window,
+    /// from the internal API Antigravity uses (cloudcode-pa, retrieveUserQuotaSummary). The sign-in is that of
+    /// Antigravity CLI on the PC (Windows, or WSL when already running); when it expires the CLI itself renews it ("agy models"), never AI Meter.
+    /// The Gemini app does not expose its limits, so they are not shown here.
     /// </summary>
     internal sealed class AntigravityProvider : Provider
     {
@@ -31,7 +31,7 @@ namespace AIMeter
 
         public override bool Enabled(Settings s) { return s.AntigravityEnabled; }
 
-        /// <summary>Antigravity CLI con un accesso su Windows (quello in WSL si vede solo con WSL acceso).</summary>
+        /// <summary>Antigravity CLI signed in on Windows (the WSL sign-in is visible only while WSL is running).</summary>
         public static bool Detected() { return File.Exists(Path.Combine(Probe.Home, TokenFile)); }
 
         public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; }
@@ -62,7 +62,7 @@ namespace AIMeter
             return st;
         }
 
-        /// <summary>Token di accesso di Antigravity CLI, se ancora valido; file = dove si trova l'accesso (anche se scaduto).</summary>
+        /// <summary>Antigravity CLI access token, if still valid; file = where the sign-in is stored (even if expired).</summary>
         private static string Token(Probe p, out string file)
         {
             file = null;
@@ -86,8 +86,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Accesso scaduto: lo rinnova Antigravity CLI con una richiesta che non usa quota (elenco dei modelli), al massimo
-        /// ogni 30 minuti. In WSL solo se è già acceso.
+        /// Expired sign-in: Antigravity CLI renews it with a request that uses no quota (the model list), at most
+        /// every 30 minutes. In WSL only if it is already running.
         /// </summary>
         private bool TryRefresh(Probe p, string file, out string token)
         {
@@ -111,7 +111,7 @@ namespace AIMeter
             return token != null;
         }
 
-        /// <summary>"2026-10-27T19:10:44.851940758+01:00": fino a 9 decimali, .NET ne legge al massimo 7.</summary>
+        /// <summary>"2026-10-27T19:10:44.851940758+01:00": up to 9 decimal places, while .NET reads at most 7.</summary>
         private static DateTime? Expiry(string s)
         {
             if (string.IsNullOrEmpty(s)) return null;
@@ -150,7 +150,7 @@ namespace AIMeter
             catch (IOException) { return null; }
         }
 
-        /// <summary>Una chiamata all'API; null se il servizio la rifiuta (es. host non abilitato per l'account).</summary>
+        /// <summary>One API call; null if the service rejects it (e.g. host not enabled for the account).</summary>
         private static Dictionary<string, object> Post(string host, string method, string token, string body)
         {
             var req = (HttpWebRequest)WebRequest.Create(host + "/v1internal:" + method);
@@ -169,7 +169,7 @@ namespace AIMeter
                 using (var r = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                 {
                     string text = r.ReadToEnd();
-                    // risposte senza token: per diagnosi e per riconoscere nuovi campi
+                    // Responses without tokens: for diagnosis and to recognise new fields.
                     try { File.WriteAllText(Path.Combine(Settings.Folder, "antigravity-" + method + "-raw.json"), text, new UTF8Encoding(false)); }
                     catch (IOException) { }
                     return Json.Parse(text);
@@ -190,9 +190,9 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// groups[].buckets[]: per gruppo di modelli ("Gemini Models", "Claude and GPT models") una finestra di 5 ore e una
-        /// settimanale. Una quota esaurita non ha remainingFraction (proto3 omette lo zero) ma ha resetTime: vale 0%.
-        /// Le finestre disattivate non contano.
+        /// groups[].buckets[]: for each model group ("Gemini Models", "Claude and GPT models") a 5-hour and a weekly
+        /// window. An exhausted quota has no remainingFraction (proto3 omits zero) but has resetTime: it counts as 0%.
+        /// Disabled windows do not count.
         /// </summary>
         internal static Usage Parse(Dictionary<string, object> d)
         {
@@ -225,12 +225,12 @@ namespace AIMeter
                     });
                 }
             }
-            // prima le finestre di 5 ore, poi le settimanali, come per gli altri servizi
+            // 5-hour windows first, then weekly ones, as for the other services.
             u.Windows = u.Windows.OrderBy(w => w.Label == "Session 5 h" ? 0 : 1).ToList();
             return u.Windows.Count > 0 ? u : null;
         }
 
-        /// <summary>Nome breve del gruppo per la riga del limite: "Claude and GPT models" → "Claude + GPT", "Gemini Models" → "Gemini".</summary>
+        /// <summary>Short group name for the limit row: "Claude and GPT models" → "Claude + GPT", "Gemini Models" → "Gemini".</summary>
         internal static string GroupName(string name)
         {
             if (string.IsNullOrEmpty(name)) return null;

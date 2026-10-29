@@ -4,8 +4,8 @@ using System.Collections.Generic;
 namespace AIMeter
 {
     /// <summary>
-    /// Dati dimostrativi, inventati ma realistici: per provare l'aspetto dell'app (--demo) e per le immagini del README
-    /// (tools\render-media.ps1), senza mostrare sessioni o progetti veri.
+    /// Demo data, invented but realistic: for previewing the app (--demo) and for the README images
+    /// (tools\render-media.ps1), without showing real sessions or projects.
     /// </summary>
     internal static class DemoData
     {

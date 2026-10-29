@@ -172,7 +172,7 @@ namespace AIMeter
         public string Name;
         public string Server;      // "Ollama", "LM Studio", "llama.cpp"…
         public string Where;       // "Windows" or "WSL".
-        public string Detail;      // Parameter count and quantization, when known.
+        public string Detail;      // Parameter count and quantisation, when known.
         public long Vram, Ram;     // GPU and system memory in bytes; zero means unknown.
         public int Context;        // Loaded context size in tokens; zero means unknown.
         public int ContextUsed;    // Tokens in the largest active request; zero means unknown.

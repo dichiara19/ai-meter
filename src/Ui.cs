@@ -47,7 +47,7 @@ namespace AIMeter
 
         /// <summary>
         /// Resolve the service logo from an installed app or a bundled provider asset.
-        /// Fall back to a monogram in the service's color when no image is available.
+        /// Fall back to a monogram in the service's colour when no image is available.
         /// </summary>
         public static FrameworkElement Logo(string id, double size) { return Logo(id, size, Theme.Dark); }
 
@@ -343,7 +343,7 @@ namespace AIMeter
 
         /// <summary>
         /// Draw concentric service rings, with Claude outside ChatGPT.
-        /// Colored arcs show remaining quota using the same thresholds as the bars.
+        /// Coloured arcs show remaining quota using the same thresholds as the bars.
         /// </summary>
         public static FrameworkElement RingIcon(IList<Tuple<ProviderState, UsageWindow>> items, double size)
         {
@@ -489,7 +489,7 @@ namespace AIMeter
 
         public const string LocalGlyph = "";
 
-        /// <summary>Summarize local models for tooltips.</summary>
+        /// <summary>Summarise local models for tooltips.</summary>
         public static string LocalSummary(ProviderState p)
         {
             if (p.Models == null || p.Models.Count == 0) return L.T("Local models: none loaded");
@@ -529,7 +529,7 @@ namespace AIMeter
             return (k >= 10 ? Math.Round(k).ToString(It) : k.ToString("0.#", It)) + "K";
         }
 
-        /// <summary>Summarize five-hour limits for tooltips.</summary>
+        /// <summary>Summarise five-hour limits for tooltips.</summary>
         public static string Summary(Snapshot s)
         {
             return string.Join("\n", s.Providers.Select(p =>

@@ -1,13 +1,13 @@
-﻿# Avvia AI Meter dal sorgente, senza eseguibile.
-# Con Smart App Control attivo un .exe non firmato viene bloccato; PowerShell, firmato da Microsoft,
-# compila il codice C# in memoria (Add-Type) e lo esegue. Il risultato è la stessa app.
+﻿# Starts AI Meter from source, without an executable.
+# With Smart App Control on, an unsigned .exe is blocked; PowerShell, signed by Microsoft,
+# compiles the C# code in memory (Add-Type) and runs it. The result is the same app.
 #
-# Uso tipico (nessuna finestra di console):
+# Typical use (no console window):
 #   conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File AIMeter.ps1 [--settings]
 param([Parameter(ValueFromRemainingArguments = $true)][string[]]$AppArgs = @())
 $ErrorActionPreference = 'Stop'
 
-# Già in esecuzione: segnala all'istanza attiva senza ricompilare (apre il pannello o le impostazioni).
+# Already running: signal the active instance without recompiling (opens the panel or Settings).
 $running = $null
 if ([Threading.Mutex]::TryOpenExisting('Local\AIMeter.Instance', [ref]$running)) {
     $name = if ($AppArgs -contains '--settings') { 'Local\AIMeter.Settings' } else { 'Local\AIMeter.Show' }
@@ -35,7 +35,7 @@ try {
 catch {
     $log = Join-Path $env:APPDATA 'AIMeter\launcher.log'
     New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
-    # l'eccezione completa, con lo stack e quella interna: senza, "Accesso negato" non dice dove
+    # The full exception, with the stack trace and the inner one: without it, "Access denied" does not say where.
     $detail = if ($_.Exception.InnerException) { $_.Exception.InnerException.ToString() } else { $_.Exception.ToString() }
     "$(Get-Date -Format s)  $detail" | Add-Content $log -Encoding UTF8
     Add-Type -AssemblyName System.Windows.Forms

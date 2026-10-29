@@ -58,7 +58,6 @@ namespace AIMeter
             if (!Path.IsPathRooted(target)) target = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), target);
         }
 
-        /// <summary>Assets are embedded in the executable or loaded from assets when running from source.</summary>
         /// <summary>App icon as path,index: the executable or assets\app.ico when running from source.</summary>
         public static string IconPath
         {

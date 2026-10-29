@@ -599,7 +599,7 @@ namespace AIMeter
             string cur;
             S.PillLimits.TryGetValue(id, out cur);
             if (windows.Count < 2 && string.IsNullOrEmpty(cur)) return;
-            // Name the limit selected by Default so its behavior is visible.
+            // Name the limit selected by Default so its behaviour is visible.
             var dflt = p == null ? null : Ui.Primary(p.Usage);
             var options = new List<Tuple<string, string>>
             {

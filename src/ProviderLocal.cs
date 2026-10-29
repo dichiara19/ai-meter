@@ -12,34 +12,34 @@ using System.Text.RegularExpressions;
 namespace AIMeter
 {
     /// <summary>
-    /// Modelli AI locali: trova i server in ascolto su questo PC (Windows e WSL già acceso), li riconosce dalle loro API
-    /// e legge i modelli caricati in memoria con memoria video, contesto e richieste in corso. Si contatta solo 127.0.0.1,
-    /// e solo con richieste di lettura che non caricano modelli.
+    /// Local AI models: finds the servers listening on this PC (Windows, and WSL when already running), recognises them by
+    /// their APIs and reads the models loaded in memory, with video memory, context and requests in progress. Only
+    /// 127.0.0.1 is contacted, and only with read requests that never load a model.
     /// </summary>
     internal sealed class LocalProvider : Provider
     {
         private readonly Settings S;
         private readonly Dictionary<string, Server> servers = new Dictionary<string, Server>();
-        private readonly Dictionary<string, DateTime> notModels = new Dictionary<string, DateTime>();   // porte provate che non sono server di modelli
+        private readonly Dictionary<string, DateTime> notModels = new Dictionary<string, DateTime>();   // Ports tried that are not model servers.
         private DateTime winScanAt = DateTime.MinValue, wslScanAt = DateTime.MinValue;
         private List<Tuple<int, string>> wslPorts = new List<Tuple<int, string>>();
         private Dictionary<int, uint> winPorts = new Dictionary<int, uint>();
         private Dictionary<uint, uint> parents = new Dictionary<uint, uint>();
         private readonly CodingAgents agents;
-        private readonly HashSet<int> swapPorts = new HashSet<int>();   // porte dei llama-server avviati da llama-swap
+        private readonly HashSet<int> swapPorts = new HashSet<int>();   // Ports of the llama-server instances started by llama-swap.
 
-        /// <summary>Programmi che ospitano un server di modelli, e le porte predefinite dei server più diffusi.</summary>
+        /// <summary>Programs that host a model server, and the default ports of the most common servers.</summary>
         private static readonly string[] KnownProcesses = { "ollama", "llama-server", "llama-swap", "lm studio", "llmster", "koboldcpp", "local-ai", "localai", "vllm" };
         private static readonly int[] KnownPorts = { 11434, 1234, 9931, 8080, 8000, 5001, 5000 };
-        /// <summary>Processi che avviano llama-server come motore: i loro figli non sono server a sé.</summary>
+        /// <summary>Processes that run llama-server as their engine: their children are not separate servers.</summary>
         private static readonly string[] Hosts = { "ollama.exe", "llama-swap.exe", "jan-llama-worker.exe", "jan.exe", "lm studio.exe" };
 
         private sealed class Server
         {
             public string Kind;       // "ollama", "lmstudio", "llamacpp", "llamarouter", "llamaswap", "vllm", "kobold", "localai", "textgen"
             public int Port;
-            public string Where;      // "Windows" o "WSL"
-            public uint Pid;          // solo su Windows
+            public string Where;      // "Windows" or "WSL".
+            public uint Pid;          // Windows only.
             public string Proc;
             public int Failures;
         }
@@ -55,7 +55,7 @@ namespace AIMeter
             var models = new List<LocalModel>();
             bool running = false;
             swapPorts.Clear();
-            // llama-swap per primo: i llama-server che avvia non vanno contati una seconda volta
+            // llama-swap first: the llama-server instances it starts must not be counted a second time.
             foreach (var srv in servers.Values.OrderBy(x => x.Kind == "llamaswap" ? 0 : 1).ToList())
             {
                 if (srv.Kind == "llamacpp" && swapPorts.Contains(srv.Port)) continue;
@@ -77,11 +77,11 @@ namespace AIMeter
             ShareWslMemory(p, models);
 
             var st = new ProviderState { Id = "local", Name = L.T("Local models"), Models = models, Running = running };
-            // i contatori della GPU si leggono qui, nel thread di raccolta, e solo se c'è un server attivo
+            // GPU counters are read here, on the collection thread, and only when a server is active.
             if (running) { st.GpuTotal = GpuMemory.Total; st.GpuUsed = st.GpuTotal > 0 ? GpuMemory.Used : 0; }
             if (S.LocalAgents)
             {
-                // le sessioni delle CLI vanno sotto il modello che usano, se è caricato qui
+                // CLI sessions belong under the model they use, if it is loaded here.
                 foreach (var s in agents.Collect(p))
                 {
                     var m = models.FirstOrDefault(x => SameModel(x.Name, s.Model));
@@ -109,7 +109,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Stesso modello con nomi scritti diversamente: "qwen3:8b" e "ollama/qwen3:8b", maiuscole, prefissi del provider.</summary>
+        /// <summary>The same model spelt differently: "qwen3:8b" and "ollama/qwen3:8b", letter case, provider prefixes.</summary>
         public static bool SameModel(string loaded, string used)
         {
             if (string.IsNullOrEmpty(loaded) || string.IsNullOrEmpty(used)) return false;
@@ -126,10 +126,10 @@ namespace AIMeter
             return a == b || (b.Length >= 4 && a.StartsWith(b)) || (a.Length >= 4 && b.StartsWith(a));
         }
 
-        // ================================================================ ricerca dei server
+        // ================================================================ server discovery
         private void Discover(Probe p)
         {
-            var candidates = new List<Tuple<int, string, uint, string>>();   // porta, dove, pid, processo
+            var candidates = new List<Tuple<int, string, uint, string>>();   // Port, location, PID, process name.
             if ((DateTime.Now - winScanAt).TotalSeconds >= 20)
             {
                 winScanAt = DateTime.Now;
@@ -140,16 +140,16 @@ namespace AIMeter
                     string name;
                     p.Procs.TryGetValue(kv.Value, out name);
                     name = name ?? "";
-                    // rete NAT di WSL (la predefinita): per ogni server Linux su 0.0.0.0 o 127.0.0.1, wslrelay.exe apre la stessa
-                    // porta su 127.0.0.1 di Windows. È un server in WSL, qualunque sia la porta.
+                    // WSL NAT networking (the default): for every Linux server on 0.0.0.0 or 127.0.0.1, wslrelay.exe opens the same
+                    // port on Windows' 127.0.0.1. It is a WSL server, whatever the port.
                     if (name == "wslrelay.exe") { if (kv.Key >= 1024) candidates.Add(Tuple.Create(kv.Key, "WSL", 0u, "")); continue; }
                     if (IsEngineChild(p, kv.Value, name)) continue;
                     string bare = name.EndsWith(".exe") ? name.Substring(0, name.Length - 4) : name;
                     if (Known(bare, kv.Key)) candidates.Add(Tuple.Create(kv.Key, "Windows", kv.Value, bare));
                 }
             }
-            // WSL acceso: le sue porte (in rete "mirrored" non compaiono tra quelle di Windows) si leggono dalla tabella TCP
-            // del kernel Linux come file, senza avviare processi in WSL: non la tiene sveglia. Una volta al minuto, ogni 5 a batteria.
+            // WSL running: its ports (absent from the Windows table in "mirrored" networking) are read from the Linux kernel's TCP
+            // table as a file, without starting processes in WSL, so it is not kept awake. Once a minute, every 5 on battery.
             double every = p.SavingPower ? 300 : 60;
             if (p.WslUp && (DateTime.Now - wslScanAt).TotalSeconds >= every)
             {
@@ -157,8 +157,8 @@ namespace AIMeter
                 wslPorts = WslListeners(p.WslRoot);
             }
             if (!p.WslUp) wslPorts.Clear();
-            // in rete "mirrored" le porte di WSL non hanno una riga nella tabella di Windows; in NAT ce l'hanno (wslrelay) e
-            // sono già tra i candidati. Si saltano solo le porte usate su Windows da un altro programma.
+            // In "mirrored" networking WSL ports have no row in the Windows table; in NAT they do (wslrelay) and are
+            // already candidates. Only ports used on Windows by another program are skipped.
             foreach (var w in wslPorts)
             {
                 uint owner;
@@ -171,7 +171,7 @@ namespace AIMeter
             {
                 string key = Key(c.Item2, c.Item1);
                 DateTime triedAt;
-                // una porta che non era un server si riprova dopo 30 minuti: lo stesso numero può passare a un altro programma
+                // A port that was not a server is retried after 30 minutes: the same number may pass to another program.
                 if (servers.ContainsKey(key) || (notModels.TryGetValue(key + "|" + c.Item3, out triedAt) && (DateTime.Now - triedAt).TotalMinutes < 30)) continue;
                 string kind = Identify(c.Item1);
                 if (kind == null) { notModels[key + "|" + c.Item3] = DateTime.Now; continue; }
@@ -179,7 +179,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Un llama-server avviato da Ollama, llama-swap, Jan o LM Studio: fa parte di quel server, non è a sé.</summary>
+        /// <summary>A llama-server started by Ollama, llama-swap, Jan or LM Studio: part of that server, not a separate one.</summary>
         private bool IsEngineChild(Probe p, uint pid, string name)
         {
             if (name != "llama-server.exe") return false;
@@ -194,14 +194,14 @@ namespace AIMeter
         {
             proc = proc.ToLowerInvariant();
             if (KnownProcesses.Any(k => proc == k || proc.StartsWith(k + "-") || proc.StartsWith(k + "_") || proc.StartsWith(k + " "))) return true;
-            // porte predefinite: solo per programmi che possono ospitare un server di modelli (python per vLLM e simili)
+            // Default ports: only for programs that can host a model server (python for vLLM and similar).
             return KnownPorts.Contains(port) && (proc.StartsWith("python") || proc == "node" || proc == "docker" || proc == "com.docker.backend");
         }
 
         /// <summary>
-        /// Porte in ascolto in WSL, da /proc/1/net/tcp e tcp6 (lo stesso spazio di rete delle app Linux). Solo quelle
-        /// raggiungibili da Windows (tutte le interfacce o localhost) e non di sistema; il nome del programma non c'è,
-        /// lo dice la prova di riconoscimento.
+        /// Ports listening in WSL, from /proc/1/net/tcp and tcp6 (the same network namespace as Linux apps). Only those
+        /// reachable from Windows (all interfaces or localhost) and not system ports; the program name is unavailable,
+        /// so the recognition probe identifies it.
         /// </summary>
         private static List<Tuple<int, string>> WslListeners(string root)
         {
@@ -233,12 +233,12 @@ namespace AIMeter
             return list;
         }
         /// <summary>
-        /// Che server è in ascolto sulla porta, da una richiesta che solo lui sa servire. L'ordine conta:
-        /// KoboldCpp imita llama-server e Ollama, llama-swap ha un /api/version come Ollama.
+        /// Which server is listening on the port, from a request only that server can answer. The order matters:
+        /// KoboldCpp imitates llama-server and Ollama, and llama-swap has an /api/version like Ollama.
         /// </summary>
         private static string Identify(int port)
         {
-            // prima una sola richiesta breve: se la porta non parla HTTP (adb, database…) ci si ferma subito
+            // One short request first: if the port does not speak HTTP (adb, databases…) stop immediately.
             if (!SpeaksHttp(port)) return null;
             if (JPath.Str(JPath.Get(Get(port, "/api/extra/version"), "result")) == "KoboldCpp") return "kobold";
             if (JPath.Truthy(JPath.Get(Get(port, "/lmstudio-greeting"), "lmstudio"))) return "lmstudio";
@@ -256,7 +256,7 @@ namespace AIMeter
             return null;
         }
 
-        /// <summary>Che server risponde sulla porta e quali modelli ha caricati (null se non è un server di modelli).</summary>
+        /// <summary>Which server answers on the port and which models it has loaded (null if it is not a model server).</summary>
         internal List<LocalModel> InspectPort(int port, out string kind)
         {
             kind = Identify(port);
@@ -266,7 +266,7 @@ namespace AIMeter
             return found;
         }
 
-        // ================================================================ modelli caricati
+        // ================================================================ loaded models
         private List<LocalModel> Query(Server s)
         {
             switch (s.Kind)
@@ -285,7 +285,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Ollama: /api/ps elenca solo i modelli in memoria, con dimensione, parte in VRAM e contesto configurato.</summary>
+        /// <summary>Ollama: /api/ps lists only the models in memory, with size, share in VRAM and configured context.</summary>
         private static List<LocalModel> Ollama(int port)
         {
             var list = JPath.Get(Get(port, "/api/ps"), "models") as IList;
@@ -306,8 +306,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Ollama non dice se un modello sta lavorando: lo dice il llama-server figlio (/slots). Con un solo modello
-        /// caricato l'abbinamento è certo; con più modelli si abbina per contesto configurato.
+        /// Ollama does not say whether a model is working: its llama-server child does (/slots). With a single model
+        /// loaded the match is certain; with several models they are matched by configured context.
         /// </summary>
         private void OllamaActivity(Probe p, List<LocalModel> models)
         {
@@ -330,7 +330,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>LM Studio: API v1 (≥ 0.4) con le istanze caricate, altrimenti la v0 con lo stato di ogni modello.</summary>
+        /// <summary>LM Studio: API v1 (≥ 0.4) with the loaded instances, otherwise v0 with the state of each model.</summary>
         private static List<LocalModel> LmStudio(int port)
         {
             var v1 = JPath.Get(Get(port, "/api/v1/models"), "models") as IList;
@@ -364,8 +364,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// llama-server: /props per modello, contesto per slot e numero di slot; /slots (attivo di norma) per le richieste
-        /// in corso e i token occupati nello slot più pieno.
+        /// llama-server: /props per model, context per slot and number of slots; /slots (normally enabled) for the requests
+        /// in progress and the tokens occupying the fullest slot.
         /// </summary>
         private static LocalModel LlamaCpp(int port, string propsPath, string slotsPath)
         {
@@ -387,8 +387,8 @@ namespace AIMeter
             {
                 if (!JPath.Truthy(JPath.Get(sl, "is_processing"))) continue;
                 m.Busy++;
-                // n_prompt_tokens è la cache dello slot e comprende già i token generati (verificato con llama-server b10787);
-                // le versioni vecchie avevano n_past, senza i token in generazione
+                // n_prompt_tokens is the slot cache and already includes the generated tokens (verified with llama-server b10787);
+                // older versions had n_past, without the tokens being generated.
                 double? cached = JPath.Num(JPath.Get(sl, "n_prompt_tokens"));
                 int used = cached != null ? (int)cached.Value
                          : (int)(JPath.Num(JPath.Get(sl, "n_past")) ?? 0) + (int)(JPath.Num(JPath.Get(sl, "next_token[0].n_decoded")) ?? JPath.Num(JPath.Get(sl, "next_token.n_decoded")) ?? 0);
@@ -399,7 +399,7 @@ namespace AIMeter
             return m;
         }
 
-        /// <summary>llama-server in modalità router (più modelli): sempre con autoload=false, per non caricarne.</summary>
+        /// <summary>llama-server in router mode (several models): always with autoload=false, so that none is loaded.</summary>
         private static List<LocalModel> LlamaRouter(int port)
         {
             var list = JPath.Get(Get(port, "/models"), "data") as IList;
@@ -420,8 +420,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// llama-swap: /running elenca i modelli avviati; per quelli pronti si interroga direttamente il loro llama-server
-        /// (indirizzo "proxy"), perché passare da /upstream caricherebbe il modello.
+        /// llama-swap: /running lists the started models; for ready ones their own llama-server is queried directly
+        /// ("proxy" address), because going through /upstream would load the model.
         /// </summary>
         private List<LocalModel> LlamaSwap(int port)
         {
@@ -448,7 +448,7 @@ namespace AIMeter
             return result;
         }
 
-        /// <summary>vLLM: un modello per processo; /metrics per le richieste in corso.</summary>
+        /// <summary>vLLM: one model per process; /metrics for the requests in progress.</summary>
         private static List<LocalModel> Vllm(int port)
         {
             var list = JPath.Get(Get(port, "/v1/models"), "data") as IList;
@@ -516,12 +516,12 @@ namespace AIMeter
             return p.Length == 0 ? null : string.Join(" · ", p);
         }
 
-        // ================================================================ memoria
-        /// <summary>Memoria video e di sistema dei server su Windows, dai contatori dei processi (quando il server non la dice).</summary>
+        // ================================================================ memory
+        /// <summary>Video and system memory of servers on Windows, from process counters (when the server does not report it).</summary>
         private void AttachMemory(Probe p, Server s, List<LocalModel> models)
         {
             if (s.Where != "Windows" || models.Count == 0 || models.Any(m => m.Vram > 0)) return;
-            // il server e i processi che ha avviato (llama-server di llama-swap, motori di LM Studio)
+            // The server and the processes it started (llama-swap's llama-server, LM Studio engines).
             var pids = new HashSet<uint> { s.Pid };
             bool grew = true;
             while (grew)
@@ -536,7 +536,7 @@ namespace AIMeter
             {
                 long v;
                 if (gpu.TryGetValue(pid, out v)) vram += v;
-                if (s.Kind == "lmstudio") continue;   // la RAM dell'app Electron non è del modello
+                if (s.Kind == "lmstudio") continue;   // The Electron app's RAM does not belong to the model.
                 try { using (var proc = Process.GetProcessById((int)pid)) ram += proc.WorkingSet64; }
                 catch (ArgumentException) { }
                 catch (InvalidOperationException) { }
@@ -545,8 +545,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// La memoria video usata in WSL è tutta a carico di vmmemWSL (e vmwp): non si può dividere tra i processi Linux.
-        /// La si dà al modello se è l'unico in WSL senza un dato proprio.
+        /// Video memory used in WSL is all charged to vmmemWSL (and vmwp): it cannot be split between Linux processes.
+        /// It is assigned to the model if that is the only one in WSL without its own figure.
         /// </summary>
         private static void ShareWslMemory(Probe p, List<LocalModel> models)
         {
@@ -560,14 +560,14 @@ namespace AIMeter
             unknown[0].Vram = total;
         }
 
-        // ================================================================ HTTP locale
+        // ================================================================ local HTTP
         private static object Get(int port, string path)
         {
             string text = GetText(port, path);
             return text == null ? null : Json.ParseAny(text);
         }
 
-        /// <summary>La porta risponde con HTTP (qualsiasi codice), entro 800 ms.</summary>
+        /// <summary>The port answers with HTTP (any status code) within 800 ms.</summary>
         private static bool SpeaksHttp(int port)
         {
             try
@@ -596,7 +596,7 @@ namespace AIMeter
                 using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                 {
                     if ((int)resp.StatusCode >= 300) return null;
-                    var buf = new char[262144];   // basta per qualsiasi risposta utile; evita di leggere file enormi
+                    var buf = new char[262144];   // Enough for any useful response; avoids reading huge files.
                     int n = sr.ReadBlock(buf, 0, buf.Length);
                     return new string(buf, 0, n);
                 }
