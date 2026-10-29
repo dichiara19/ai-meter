@@ -685,7 +685,7 @@ namespace AIMeter
         }
 
         /// <summary>Build a service card with its header, limits, notice and optional expanded session list.</summary>
-        public static Border ProviderCard(ProviderState p, bool expanded, Action toggle, Action<string> login)
+        public static Border ProviderCard(ProviderState p, bool expanded, Action toggle, Action<string> login, bool sessionsOpen = true, Action toggleSessions = null)
         {
             if (p.Models != null) return LocalCard(p, expanded, toggle);
             string brand = BrandBrush(p.Id);
@@ -852,19 +852,42 @@ namespace AIMeter
                 var div = new Border { Height = 1, Margin = new Thickness(-14, 12, -14, 6) };
                 div.SetResourceReference(Border.BackgroundProperty, "Divider");
                 stack.Children.Add(div);
-                var ordered = p.Sessions
-                    .OrderByDescending(s => s.Status == "app")
-                    .ThenByDescending(s => s.Status == "busy")
+                // Open desktop apps stay visible; agent sessions fold behind a summary row when the caller supports it.
+                foreach (var s in p.Sessions.Where(s => s.Status == "app")) stack.Children.Add(SessionRow(s, brand));
+                var ordered = p.Sessions.Where(s => s.Status != "app")
+                    .OrderByDescending(s => s.Status == "busy")
                     .ThenByDescending(s => s.Updated).ToList();
-                foreach (var s in ordered.Take(6)) stack.Children.Add(SessionRow(s, brand));
-                if (ordered.Count > 6)
+                if (ordered.Count > 0 && toggleSessions != null) stack.Children.Add(SessionSummary(ordered, sessionsOpen, toggleSessions));
+                if (sessionsOpen || toggleSessions == null)
                 {
-                    var more = Text(L.F("+{0} more sessions", ordered.Count - 6), 11.5, "Text3");
-                    more.Margin = new Thickness(18, 2, 0, 0);
-                    stack.Children.Add(more);
+                    foreach (var s in ordered.Take(6)) stack.Children.Add(SessionRow(s, brand));
+                    if (ordered.Count > 6)
+                    {
+                        var more = Text(L.F("+{0} more sessions", ordered.Count - 6), 11.5, "Text3");
+                        more.Margin = new Thickness(18, 2, 0, 0);
+                        stack.Children.Add(more);
+                    }
                 }
             }
             return Card(stack, new Thickness(14, 12, 14, 12));
+        }
+
+        /// <summary>A clickable row that counts agent sessions and shows or hides their list.</summary>
+        private static FrameworkElement SessionSummary(List<Session> sessions, bool open, Action toggle)
+        {
+            var row = new DockPanel { Background = Brushes.Transparent, Cursor = Cursors.Hand, Margin = new Thickness(0, 2, 0, 2) };
+            var chev = Glyph(open ? "" : "", 9, "Text3");
+            chev.Width = 18;
+            chev.HorizontalAlignment = HorizontalAlignment.Left;
+            DockPanel.SetDock(chev, Dock.Left);
+            row.Children.Add(chev);
+
+            int busy = sessions.Count(s => s.Status == "busy");
+            string text = L.N(sessions.Count, "{0} session", "{0} sessions");
+            if (busy > 0) text += " · " + busy.ToString(It) + " " + L.T("working");
+            row.Children.Add(Text(text, 11.5, "Text2"));
+            row.MouseLeftButtonUp += (o, e) => { toggle(); e.Handled = true; };
+            return row;
         }
 
         /// <summary>

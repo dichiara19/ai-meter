@@ -47,6 +47,7 @@ namespace AIMeter
             }
             store.Rate("synthetic-session-0", 1); store.Rate("synthetic-session-1", 0); store.Rate("synthetic-session-2", -1);
             var report = new HistoryAnalysis(store).Read(first, "");
+            AddConsumption(report, now);
             var emptyStore = new HistoryStore(Path.Combine(storage, "empty.sqlite3"));
             var empty = new HistoryAnalysis(emptyStore).Read(first, "");
             var firstStore = new HistoryStore(Path.Combine(storage, "first.sqlite3"));
@@ -88,6 +89,23 @@ namespace AIMeter
             application.Shutdown();
         }
 
+        /// <summary>Synthetic detector state: one ready limit with an ongoing episode, one still learning.</summary>
+        private static void AddConsumption(HistoryReport report, DateTime now)
+        {
+            Func<string, ConsumptionScope> scope = metric => new ConsumptionScope { Provider = "claude", Account = "synthetic", Metric = metric, Source = "live", Plan = "Max" };
+            report.Readiness.Add(new ReadinessResult { Scope = scope("Week|"), State = ReadinessState.Ready, Reason = "Compared with {0} days with consumption.", Arguments = new object[] { 23 } });
+            report.Readiness.Add(new ReadinessResult { Scope = scope("Session 5 h|"), State = ReadinessState.Learning, Reason = "{0} of {1} observed days.", Arguments = new object[] { 9, 14 } });
+            DateTime start = now.AddMinutes(-40).ToUniversalTime();
+            var baseline = new BaselineSummary { Context = "weekday", TimeZone = TimeZoneInfo.Local.Id, FromUtc = start.AddDays(-30), ToUtc = start.Date, ActiveDays = 23 };
+            report.Episodes.Add(new AlertEpisode
+            {
+                Id = "synthetic", Provider = "claude", Metric = "Week|", State = AlertEpisode.Open, OpenedUtc = start, LastUtc = start.AddMinutes(30), WasEligible = true,
+                Evidence = new AnomalyEvidence { Kind = EvidenceKind.Sustained, StartUtc = start, EndUtc = start.AddMinutes(30), Points = 6, Minutes = 31, RatePerHour = 11.6, ThresholdPerHour = 4.2 },
+                Baseline = Json.Parse(Json.Serialize(baseline.ToJson())),
+                Candidates = { new SessionCandidate { SessionId = "synthetic-session-4", Agent = "Claude Code", Model = "Opus", First = now.AddMinutes(-45), Last = now.AddMinutes(-12), Replies = 38, Input = 41200, Output = 9800, CacheRead = 1840000, CacheWrite = 96000 } },
+            });
+        }
+
         private static void Render(Controller controller, HistoryStore store, HistoryReport report, string output, string prefix, bool zero, bool contrast = false)
         {
             var window = new HistoryWindow(controller, store);
@@ -97,6 +115,14 @@ namespace AIMeter
             if (zero) typeof(HistoryWindow).GetField("selectedActivity", flags).SetValue(window, 1);
             foreach (string method in new[] { "RenderOverview", "RenderSessions", "RenderQuotas", "RenderActivity" })
                 typeof(HistoryWindow).GetMethod(method, flags).Invoke(window, null);
+            if (report.Episodes.Count > 0)
+            {
+                var card = (Border)typeof(HistoryWindow).GetMethod("ConsumptionCard", flags).Invoke(window, null);
+                var host = new Border { Width = 900, Padding = new Thickness(16), Child = card };
+                host.SetResourceReference(Border.BackgroundProperty, "Fallback");
+                foreach (object key in window.Resources.Keys) host.Resources[key] = window.Resources[key];
+                MediaRenderer.Save(host, Path.Combine(output, prefix + "-consumption.png"), 1);
+            }
             var status = (TextBlock)typeof(HistoryWindow).GetField("status", flags).GetValue(window);
             status.Text = L.F("History since {0} · view refreshed at {1}", report.Started.ToString("g", L.Culture), DateTime.Now.ToString("t", L.Culture));
             var tabs = (TabControl)typeof(HistoryWindow).GetField("tabs", flags).GetValue(window);

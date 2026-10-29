@@ -10,31 +10,19 @@ namespace AIMeter
         internal DateTime Started;
         internal long Bytes, Observations, Events, Gaps, SessionCount, Rated, Positive, Neutral, Negative;
         internal bool HasAnyHistory;
-        internal int ComparisonIntervals;
         internal List<HistorySession> Sessions;
         internal List<object[]> Models, Days, Cycles, Trend, Coverage, Amounts;
-        internal List<HistorySignal> Signals = new List<HistorySignal>();
-    }
-
-    internal sealed class HistorySignal
-    {
-        internal string Provider, Metric;
-        internal double Ratio;
-        internal bool IsPersistent;
-        internal DateTime At;
-    }
-
-    internal sealed class HistoryComparison
-    {
-        internal int Intervals;
-        internal List<HistorySignal> Signals = new List<HistorySignal>();
+        // Detector state shared with notifications; selected dates and chart limits never change it.
+        internal List<AlertEpisode> Episodes = new List<AlertEpisode>();
+        internal List<ReadinessResult> Readiness = new List<ReadinessResult>();
     }
 
     /// <summary>Read-only projections. Provider quotas, logged tokens and computed API costs remain separate units.</summary>
     internal sealed class HistoryAnalysis
     {
         private readonly HistoryStore store;
-        internal HistoryAnalysis(HistoryStore store) { this.store = store; }
+        private readonly ConsumptionMonitor monitor;
+        internal HistoryAnalysis(HistoryStore store, ConsumptionMonitor monitor = null) { this.store = store; this.monitor = monitor; }
 
         internal string[] Providers()
         {
@@ -75,9 +63,11 @@ namespace AIMeter
                 AND NOT EXISTS(SELECT 1 FROM observations newer WHERE newer.provider=o.provider AND newer.account=o.account
                     AND newer.metric=o.metric AND newer.measured>o.measured) ORDER BY o.measured DESC LIMIT 100", from, provider, provider);
             report.Trend = store.Query("SELECT provider,account,metric,resets,measured,percent,source,allowance,currency,plan FROM observations WHERE measured>=? AND percent IS NOT NULL AND (?='' OR provider=?) ORDER BY measured DESC LIMIT 5000", from, provider, provider);
-            var comparison = Compare(report.Trend);
-            report.Signals = comparison.Signals;
-            report.ComparisonIntervals = comparison.Intervals;
+            if (monitor != null)
+            {
+                report.Episodes = monitor.Episodes(since == DateTime.MinValue ? DateTime.MinValue : since.ToUniversalTime(), provider, 20);
+                report.Readiness = monitor.Readiness.Where(r => provider == "" || r.Scope.Provider == provider).ToList();
+            }
             return report;
         }
 
@@ -116,62 +106,5 @@ namespace AIMeter
         }
 
         private static long Count(object value) { return value == null ? 0 : Convert.ToInt64(value); }
-
-        /// <summary>
-        /// Compare positive quota rates only within the same account, metric, source and allowance.
-        /// Resets, decreases, gaps and overlapping limits are never summed or treated as session costs.
-        /// </summary>
-        internal static List<HistorySignal> Signals(List<object[]> rows)
-        {
-            return Compare(rows).Signals;
-        }
-
-        internal static HistoryComparison Compare(List<object[]> rows)
-        {
-            var result = new HistoryComparison();
-            foreach (var group in rows.Where(row => row[3] != null && !Convert.ToString(row[6]).Contains("unidentified-account"))
-                .GroupBy(row => new { Provider = row[0], Account = row[1], Metric = row[2], Source = row[6],
-                    Allowance = row.Length > 8 ? row[7] : null, Currency = row.Length > 8 ? row[8] : null, Plan = row.Length > 9 ? row[9] : null }))
-            {
-                var ordered = group.OrderBy(row => Convert.ToInt64(row[4])).ToList();
-                var baseline = new List<double>();
-                int consecutive = 0;
-                double lastRatio = 0;
-                for (int i = 1; i < ordered.Count; i++)
-                {
-                    var previous = ordered[i - 1]; var current = ordered[i];
-                    double minutes = (Convert.ToInt64(current[4]) - Convert.ToInt64(previous[4])) / 60000.0;
-                    double delta = Convert.ToDouble(current[5]) - Convert.ToDouble(previous[5]);
-                    if (!Equals(previous[3], current[3]) || minutes < 5 || minutes > 20 || delta < 0) { consecutive = 0; continue; }
-                    double rate = delta / minutes;
-                    bool unusual = false;
-                    if (baseline.Count >= 8)
-                    {
-                        double median = Median(baseline);
-                        double deviation = Median(baseline.Select(value => Math.Abs(value - median)).ToList());
-                        unusual = delta >= 3 && rate > Math.Max(median * 3, median + Math.Max(0.05, 6 * deviation));
-                        lastRatio = median > 0 ? rate / median : 0;
-                    }
-                    consecutive = unusual ? consecutive + 1 : 0;
-                    // Keep candidate anomalies out of the baseline so a persistent shift remains visible.
-                    if (!unusual && delta > 0) { baseline.Add(rate); if (baseline.Count > 100) baseline.RemoveAt(0); }
-                }
-                if (consecutive > 0)
-                {
-                    var latest = ordered[ordered.Count - 1];
-                    result.Signals.Add(new HistorySignal { Provider = Convert.ToString(latest[0]), Metric = Convert.ToString(latest[2]),
-                        IsPersistent = consecutive >= 3, Ratio = lastRatio, At = HistoryStore.Time(latest[4]) });
-                }
-                result.Intervals = Math.Max(result.Intervals, baseline.Count);
-            }
-            return result;
-        }
-
-        private static double Median(List<double> values)
-        {
-            var ordered = values.OrderBy(value => value).ToArray();
-            int middle = ordered.Length / 2;
-            return ordered.Length % 2 == 0 ? (ordered[middle - 1] + ordered[middle]) / 2 : ordered[middle];
-        }
     }
 }

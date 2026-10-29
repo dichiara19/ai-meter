@@ -92,7 +92,8 @@ namespace AIMeter
             {
                 if (p.Models != null && !p.Running && p.Sessions.Count == 0) continue;   // modelli locali: la scheda solo se c'è qualcosa da mostrare
                 string id = p.Id;
-                var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.Login);
+                string list = id + ".sessions";
+                var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.Login, C.IsExpanded(list), () => C.ToggleExpanded(list));
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
                 body.Children.Add(card);
             }

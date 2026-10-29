@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -163,6 +164,8 @@ namespace AIMeter
         private HistoryWindow historyWindow;
         private HistoryStore historyStore;
         private HistoryCollector historyCollector;
+        internal ConsumptionMonitor Consumption { get; private set; }
+        private List<ConsumptionNotice> pendingConsumption = new List<ConsumptionNotice>();   // Guarded by itself.
         private string pendingFeedback;
         public string HistoryError { get; private set; }
         private Window menuHost;
@@ -207,6 +210,7 @@ namespace AIMeter
             collector = new Collector(Settings);
             historyStore = new HistoryStore(Path.Combine(Settings.Folder, "history.sqlite3"));
             historyCollector = new HistoryCollector(historyStore);
+            Consumption = new ConsumptionMonitor(historyStore);
             Theme.Apply(Settings);
 
             CreateFlyout();
@@ -272,6 +276,14 @@ namespace AIMeter
                                 if (HistoryError == null) Program.LogError("history-collection", exception);
                                 HistoryError = exception.Message;
                             }
+                            // Analysis failures never stop collection or the existing quota alerts.
+                            try
+                            {
+                                var notices = Consumption.Process(DateTime.UtcNow,
+                                    Settings.ConsumptionAlerts ? Settings.ConsumptionAlertsSince.ToUniversalTime() : (DateTime?)null, TimeZoneInfo.Local);
+                                lock (pendingConsumption) pendingConsumption.AddRange(notices);
+                            }
+                            catch (Exception exception) { Program.LogError("consumption-analysis", exception); }
                         }
                     }
                 }
@@ -518,6 +530,12 @@ namespace AIMeter
             settingsWindow.Activate();
         }
 
+        public void OpenSettings(string page)
+        {
+            OpenSettings();
+            settingsWindow.Open(page);
+        }
+
         /// <summary>Open Claude Code sign-in in a terminal; the CLI handles authentication.</summary>
         public void LoginClaude()
         {
@@ -672,11 +690,38 @@ namespace AIMeter
             if (Program.Demo) { foreach (var p in s.Providers) p.Tip = Alerts.TipFor(p, Settings, DateTime.Now); return; }
             if (alerts == null) alerts = new Alerts();
             var list = alerts.Check(s, Settings);
-            if (list.Count == 0) { NotifyFeedback(); return; }
+            // Consumption notices join the same balloon, so they never compete with low-quota warnings.
+            List<ConsumptionNotice> consumption;
+            lock (pendingConsumption) { consumption = pendingConsumption.ToList(); pendingConsumption.Clear(); }
+            // A notice delayed past its relevance stays visible in the history instead of interrupting late.
+            consumption = consumption.Where(c => Settings.ConsumptionAlerts && (DateTime.UtcNow - c.EventUtc).TotalMinutes <= 30).ToList();
+            if (list.Count == 0 && consumption.Count == 0) { if (!SuggestConsumptionAlerts()) NotifyFeedback(); return; }
+            Action open = () => { if (!flyout.IsVisible) ToggleFlyout(); };
+            if (list.Count == 0)
+            {
+                var c = consumption[consumption.Count - 1];
+                list.Add(Tuple.Create(c.Title, c.Text));
+                open = () => OpenHistory();
+                consumption.RemoveAt(consumption.Count - 1);
+            }
+            int others = list.Count - 1 + consumption.Count;
             var n = list[list.Count - 1];
-            string text = list.Count > 1 ? n.Item2 + "\n" + L.N(list.Count - 1, "+{0} other notice", "+{0} other notices") : n.Item2;
-            balloonAction = () => { if (!flyout.IsVisible) ToggleFlyout(); };
+            string text = others > 0 ? n.Item2 + "\n" + L.N(others, "+{0} other notice", "+{0} other notices") : n.Item2;
+            balloonAction = open;
             tray.ShowBalloonTip(15000, n.Item1, text, Forms.ToolTipIcon.None);
+        }
+
+        /// <summary>Suggest the opt-in once, when at least one scope is ready. Returns whether a balloon was shown.</summary>
+        private bool SuggestConsumptionAlerts()
+        {
+            if (Settings.ConsumptionAlerts || Settings.ConsumptionSuggested || !Settings.HistoryEnabled) return false;
+            if (!Consumption.Readiness.Any(r => r.State == ReadinessState.Ready)) return false;
+            Settings.ConsumptionSuggested = true;
+            Settings.Save();
+            balloonAction = () => OpenSettings("history");
+            tray.ShowBalloonTip(15000, L.T("Unusual consumption alerts are available"),
+                L.T("Your history is now enough to compare consumption with your usual range. Open Settings to turn on these notifications."), Forms.ToolTipIcon.None);
+            return true;
         }
 
         private void NotifyFeedback()

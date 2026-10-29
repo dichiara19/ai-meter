@@ -36,7 +36,7 @@ namespace AIMeter
 
         internal HistoryWindow(Controller controller, HistoryStore store)
         {
-            this.controller = controller; this.store = store; analysis = new HistoryAnalysis(store);
+            this.controller = controller; this.store = store; analysis = new HistoryAnalysis(store, controller.Consumption);
             Title = L.T("Usage history"); Width = Math.Min(1160, SystemParameters.WorkArea.Width - 32); Height = Math.Min(860, SystemParameters.WorkArea.Height - 32);
             MinWidth = Math.Min(660, Width); MinHeight = Math.Min(480, Height);
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -204,20 +204,94 @@ namespace AIMeter
             else overview.Children.Add(Empty("Session measurements are not available yet", "Quota readings can be available before a supported tool records session metrics.", null, null));
 
             if (report.Models.Count > 0) overview.Children.Add(ModelsCard());
-            if (report.Signals.Count > 0)
-            {
-                var content = new StackPanel();
-                foreach (var signal in report.Signals) content.Children.Add(Note(L.F(signal.IsPersistent ? "Persistent higher quota consumption: {0} · {1} ({2})." : "Unusually fast quota consumption: {0} · {1} ({2}).",
-                    HistoryVisuals.ProviderName(signal.Provider), MetricLabel(signal.Metric), signal.Ratio > 0 ? signal.Ratio.ToString("0.0", L.Culture) + "×" : L.T("above baseline"))));
-                overview.Children.Add(Card("Consumption signals", "Signals describe recorded quota rates. They cannot prove a change to provider billing rules.", content));
-            }
-            else if (report.Trend.Count == 0 || report.Trend.All(row => Text(row[6]).Contains("unidentified-account")))
+            if (report.Trend.Count == 0 || report.Trend.All(row => Text(row[6]).Contains("unidentified-account")))
                 overview.Children.Add(Empty("No comparable quota readings yet", "Automatic comparisons need percentage readings with an identified account. Session measurements can still be explored separately.", null, null));
-            else if (report.ComparisonIntervals < 8)
-                overview.Children.Add(Empty("Building your comparison baseline", L.F("{0} of 8 comparable active intervals recorded. Until there is enough history, changes in consumption cannot be assessed.", report.ComparisonIntervals), null, null));
-            else overview.Children.Add(Card("Consumption signals", "No unusual rate in the available comparisons. Task complexity and other activity can still affect consumption."));
+            else overview.Children.Add(ConsumptionCard());
             overview.Children.Add(FeedbackCard());
             overview.Children.Add(CoverageCard());
+        }
+
+        /// <summary>
+        /// Readiness per limit and recorded episodes, from the same stored evidence as notifications.
+        /// Overlapping sessions are shown as candidates; the user interprets the cause.
+        /// </summary>
+        private Border ConsumptionCard()
+        {
+            var content = new StackPanel();
+            foreach (var r in report.Readiness.Where(r => r.Scope.IsIdentified))
+            {
+                var line = new WrapPanel();
+                line.Children.Add(Note(HistoryVisuals.ProviderName(r.Scope.Provider) + " · " + MetricLabel(r.Scope.Metric) + " — " + L.T(StateLabel(r.State)) + ": " + L.F(r.Reason, r.Arguments)));
+                if (r.State == ReadinessState.ReferenceChanged)
+                {
+                    string key = r.Scope.Key;
+                    line.Children.Add(Button("Rebuild the reference", () => { controller.Consumption.RebuildReference(key, DateTime.UtcNow); Reload(); }));
+                }
+                content.Children.Add(line);
+            }
+            if (report.Readiness.Count == 0) content.Children.Add(Note("Comparisons start once readings with an identified account have been processed."));
+
+            foreach (var e in report.Episodes)
+            {
+                var block = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+                block.Children.Add(Ui.Text(L.F("{0} · {1} · {2}, {3}", HistoryVisuals.ProviderName(e.Provider), MetricLabel(e.Metric),
+                    e.OpenedUtc.ToLocalTime().ToString("g", L.Culture), L.T(EpisodeLabel(e))), 14, "Text", FontWeights.SemiBold));
+                block.Children.Add(Note(ConsumptionMonitor.Explain(e.Evidence)));
+                block.Children.Add(Note(L.F("Comparison: {0}, {1} days with consumption between {2} and {3}.", L.T(ContextLabel(Json.Str(e.Baseline, "context"))),
+                    Number((long)(Json.Num(e.Baseline, "activeDays") ?? 0)), Day(Json.Str(e.Baseline, "fromUtc")), Day(Json.Str(e.Baseline, "toUtc")))));
+                if (!e.WasEligible) block.Children.Add(Note("Recorded without a notification."));
+                AddCandidates(block, e);
+                if (e.State == AlertEpisode.Open)
+                {
+                    string id = e.Id;
+                    block.Children.Add(Button("This was expected", () => { controller.Consumption.Acknowledge(id); Reload(); }));
+                }
+                content.Children.Add(block);
+            }
+            return Card("Unusual consumption", "Compared with your own observed history. A departure shows what changed, not why: providers, task complexity and other devices can all play a part.", content);
+        }
+
+        private void AddCandidates(StackPanel block, AlertEpisode e)
+        {
+            if (e.Candidates.Count == 0)
+            {
+                block.Children.Add(Note("No locally recorded session overlaps this interval. The consumption may come from another device, a web chat or an unsupported tool."));
+                return;
+            }
+            block.Children.Add(Note(e.Candidates.Count == 1
+                ? "Possibly associated, because its responses overlap the interval. Sessions carry no account, so the match is by service only:"
+                : "Several sessions overlap the interval; the evidence cannot distinguish them. Sessions carry no account, so the match is by service only:"));
+            foreach (var c in e.Candidates)
+            {
+                var row = new WrapPanel();
+                string label = L.F("{0} · {1} · from {2} · {3} responses · ref. {4}", c.Agent, c.Model ?? "—", c.First.ToString("t", L.Culture), Number(c.Replies), c.SessionId.Substring(0, Math.Min(6, c.SessionId.Length)));
+                string measures = L.F("Input {0} · output {1} · cache read {2} · cache write {3} · computed API cost {4}",
+                    Measure(c.Input), Measure(c.Output), Measure(c.CacheRead), Measure(c.CacheWrite), c.Cost.HasValue ? c.Cost.Value.ToString("0.00", L.Culture) + " USD" : "—");
+                var text = Note(label + "\n" + measures); text.Margin = new Thickness(12, 2, 12, 6);
+                row.Children.Add(text);
+                string id = c.SessionId;
+                row.Children.Add(Button("Open session", () => FocusSession(id)));
+                block.Children.Add(row);
+            }
+        }
+
+        private static string Measure(long? value) { return value.HasValue ? Number(value.Value) : "—"; }
+        private static string Day(string iso)
+        {
+            DateTime at;
+            return DateTime.TryParse(iso, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out at) ? at.ToLocalTime().ToString("d", L.Culture) : "—";
+        }
+        private static string ContextLabel(string context) { return context == "weekday" ? "weekdays" : context == "weekend" ? "weekends" : "all days"; }
+        private static string EpisodeLabel(AlertEpisode e) { return e.State == AlertEpisode.Open ? "ongoing" : e.State == AlertEpisode.AcknowledgedExpected ? "marked as expected" : "ended"; }
+        private static string StateLabel(ReadinessState state)
+        {
+            switch (state)
+            {
+                case ReadinessState.Ready: return "Ready";
+                case ReadinessState.Learning: return "Learning";
+                case ReadinessState.ReferenceChanged: return "Reference changed";
+                default: return "Temporarily unavailable";
+            }
         }
 
         private static Border Counter(string label, string value, string hint)
@@ -436,7 +510,7 @@ namespace AIMeter
         private static string Number(object value) { return value == null ? "—" : Convert.ToInt64(value).ToString("N0", L.Culture); }
         private static string Amount(object value) { return value == null ? "—" : Convert.ToDouble(value).ToString("0.0000", L.Culture); }
         private static string AccountLabel(object account, bool unknown) { string text = Text(account); return unknown ? L.T("Unknown account") : text.Substring(0, Math.Min(8, text.Length)); }
-        private static string MetricLabel(string metric) { var parts = metric.Split(new[] { '|' }, 2); return L.T(parts[0]) + (parts.Length > 1 && parts[1].Length > 0 ? " · " + parts[1] : ""); }
+        private static string MetricLabel(string metric) { return HistoryVisuals.MetricLabel(metric); }
 
         private static DataGrid Table(string[] columns, IEnumerable<string[]> rows)
         {
