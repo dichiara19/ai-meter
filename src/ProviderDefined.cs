@@ -767,7 +767,7 @@ namespace AIMeter
             var w = new UsageWindow
             {
                 Label = Json.Str(spec, "label") ?? "Usage",
-                Short = Json.Str(spec, "short") ?? "",
+                Short = UsageWindow.NormaliseShort(Json.Str(spec, "short") ?? ""),
                 ResetsAt = JPath.Date(JPath.Get(doc, Json.Str(spec, "resets"))),
                 StartedAt = JPath.Date(JPath.Get(doc, Json.Str(spec, "starts"))),
             };

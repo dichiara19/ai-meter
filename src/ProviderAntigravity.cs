@@ -215,11 +215,11 @@ namespace AIMeter
                     DateTime? reset = Json.FromIso(Json.Str(b, "resetTime"));
                     double? frac = Json.Num(b, "remainingFraction");
                     if (frac == null && reset == null) continue;
-                    bool first = !u.Windows.Any(w => w.Short == (five ? "5h" : "7g"));
+                    bool first = !u.Windows.Any(w => w.Short == (five ? UsageWindow.ShortFiveHours : UsageWindow.ShortWeek));
                     u.Windows.Add(new UsageWindow
                     {
                         Label = five ? "Session 5 h" : "Week", Suffix = name,
-                        Short = first ? (five ? "5h" : "7g") : "m",
+                        Short = first ? (five ? UsageWindow.ShortFiveHours : UsageWindow.ShortWeek) : "m",
                         Used = Math.Max(0, Math.Min(100, (1 - (frac ?? 0)) * 100)), ResetsAt = reset,
                         StartedAt = reset.HasValue ? reset.Value - (five ? TimeSpan.FromHours(5) : TimeSpan.FromDays(7)) : (DateTime?)null,
                     });

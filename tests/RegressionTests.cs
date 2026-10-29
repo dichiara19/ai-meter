@@ -47,6 +47,7 @@ namespace AIMeter
             Test("Money changes invalidate the render signature", MoneySignature);
             Test("Every supported language describes estimates and cached data", Translations);
             Test("Budgets reject non-finite amounts", InvalidBudget);
+            Test("Earlier Italian window codes in definitions keep their length", LegacyWindowCodes);
             StartupRegressionTests.Register(Test);
             HistoryRegressionTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
@@ -495,6 +496,19 @@ namespace AIMeter
                 Settings.Current.Budgets["fixture"] = amount + "|day";
                 double value; string period;
                 Assert(!SpendTracker.Budget(Settings.Current, "fixture", out value, out period), "Accepted invalid amount " + amount);
+            }
+        }
+
+        private static void LegacyWindowCodes()
+        {
+            var limit = typeof(DefinedProvider).GetMethod("Limit", Private);
+            var document = new Dictionary<string, object> { { "pct", 10 } };
+            var expected = new Dictionary<string, TimeSpan> { { "7g", TimeSpan.FromDays(7) }, { "mese", TimeSpan.FromDays(30) }, { "1g", TimeSpan.FromDays(1) }, { "7d", TimeSpan.FromDays(7) } };
+            foreach (var pair in expected)
+            {
+                var spec = new Dictionary<string, object> { { "label", "Usage" }, { "short", pair.Key }, { "percent", "pct" } };
+                var window = (UsageWindow)limit.Invoke(null, new object[] { document, spec });
+                Assert(window != null && window.Length == pair.Value, "Wrong window length for short code " + pair.Key);
             }
         }
     }

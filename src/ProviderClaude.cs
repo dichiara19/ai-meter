@@ -272,9 +272,9 @@ namespace AIMeter
                     if (pct == null) continue;
                     DateTime? resets = Json.FromIso(Json.Str(l, "resets_at"));
                     if (kind == "session")
-                        u.Windows.Add(new UsageWindow { Label = "Session 5 h", Short = "5h", Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddHours(-5) : (DateTime?)null });
+                        u.Windows.Add(new UsageWindow { Label = "Session 5 h", Short = UsageWindow.ShortFiveHours, Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddHours(-5) : (DateTime?)null });
                     else if (kind == "weekly_all")
-                        u.Windows.Add(new UsageWindow { Label = "Week", Short = "7g", Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddDays(-7) : (DateTime?)null });
+                        u.Windows.Add(new UsageWindow { Label = "Week", Short = UsageWindow.ShortWeek, Used = pct.Value, ResetsAt = resets, StartedAt = resets.HasValue ? resets.Value.AddDays(-7) : (DateTime?)null });
                     else if (kind == "weekly_scoped")
                     {
                         string model = Json.Str(Json.Obj(Json.Obj(l, "scope"), "model"), "display_name");
@@ -284,8 +284,8 @@ namespace AIMeter
             }
             if (u.Windows.Count == 0)
             {
-                AddWindow(u, d, "five_hour", "Session 5 h", null, "5h", TimeSpan.FromHours(5));
-                AddWindow(u, d, "seven_day", "Week", null, "7g", TimeSpan.FromDays(7));
+                AddWindow(u, d, "five_hour", "Session 5 h", null, UsageWindow.ShortFiveHours, TimeSpan.FromHours(5));
+                AddWindow(u, d, "seven_day", "Week", null, UsageWindow.ShortWeek, TimeSpan.FromDays(7));
                 AddWindow(u, d, "seven_day_opus", "Week", "Opus", "m", TimeSpan.FromDays(7));
                 AddWindow(u, d, "seven_day_sonnet", "Week", "Sonnet", "m", TimeSpan.FromDays(7));
             }
@@ -380,8 +380,8 @@ namespace AIMeter
                 var last = samples[samples.Length - 1] as Dictionary<string, object>;
                 var u = Json.Obj(last, "u");
                 var usage = new Usage { Source = "cache", At = Json.FromUnixMs(Json.Num(last, "t")) ?? fi.LastWriteTime };
-                if (Json.Num(u, "fh") != null) usage.Windows.Add(new UsageWindow { Label = "Session 5 h", Short = "5h", Used = Json.Num(u, "fh").Value });
-                if (Json.Num(u, "sd") != null) usage.Windows.Add(new UsageWindow { Label = "Week", Short = "7g", Used = Json.Num(u, "sd").Value });
+                if (Json.Num(u, "fh") != null) usage.Windows.Add(new UsageWindow { Label = "Session 5 h", Short = UsageWindow.ShortFiveHours, Used = Json.Num(u, "fh").Value });
+                if (Json.Num(u, "sd") != null) usage.Windows.Add(new UsageWindow { Label = "Week", Short = UsageWindow.ShortWeek, Used = Json.Num(u, "sd").Value });
                 return usage;
             }) as Usage;
         }

@@ -73,13 +73,13 @@ A path picks a value from the JSON answer: `data.usage`, `items[0].name`, `items
 | Field | Meaning |
 |---|---|
 | `label` | English text, translatable in `i18n`. |
-| `short` | Label for the compact pill (for example `5h`, `7d`). |
+| `short` | Window kind: `5h`, `7d`, `month` or `1d` for the main window of that length, `m` for a secondary limit, `$` for money. The older codes `7g`, `mese` and `1g` are still accepted. |
 | `percent` | Path of the used percentage; `percentScale: 100` if the API returns a fraction. |
 | `used`, `limit`, `remaining` | Paths of amounts: the percentage is computed from two of them. |
 | `currency`, `currencyPath`, `scale` | With a currency the row shows money left (`scale: 0.01` for cents). |
 | `balance` | Path of a balance with no limit: only the amount is shown, without a bar. |
 | `unlimited` | Path that, when true, shows *unlimited*. |
-| `starts`, `resets` | Paths of the start and reset time: ISO text, Unix seconds or milliseconds. With both, AI Meter knows the length of the window: it uses it for the forecast, the reset notification and the tip before a reset (`short` values `5h`, `7g` and `mese` also tell it the length). |
+| `starts`, `resets` | Paths of the start and reset time: ISO text, Unix seconds or milliseconds. With both, AI Meter knows the length of the window: it uses it for the forecast, the reset notification and the tip before a reset (`short` values `5h`, `7d`, `month` and `1d` also tell it the length). |
 | `when`, `unless` | Paths (one or a list): the row is shown only if all `when` are true and no `unless` is. |
 
 ### `notes`

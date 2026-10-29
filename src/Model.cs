@@ -9,9 +9,13 @@ namespace AIMeter
 {
     internal sealed class UsageWindow
     {
+        // Language-neutral Short codes for the main window of each length. They select the default pill limit and
+        // the weekly display, and give the length of windows without known boundaries.
+        public const string ShortFiveHours = "5h", ShortWeek = "7d", ShortMonth = "month", ShortDay = "1d";
+
         public string Label;      // English translation key, resolved by Ui.LabelOf when displayed.
         public string Suffix;     // Untranslated suffix, such as a model name.
-        public string Short;      // Compact pill label, such as "5h" or "7g".
+        public string Short;      // Window kind: ShortFiveHours, ShortWeek, ShortMonth, ShortDay, "m" for a secondary limit or "$".
         public double Used;       // Percentage used, from 0 to 100.
         public DateTime? ResetsAt; // Local time.
         public DateTime? StartedAt; // Window start, when known or inferred from its duration.
@@ -39,12 +43,24 @@ namespace AIMeter
             get
             {
                 if (StartedAt.HasValue && ResetsAt.HasValue && ResetsAt.Value > StartedAt.Value) return ResetsAt.Value - StartedAt.Value;
-                if (Short == "5h" || Label == "Session 5 h") return TimeSpan.FromHours(5);
-                if (Short == "7g" || Label == "Week") return TimeSpan.FromDays(7);
-                if (Short == "mese") return TimeSpan.FromDays(30);
-                if (Short == "1g") return TimeSpan.FromDays(1);
+                if (Short == ShortFiveHours || Label == "Session 5 h") return TimeSpan.FromHours(5);
+                if (Short == ShortWeek || Label == "Week") return TimeSpan.FromDays(7);
+                if (Short == ShortMonth) return TimeSpan.FromDays(30);
+                if (Short == ShortDay) return TimeSpan.FromDays(1);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Map the Italian codes used by earlier service definitions ("7g", "mese", "1g") to the current ones,
+        /// so user-written definitions keep their window length. Other values are returned unchanged.
+        /// </summary>
+        public static string NormaliseShort(string code)
+        {
+            if (code == "7g") return ShortWeek;
+            if (code == "mese") return ShortMonth;
+            if (code == "1g") return ShortDay;
+            return code;
         }
 
         /// <summary>Whether a current percentage is available for bars, alerts and forecasts.</summary>

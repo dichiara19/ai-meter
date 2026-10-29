@@ -200,7 +200,7 @@ namespace AIMeter
         public static UsageWindow Primary(Usage u)
         {
             if (u == null) return null;
-            return u.Windows.FirstOrDefault(w => w.Short == "5h") ?? u.Windows.FirstOrDefault(w => w.Spent == null && w.HasPercent)
+            return u.Windows.FirstOrDefault(w => w.Short == UsageWindow.ShortFiveHours) ?? u.Windows.FirstOrDefault(w => w.Spent == null && w.HasPercent)
                    // Use the service's monetary limit by default; a user budget requires an explicit choice.
                    ?? u.Windows.FirstOrDefault(w => w.HasPercent && !w.Budget && !w.Hidden);
         }
@@ -227,7 +227,7 @@ namespace AIMeter
                 if (w != null) return new[] { w };
             }
             var five = Primary(p.Usage);
-            var week = p.Usage.Windows.FirstOrDefault(w => w.Short == "7g");
+            var week = p.Usage.Windows.FirstOrDefault(w => w.Short == UsageWindow.ShortWeek);
             var list = metric == "week" ? new[] { week ?? five } : metric == "both" ? new[] { five, week } : new[] { five };
             return list.Where(x => x != null).Distinct().ToArray();
         }

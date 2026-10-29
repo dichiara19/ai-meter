@@ -84,7 +84,7 @@ namespace AIMeter
         {
             var snapshot = SnapshotAt(at);
             var usage = new Usage { At = at, Identity = account, Source = "live" };
-            usage.Windows.Add(new UsageWindow { Label = "Week", Short = "7g", ResetsAt = reset, Used = used });
+            usage.Windows.Add(new UsageWindow { Label = "Week", Short = UsageWindow.ShortWeek, ResetsAt = reset, Used = used });
             snapshot.Providers.Add(new ProviderState { Id = "fixture", Usage = usage });
             return snapshot;
         }

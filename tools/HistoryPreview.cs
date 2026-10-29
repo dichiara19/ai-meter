@@ -35,8 +35,8 @@ namespace AIMeter
                 DateTime at = now.AddMinutes((i - 20) * 5);
                 var snapshot = new Snapshot { Taken = at };
                 var usage = new Usage { Source = "live", Identity = "synthetic-account", At = at };
-                usage.Windows.Add(new UsageWindow { Label = "Session 5 h", Short = "5h", Used = 10 + i * 2.1, ResetsAt = now.AddHours(2), StartedAt = now.AddHours(-3) });
-                usage.Windows.Add(new UsageWindow { Label = "Week", Short = "7g", Used = 24 + i * 0.5, ResetsAt = now.AddDays(3), StartedAt = now.AddDays(-4) });
+                usage.Windows.Add(new UsageWindow { Label = "Session 5 h", Short = UsageWindow.ShortFiveHours, Used = 10 + i * 2.1, ResetsAt = now.AddHours(2), StartedAt = now.AddHours(-3) });
+                usage.Windows.Add(new UsageWindow { Label = "Week", Short = UsageWindow.ShortWeek, Used = 24 + i * 0.5, ResetsAt = now.AddDays(3), StartedAt = now.AddDays(-4) });
                 usage.Windows.Add(new UsageWindow { Label = "Spent today", Amount = 2.35 + i * 0.12, AmountUnit = "USD", IsEstimated = true, NoBar = true });
                 snapshot.Providers.Add(new ProviderState { Id = "claude", Name = "Claude", Plan = "Max", Usage = usage });
                 int index = i;

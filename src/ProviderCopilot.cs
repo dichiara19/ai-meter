@@ -131,7 +131,7 @@ namespace AIMeter
                     if (total == null || rem == null || total <= 0) continue;
                     u.Windows.Add(new UsageWindow
                     {
-                        Label = k == "chat" ? "Chat" : "Completions", Short = u.Windows.Count == 0 ? "mese" : "m",
+                        Label = k == "chat" ? "Chat" : "Completions", Short = u.Windows.Count == 0 ? UsageWindow.ShortMonth : "m",
                         Used = Math.Max(0, Math.Min(100, (total.Value - rem.Value) / total.Value * 100)), ResetsAt = reset,
                         StartedAt = reset.HasValue ? reset.Value.AddMonths(-1) : (DateTime?)null,
                         Detail = Left(rem.Value, total.Value),
@@ -150,7 +150,7 @@ namespace AIMeter
             if (unlimited && !primary) return;   // Secondary unlimited quotas: nothing to show.
             u.Windows.Add(new UsageWindow
             {
-                Label = label, Short = primary && !u.Windows.Any(w => w.Short == "mese") ? "mese" : "m",
+                Label = label, Short = primary && !u.Windows.Any(w => w.Short == UsageWindow.ShortMonth) ? UsageWindow.ShortMonth : "m",
                 Used = unlimited ? 0 : 100 - pctLeft.Value, ResetsAt = reset,
                 StartedAt = reset.HasValue ? reset.Value.AddMonths(-1) : (DateTime?)null,
                 RightText = unlimited ? "unlimited" : null,
