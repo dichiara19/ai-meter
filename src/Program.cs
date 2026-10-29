@@ -78,8 +78,11 @@ namespace AIMeter
                 Native.SetWindowAppId(new System.Windows.Interop.WindowInteropHelper(w).Handle, "AIMeter.App", IconPath, "AI Meter", LaunchCommand);
         }
 
-        /// <summary>--demo uses sample data for previews and screenshots, without network access or notifications.</summary>
-        public static bool Demo { get; private set; }
+        /// <summary>
+        /// Sample data for previews and screenshots, without network access or notifications.
+        /// Set by --demo, or switched at run time from the welcome window, the tray menu or Settings → About.
+        /// </summary>
+        public static bool Demo { get; internal set; }
 
         public static Stream OpenAsset(string name)
         {

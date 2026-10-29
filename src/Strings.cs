@@ -27,7 +27,7 @@ namespace AIMeter
         public static CultureInfo Culture { get; private set; }
         private static Dictionary<string, string> table;
 
-        static L() { RegisterHistoryStrings(); Init("system"); }
+        static L() { RegisterHistoryStrings(); RegisterWelcomeStrings(); Init("system"); }
 
         /// <summary>Use the Windows language for "system", otherwise a supported language code.</summary>
         public static void Init(string setting)

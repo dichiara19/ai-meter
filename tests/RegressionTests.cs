@@ -46,7 +46,7 @@ namespace AIMeter
             Test("Extra-key backoff applies until the key changes", ExtraBackoff);
             Test("Missing choices survive a restart and expire after ten days", MissingChoice);
             Test("Money changes invalidate the render signature", MoneySignature);
-            Test("Every supported language describes estimates and cached data", Translations);
+            Test("Every supported language describes estimates, cached data and the welcome window", Translations);
             Test("Budgets reject non-finite amounts", InvalidBudget);
             Test("Earlier Italian window codes in definitions keep their length", LegacyWindowCodes);
             StartupRegressionTests.Register(Test);
@@ -518,6 +518,8 @@ namespace AIMeter
                 Assert(L.T("Spending unavailable") != "Spending unavailable", "Missing unavailable translation for " + lang);
                 Assert(L.T("{0} estimated since {1}") != "{0} estimated since {1}", "Missing estimate translation for " + lang);
                 Assert(L.T("Last updated {0}") != "Last updated {0}", "Missing cached-data translation for " + lang);
+                foreach (var key in new[] { "Welcome to AI Meter", "Show in the taskbar", "Preview with sample data", "Sample data", "Leave sample data", "Showing sample data" })
+                    Assert(L.T(key) != key, "Missing welcome translation for " + lang + ": " + key);
             }
             L.Init("en");
         }

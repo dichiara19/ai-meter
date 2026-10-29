@@ -71,11 +71,6 @@ namespace AIMeter
             Settings = Settings.Load();
             Settings.Current = Settings;
             bool firstRun = !Settings.FirstRunDone;
-            if (firstRun)
-            {
-                Settings.FirstRunDone = true;
-                Settings.Save();
-            }
             try { Settings.InitialiseStartup(firstRun); } catch (Exception) { }
             L.Init(Settings.Language);
             collector = new Collector(Settings);
@@ -83,6 +78,7 @@ namespace AIMeter
             historyCollector = new HistoryCollector(historyStore);
             Consumption = new ConsumptionMonitor(historyStore);
             Theme.Apply(Settings);
+            bool sampleData = firstRun && AskFirstRunConsent();
 
             CreateFlyout();
             hideDetails.Tick += (o, e) => { hideDetails.Stop(); if (flyout.HoverMode && !flyout.IsMouseOver && (pill == null || !pill.IsMouseOver)) flyout.Hide(); };
@@ -98,7 +94,7 @@ namespace AIMeter
                 Settings.Save();
                 ApplySettings();
             }
-            if (firstRun) ShowPrivacyNotice();
+            if (sampleData) SetSampleData(true);
 
             SystemEvents.SessionSwitch += OnSessionSwitch;
             SystemEvents.PowerModeChanged += OnPowerModeChanged;

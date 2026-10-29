@@ -35,7 +35,10 @@ namespace AIMeter
             page.Children.Add(t);
         }
 
-        private void Group(params FrameworkElement[] rows)
+        private void Group(params FrameworkElement[] rows) { page.Children.Add(Card(rows)); }
+
+        /// <summary>A settings card: rows separated by dividers on the card background.</summary>
+        internal static Border Card(params FrameworkElement[] rows)
         {
             var stack = new StackPanel();
             for (int i = 0; i < rows.Length; i++)
@@ -51,7 +54,7 @@ namespace AIMeter
             var card = new Border { CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Child = stack, Margin = new Thickness(0, 0, 0, 4) };
             card.SetResourceReference(Border.BackgroundProperty, "Card");
             card.SetResourceReference(Border.BorderBrushProperty, "CardStroke");
-            page.Children.Add(card);
+            return card;
         }
 
         /// <summary>
@@ -80,7 +83,7 @@ namespace AIMeter
             return host;
         }
 
-        private static FrameworkElement Row(FrameworkElement icon, string title, string description, FrameworkElement control, FrameworkElement extra = null)
+        internal static FrameworkElement Row(FrameworkElement icon, string title, string description, FrameworkElement control, FrameworkElement extra = null)
         {
             // Match Windows Settings card heights: 68 px with an icon, 56 px without, including margins.
             var g = new Grid { MinHeight = icon != null ? 48 : 36, Margin = new Thickness(16, 10, 16, 10) };
@@ -126,7 +129,7 @@ namespace AIMeter
             return sp;
         }
 
-        private static CheckBox Toggle(bool value, Action<bool> changed)
+        internal static CheckBox Toggle(bool value, Action<bool> changed)
         {
             var cb = new CheckBox { IsChecked = value };
             cb.SetResourceReference(FrameworkElement.StyleProperty, "ToggleSwitch");

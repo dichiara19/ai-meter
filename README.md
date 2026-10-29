@@ -233,12 +233,12 @@ Local usage history is enabled by default. Its SQLite archive contains quota/spe
 
 Network connections are limited to reading your own usage:
 
-- **Claude limits** (on by default): a request to Anthropic's API (`api.anthropic.com`) with the OAuth access token of your existing Claude Code login. Governed by [Anthropic's privacy policy](https://www.anthropic.com/legal/privacy). You are told about it on first launch and can turn it off in Settings → *Limiti in tempo reale*.
+- **Claude limits** (on by default): a request to Anthropic's API (`api.anthropic.com`) with the OAuth access token of your existing Claude Code login. Governed by [Anthropic's privacy policy](https://www.anthropic.com/legal/privacy). You choose it on the first-launch screen and can turn it off in Settings → Services → Claude → *Real-time limits*.
 - **Codex limits**: requested by the installed `codex` program with its own login; AI Meter never handles that token.
 - **GitHub Copilot quotas** (off by default): a request to `api.github.com`, only if you enable Copilot and sign in to GitHub.
 - **Google Antigravity quotas** (off by default): requests to `cloudcode-pa.googleapis.com`, only if you enable Antigravity, with the sign-in of Antigravity CLI.
 - **Cursor usage**: a request to `cursor.com` with the Cursor app's own sign-in, only if Cursor is enabled.
-- **OpenRouter, Vercel AI Gateway, Experiential Labs, DeepSeek, Kimi**: a request to `openrouter.ai`, `ai-gateway.vercel.sh`, `api.experientiallabs.ai`, `api.deepseek.com` or `api.moonshot.ai` with your API key, only if you turn the service on and a key is added or found on the PC. A key found in another program is read where it is, never copied, and sent only to its own service; values that are commands (`!…` in Pi) are never run.
+- **OpenRouter, Vercel AI Gateway, Experiential Labs, DeepSeek, Kimi**: a request to `openrouter.ai`, `ai-gateway.vercel.sh`, `api.experientiallabs.ai`, `api.deepseek.com` or `api.moonshot.ai` with your API key, only if you turn the service on and a key is added or found on the PC. Keys saved by other programs are looked for only if you allow it on the first-launch screen or in Settings → Services; a key found there is read where it is, never copied, and sent only to its own service; values that are commands (`!…` in Pi) are never run.
 - **Definitions you add**: a request to the address named in the file.
 - **Local models**: requests to `127.0.0.1` only, which never leave the PC.
 
