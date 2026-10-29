@@ -20,8 +20,6 @@ namespace AIMeter
     {
         public event Action Saved;
 
-        public ApiKeyWindow(ServiceDefinition d) : this(d, null) { }
-
         /// <summary>An optional slot saves an extra credential as &lt;id&gt;.&lt;slot&gt;; null selects the main key.</summary>
         public ApiKeyWindow(ServiceDefinition d, string slot)
         {

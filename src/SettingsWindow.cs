@@ -50,8 +50,6 @@ namespace AIMeter
             Title = L.T("AI Meter Settings");
             Width = 1000; Height = 740; MinWidth = 560; MinHeight = 480;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            FontFamily = Theme.Font;
-            UseLayoutRounding = true;
             Icon = Controller.AppIconImage();
             Program.Brand(this);
             Ui.MakeSettingsWindow(this);

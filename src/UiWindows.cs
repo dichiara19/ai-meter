@@ -50,7 +50,6 @@ namespace AIMeter
             w.SourceInitialized += (o, e) =>
             {
                 var hwnd = new WindowInteropHelper(w).Handle;
-                var src = HwndSource.FromHwnd(hwnd);
                 if (tool) Native.AddExStyle(hwnd, Native.WS_EX_TOOLWINDOW | (noActivate ? Native.WS_EX_NOACTIVATE : 0), Native.WS_EX_APPWINDOW);
                 // Disable the system menu so DWM does not overlay caption buttons on the content.
                 int style = Native.GetWindowLong(hwnd, Native.GWL_STYLE);
