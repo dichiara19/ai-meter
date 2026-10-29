@@ -25,14 +25,12 @@ namespace AIMeter
             test("History export is complete and excludes source content", SafeExport);
             test("Deletion clears metrics, ratings, offsets and previous baselines", DeleteHistory);
             test("History identifies collection interruptions without synthetic readings", CollectionGaps);
-            test("Quota signals ignore resets, gaps and unidentified accounts", QuotaSignals);
             test("Unsupported newer history schemas are preserved", FutureSchema);
             test("History retains numeric balances and explicit spending quality", StandaloneAmounts);
             test("History preserves each extra response's measurement time", ExtraTimestamp);
             test("Invalid and extreme source data cannot interrupt collection", InvalidSourceData);
             test("Independent Pi replies without numeric timestamps remain distinct", IndependentPiReplies);
             test("Session totals respect the selected period", SelectedPeriod);
-            test("Idle intervals cannot manufacture a quota anomaly baseline", IdleBaseline);
             test("History strings are translated in every supported language", Translations);
             test("Short collection pauses remain explicit in history", ShortPause);
             test("Resuming Windows cannot collect through a locked session", LockedResume);
@@ -40,7 +38,6 @@ namespace AIMeter
             test("Invalid provider numbers remain unavailable while unlimited is explicit", InvalidProviderNumbers);
             test("Daily history uses valid local dates across midnight", LocalDailyHistory);
             test("An empty filter is distinguished from a new archive", FilteredHistory);
-            test("Comparison readiness requires active, account-scoped intervals", ComparisonReadiness);
             test("Daily boundaries include skipped and repeated local midnights", MidnightTransitions);
         }
 
@@ -231,20 +228,6 @@ namespace AIMeter
             Assert(Count(store, "coverage") == 1 && Count(store, "observations") == 0, "An interruption was hidden or filled with synthetic readings.");
         }
 
-        private static void QuotaSignals()
-        {
-            var at = DateTime.Now; long reset = HistoryStore.Stamp(at.AddDays(1)); var rows = new List<object[]>();
-            for (int i = 0; i < 12; i++) rows.Add(new object[] { "fixture", "account", "Week|", reset, HistoryStore.Stamp(at.AddMinutes(i * 5)), (double)i, "live" });
-            rows.Add(new object[] { "fixture", "account", "Week|", reset, HistoryStore.Stamp(at.AddMinutes(60)), 30.0, "live" });
-            Assert(HistoryAnalysis.Signals(rows).Count == 1, "A clear rate spike was missed.");
-            rows[rows.Count - 1][3] = reset + 1;
-            Assert(HistoryAnalysis.Signals(rows).Count == 0, "A reset became an anomaly.");
-            rows[rows.Count - 1][3] = reset; rows[rows.Count - 1][4] = HistoryStore.Stamp(at.AddHours(4));
-            Assert(HistoryAnalysis.Signals(rows).Count == 0, "A collection gap became an anomaly.");
-            foreach (var row in rows) row[6] = "live:unidentified-account";
-            Assert(HistoryAnalysis.Signals(rows).Count == 0, "Unknown accounts were compared.");
-        }
-
         private static void FutureSchema()
         {
             var store = Store();
@@ -300,14 +283,6 @@ namespace AIMeter
             Insert(store, Event("older", "session", at), Event("newer", "session", at.AddHours(1)));
             var session = store.Sessions(at.AddMinutes(30), "", 10)[0];
             Assert(session.Replies == 1 && session.Input == 100, "Session totals included responses outside the selected period.");
-        }
-
-        private static void IdleBaseline()
-        {
-            var at = DateTime.Now; var rows = new List<object[]>(); long reset = HistoryStore.Stamp(at.AddDays(1));
-            for (int i = 0; i < 12; i++) rows.Add(new object[] { "fixture", "account", "Week|", reset, HistoryStore.Stamp(at.AddMinutes(i * 5)), 0.0, "live" });
-            rows.Add(new object[] { "fixture", "account", "Week|", reset, HistoryStore.Stamp(at.AddMinutes(60)), 8.0, "live" });
-            Assert(HistoryAnalysis.Signals(rows).Count == 0, "Ordinary activity after idle time became an anomaly.");
         }
 
         private static void Translations()
@@ -390,16 +365,6 @@ namespace AIMeter
             Insert(store, Event("reply", "session", store.Started));
             var filtered = analysis.Read(DateTime.MinValue, "another-provider");
             Assert(filtered.HasAnyHistory && filtered.Events == 0 && filtered.SessionCount == 0, "A filter with no matches looked like an empty archive.");
-        }
-
-        private static void ComparisonReadiness()
-        {
-            var at = DateTime.Now; long reset = HistoryStore.Stamp(at.AddDays(1)); var rows = new List<object[]>();
-            for (int i = 0; i < 9; i++) rows.Add(new object[] { "fixture", "account", "Week|", reset, HistoryStore.Stamp(at.AddMinutes(i * 5)), (double)i, "live" });
-            Assert(HistoryAnalysis.Compare(rows.Take(2).ToList()).Intervals == 1, "A first interval claimed a complete comparison baseline.");
-            Assert(HistoryAnalysis.Compare(rows).Intervals == 8, "Active intervals did not establish comparison readiness.");
-            foreach (var row in rows) row[6] = "live:unidentified-account";
-            Assert(HistoryAnalysis.Compare(rows).Intervals == 0, "Unidentified accounts established a comparison baseline.");
         }
 
         private static void MidnightTransitions()

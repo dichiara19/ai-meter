@@ -50,6 +50,7 @@ namespace AIMeter
             Test("Budgets reject non-finite amounts", InvalidBudget);
             StartupRegressionTests.Register(Test);
             HistoryRegressionTests.Register(Test);
+            ConsumptionTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 
@@ -69,7 +70,7 @@ namespace AIMeter
             s.NotifyReset = true;
             Settings.Current = s;
             try { action(); }
-            catch (Exception e) { throw new Exception("FAIL: " + name, e); }
+            catch (Exception e) { throw new Exception("FAIL: " + name + ": " + e.Message, e); }
             passed++;
             Console.WriteLine("PASS: " + name);
         }
