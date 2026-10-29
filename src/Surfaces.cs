@@ -90,7 +90,7 @@ namespace AIMeter
             if (s.Providers.Count == 0) { body.Children.Add(EmptyState()); return; }
             foreach (var p in s.Providers)
             {
-                if (p.Models != null && !p.Running && p.Sessions.Count == 0) continue;   // Local models: show the card only when there is something to display.
+                if (p.IsIdleLocal) continue;   // Local models: show the card only when there is something to display.
                 string id = p.Id;
                 var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.Login);
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
@@ -276,7 +276,7 @@ namespace AIMeter
             if (s.Providers.Count == 0) body.Children.Add(DesktopWidget.EmptyState());
             foreach (var p in s.Providers)
             {
-                if (p.Models != null && !p.Running && p.Sessions.Count == 0) continue;   // Local models: show the card only when there is something to display.
+                if (p.IsIdleLocal) continue;   // Local models: show the card only when there is something to display.
                 var card = Ui.ProviderCard(p, true, null, C.Login);
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
                 body.Children.Add(card);

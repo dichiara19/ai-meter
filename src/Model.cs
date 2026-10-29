@@ -164,6 +164,9 @@ namespace AIMeter
 
         public int Active { get { int n = 0; foreach (var s in Sessions) if (s.Status != "app") n++; return n; } }
         public int Busy { get { int n = 0; foreach (var s in Sessions) if (s.Status == "busy") n++; return n; } }
+
+        /// <summary>A local-model service with no running server and no sessions: its card has nothing to show.</summary>
+        public bool IsIdleLocal { get { return Models != null && !Running && Sessions.Count == 0; } }
     }
 
     /// <summary>A model loaded by a local server on Windows or WSL.</summary>
