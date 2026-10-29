@@ -240,7 +240,7 @@ namespace AIMeter
     </Setter.Value></Setter>
   </Style>
 
-  <!-- ComboBox Fluent -->
+  <!-- Fluent ComboBox -->
   <Style x:Key='ComboToggle' TargetType='ToggleButton'>
     <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
     <Setter Property='Template'><Setter.Value>
