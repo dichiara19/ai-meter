@@ -15,8 +15,8 @@ using System.Windows.Shell;
 namespace AIMeter
 {
     /// <summary>
-    /// GitHub Copilot: richieste premium e quote chat dall'API interna di Copilot.
-    /// L'accesso a GitHub lo fa AI Meter con il flusso "codice dispositivo"; il token resta cifrato con DPAPI.
+    /// GitHub Copilot: premium requests and chat quotas from Copilot's internal API.
+    /// AI Meter signs in to GitHub with the "device code" flow; the token stays encrypted with DPAPI.
     /// </summary>
     internal sealed class CopilotProvider : Provider
     {
@@ -33,7 +33,7 @@ namespace AIMeter
 
         public override bool Enabled(Settings s) { return s.CopilotEnabled; }
 
-        /// <summary>Copilot è disponibile: account già collegato o VS Code installato (che lo include).</summary>
+        /// <summary>Copilot is available: account already linked or VS Code installed (which includes it).</summary>
         public static bool Detected() { return GitHubAuth.HasToken || VsCodeInstalled(); }
 
         public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; }
@@ -92,7 +92,7 @@ namespace AIMeter
                 using (var r = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                 {
                     string body = r.ReadToEnd();
-                    // risposta senza token: per diagnosi e per riconoscere nuovi campi
+                    // Response without tokens: for diagnosis and to recognise new fields.
                     try { File.WriteAllText(Path.Combine(Settings.Folder, "copilot-usage-raw.json"), body, new UTF8Encoding(false)); }
                     catch (IOException) { }
                     var d = Json.Parse(body);
@@ -121,7 +121,7 @@ namespace AIMeter
                 AddQuota(u, Json.Obj(snaps, "chat"), "Chat", reset, false);
                 AddQuota(u, Json.Obj(snaps, "completions"), "Completions", reset, false);
             }
-            // piano gratuito: totali mensili e quanto ne resta
+            // Free plan: monthly totals and how much remains.
             var monthly = Json.Obj(d, "monthly_quotas");
             var left = Json.Obj(d, "limited_user_quotas");
             if (u.Windows.Count == 0 && monthly != null && left != null)
@@ -131,7 +131,7 @@ namespace AIMeter
                     if (total == null || rem == null || total <= 0) continue;
                     u.Windows.Add(new UsageWindow
                     {
-                        Label = k == "chat" ? "Chat" : "Completions", Short = u.Windows.Count == 0 ? "mese" : "m",
+                        Label = k == "chat" ? "Chat" : "Completions", Short = u.Windows.Count == 0 ? UsageWindow.ShortMonth : "m",
                         Used = Math.Max(0, Math.Min(100, (total.Value - rem.Value) / total.Value * 100)), ResetsAt = reset,
                         StartedAt = reset.HasValue ? reset.Value.AddMonths(-1) : (DateTime?)null,
                         Detail = Left(rem.Value, total.Value),
@@ -147,10 +147,10 @@ namespace AIMeter
             double? pctLeft = Json.Num(q, "percent_remaining");
             double? ent = Json.Num(q, "entitlement"), rem = Json.Num(q, "remaining");
             if (!unlimited && pctLeft == null) return;
-            if (unlimited && !primary) return;   // quote illimitate secondarie: niente da mostrare
+            if (unlimited && !primary) return;   // Secondary unlimited quotas: nothing to show.
             u.Windows.Add(new UsageWindow
             {
-                Label = label, Short = primary && !u.Windows.Any(w => w.Short == "mese") ? "mese" : "m",
+                Label = label, Short = primary && !u.Windows.Any(w => w.Short == UsageWindow.ShortMonth) ? UsageWindow.ShortMonth : "m",
                 Used = unlimited ? 0 : 100 - pctLeft.Value, ResetsAt = reset,
                 StartedAt = reset.HasValue ? reset.Value.AddMonths(-1) : (DateTime?)null,
                 RightText = unlimited ? "unlimited" : null,
@@ -158,7 +158,7 @@ namespace AIMeter
             });
         }
 
-        /// <summary>Nome breve del piano per l'etichetta (es. licenza gratuita per studenti → EDU).</summary>
+        /// <summary>Short plan name for the label (e.g. free student licence → EDU).</summary>
         private static string PlanName(string plan, string sku)
         {
             sku = (sku ?? "").ToLowerInvariant();
@@ -184,10 +184,10 @@ namespace AIMeter
         }
     }
 
-    /// <summary>Accesso a GitHub con il flusso "codice dispositivo"; token cifrato con DPAPI per l'utente corrente.</summary>
+    /// <summary>GitHub sign-in with the "device code" flow; token encrypted with DPAPI for the current user.</summary>
     internal static class GitHubAuth
     {
-        // client OAuth di Copilot per VS Code: è quello che può leggere le quote, e GitHub lo mostra come "Visual Studio Code"
+        // Copilot's OAuth client for VS Code: it is the one that can read quotas, and GitHub shows it as "Visual Studio Code".
         private const string ClientId = "Iv1.b507a08c87ecfe98";
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("AIMeter.GitHub");
         private static string FilePath { get { return Path.Combine(Settings.Folder, "github-token.bin"); } }
@@ -227,7 +227,7 @@ namespace AIMeter
             };
         }
 
-        /// <summary>Un tentativo: token se autorizzato, "pending"/"slow_down" se in attesa, altro testo se è fallito.</summary>
+        /// <summary>One attempt: the token if authorised, "pending"/"slow_down" while waiting, other text if it failed.</summary>
         public static string Poll(DeviceCode c, out string token)
         {
             token = null;
@@ -261,7 +261,7 @@ namespace AIMeter
         }
     }
 
-    /// <summary>Finestra di accesso a GitHub: mostra il codice, apre la pagina, attende la conferma.</summary>
+    /// <summary>GitHub sign-in window: shows the code, opens the page and waits for confirmation.</summary>
     internal sealed class GitHubLoginWindow : Window
     {
         private readonly TextBlock code, status;

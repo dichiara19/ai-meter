@@ -1,11 +1,11 @@
-﻿# Compila AI Meter con il compilatore C# di .NET Framework 4.8 (già incluso in Windows) e lo installa per l'utente.
-#   powershell -ExecutionPolicy Bypass -File build.ps1            compila e installa
-#   powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstall compila soltanto (in .\bin)
-#   -Mode exe     installa l'eseguibile compilato (serve un eseguibile firmato se Smart App Control è attivo)
-#   -Mode script  installa il sorgente con il launcher AIMeter.ps1 (predefinito: funziona con Smart App Control)
-#   -Package      crea anche il pacchetto MSIX per il Microsoft Store (bin\AIMeter.msix; serve il Windows SDK)
-#                 identità del pacchetto da Partner Center: -IdentityName, -Publisher, -PublisherName
-#                 (o le variabili d'ambiente STORE_IDENTITY_NAME, STORE_PUBLISHER, STORE_PUBLISHER_NAME)
+﻿# Builds AI Meter with the .NET Framework 4.8 C# compiler (included in Windows) and installs it for the current user.
+#   powershell -ExecutionPolicy Bypass -File build.ps1            build and install
+#   powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstall build only (into .\bin)
+#   -Mode exe     install the compiled executable (needs a signed executable if Smart App Control is on)
+#   -Mode script  install the sources with the AIMeter.ps1 launcher (default: works with Smart App Control)
+#   -Package      also build the MSIX package for the Microsoft Store (bin\AIMeter.msix; needs the Windows SDK)
+#                 package identity from Partner Center: -IdentityName, -Publisher, -PublisherName
+#                 (or the environment variables STORE_IDENTITY_NAME, STORE_PUBLISHER, STORE_PUBLISHER_NAME)
 param(
     [switch]$NoInstall, [ValidateSet('script', 'exe')][string]$Mode = 'script',
     [switch]$Package,
@@ -19,9 +19,9 @@ $bin = Join-Path $root 'bin'
 $fw = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319'
 New-Item -ItemType Directory -Force $bin | Out-Null
 
-# --- icona dell'app: due anelli concentrici sfumati (Claude fuori, ChatGPT dentro), senza sfondo come le icone di sistema
+# --- app icon: two concentric gradient rings (Claude outside, ChatGPT inside), with no background like system icons
 Add-Type -AssemblyName System.Drawing
-# $size: lato dell'icona; $w x $h: immagine (le tile del menu Start hanno l'icona al centro di un'area più ampia)
+# $size: icon side; $w x $h: image size (Start menu tiles centre the icon in a larger area)
 function New-RingPng([int]$size, [int]$w = $size, [int]$h = $size) {
     $bmp = New-Object System.Drawing.Bitmap $w, $h
     $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -29,8 +29,8 @@ function New-RingPng([int]$size, [int]$w = $size, [int]$h = $size) {
     $g.TranslateTransform(($w - $size) / 2.0, ($h - $size) / 2.0)
     $s = $size / 16.0
     $c = $size / 2.0
-    # anelli spessi con sfumatura diagonale (luce in alto a sinistra): ambra -> corallo -> terracotta fuori,
-    # menta -> smeraldo -> verde petrolio dentro; binari grigi traslucidi, leggibili su sfondi chiari e scuri
+    # Thick rings with a diagonal gradient (light from the top left): amber -> coral -> terracotta outside,
+    # mint -> emerald -> teal inside; translucent grey tracks, readable on light and dark backgrounds.
     $ring = {
         param([double]$r, [double]$width, [int]$sweep, [string[]]$colors)
         $box = New-Object System.Drawing.RectangleF ([float]($c - $r - $width)), ([float]($c - $r - $width)), ([float](2 * ($r + $width))), ([float](2 * ($r + $width)))
@@ -69,9 +69,9 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($p in $pngs) { $bw.Write($p) }
 $bw.Flush()
 [IO.File]::WriteAllBytes((Join-Path $root 'assets\app.ico'), $ico.ToArray())
-[IO.File]::WriteAllBytes((Join-Path $root 'assets\logo.png'), (New-RingPng 256))   # logo del README
+[IO.File]::WriteAllBytes((Join-Path $root 'assets\logo.png'), (New-RingPng 256))   # README logo
 
-# --- manifest (DPI per monitor, Windows 10/11) e configurazione runtime (GC leggero)
+# --- manifest (per-monitor DPI, Windows 10/11) and runtime configuration (lightweight GC)
 @'
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
@@ -96,7 +96,7 @@ $bw.Flush()
 </configuration>
 '@ | Set-Content (Join-Path $bin 'AIMeter.exe.config') -Encoding UTF8
 
-# --- compilazione
+# --- compilation
 function Invoke-Csc([string]$out, [string[]]$extra = @()) {
     $refs = @(
         "$fw\WPF\PresentationCore.dll", "$fw\WPF\PresentationFramework.dll", "$fw\WPF\WindowsBase.dll",
@@ -104,32 +104,32 @@ function Invoke-Csc([string]$out, [string[]]$extra = @()) {
         "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
     ) | ForEach-Object { "/r:$_" }
     $res = @('app.ico', 'antigravity.png' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
-    # definizioni dei servizi e i loro loghi inclusi nell'eseguibile (nell'avvio da sorgente si leggono dalla cartella providers)
+    # Service definitions and their logos embedded in the executable (when running from source they are read from the providers folder).
     $res += @(Get-ChildItem (Join-Path $root 'providers\*') -Include *.json, *.png | ForEach-Object { "/resource:$($_.FullName),providers.$($_.Name)" })
     $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
     & "$fw\csc.exe" /nologo /target:winexe /optimize+ /platform:anycpu /langversion:5 `
         "/out:$out" "/win32icon:$(Join-Path $root 'assets\app.ico')" "/win32manifest:$(Join-Path $bin 'app.manifest')" `
         @refs @res @extra @src
-    if ($LASTEXITCODE -ne 0) { throw "Compilazione fallita" }
-    Write-Host "Compilato: $out"
+    if ($LASTEXITCODE -ne 0) { throw "Compilation failed" }
+    Write-Host "Compiled: $out"
 }
 Invoke-Csc (Join-Path $bin 'AIMeter.exe')
 
-# --- pacchetto MSIX per il Microsoft Store (lo Store lo firma: niente blocchi di SmartScreen e Smart App Control)
+# --- MSIX package for the Microsoft Store (the Store signs it: no SmartScreen or Smart App Control blocks)
 if ($Package) {
     $layout = Join-Path $bin 'msix'
     $work = Join-Path $bin 'msix-work'
     foreach ($d in $layout, $work) { if (Test-Path $d) { Remove-Item $d -Recurse -Force }; New-Item -ItemType Directory $d | Out-Null }
     New-Item -ItemType Directory (Join-Path $layout 'Assets'), (Join-Path $layout 'assets') -Force | Out-Null
 
-    # stesso sorgente con l'avvio automatico del pacchetto (API StartupTask di Windows)
+    # Same sources with the package's start-up task (Windows StartupTask API).
     $wm = Join-Path $env:WINDIR 'System32\WinMetadata'
     Invoke-Csc (Join-Path $layout 'AIMeter.exe') @('/define:MSIX', "/r:$fw\System.Runtime.dll",
         "/r:$wm\Windows.ApplicationModel.winmd", "/r:$wm\Windows.Foundation.winmd")
     Copy-Item (Join-Path $bin 'AIMeter.exe.config'), (Join-Path $root 'LICENSE'), (Join-Path $root 'NOTICE') $layout
     Copy-Item (Join-Path $root 'assets\app.ico') (Join-Path $layout 'assets')
 
-    # immagini del pacchetto: icona della barra e dell'elenco app in più dimensioni, tile, logo dello Store
+    # Package images: taskbar and app list icon in several sizes, tiles, Store logo.
     $img = Join-Path $layout 'Assets'
     function Save-Png([string]$name, [byte[]]$png) { [IO.File]::WriteAllBytes((Join-Path $img $name), $png) }
     foreach ($t in 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256) {
@@ -188,34 +188,34 @@ if ($Package) {
 </Package>
 "@ | Set-Content (Join-Path $layout 'AppxManifest.xml') -Encoding UTF8
 
-    # makepri e makeappx dal Windows SDK (presente sui runner di GitHub Actions)
+    # makepri and makeappx from the Windows SDK (present on GitHub Actions runners).
     $kit = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
         Sort-Object FullName | Select-Object -Last 1
-    if (-not $kit) { Write-Warning "Windows SDK non trovato: contenuto del pacchetto pronto in $layout, MSIX non creato"; return }
+    if (-not $kit) { Write-Warning "Windows SDK not found: package contents ready in $layout, MSIX not created"; return }
     $sdk = $kit.DirectoryName
     $cfg = Join-Path $work 'priconfig.xml'
     & "$sdk\makepri.exe" createconfig /cf $cfg /dq en-US /pv 10.0.0 /o | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "makepri createconfig fallito" }
-    # un solo resources.pri con tutte le scale (niente pacchetti di risorse separati, che servono solo nei bundle)
-    # e le sei lingue dell'interfaccia come lingue del pacchetto
+    if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed" }
+    # A single resources.pri with every scale (no separate resource packages, which only bundles need)
+    # and the six interface languages as package languages.
     $x = [IO.File]::ReadAllText($cfg)
     $x = [regex]::Replace($x, '(?s)<packaging>.*?</packaging>', '')
     $x = $x.Replace('name="Language" value="en-US"', 'name="Language" value="en-US;it-IT;es-ES;fr-FR;de-DE;pt-PT"')
     [IO.File]::WriteAllText($cfg, $x)
     & "$sdk\makepri.exe" new /pr $layout /cf $cfg /mn (Join-Path $layout 'AppxManifest.xml') /of (Join-Path $layout 'resources.pri') /o
-    if ($LASTEXITCODE -ne 0) { throw "makepri fallito" }
+    if ($LASTEXITCODE -ne 0) { throw "makepri failed" }
     $msix = Join-Path $bin 'AIMeter.msix'
     & "$sdk\makeappx.exe" pack /d $layout /p $msix /o
-    if ($LASTEXITCODE -ne 0) { throw "makeappx fallito" }
-    Write-Host "Pacchetto: $msix (versione $version, non firmato: lo firma il Microsoft Store)"
+    if ($LASTEXITCODE -ne 0) { throw "makeappx failed" }
+    Write-Host "Package: $msix (version $version, unsigned: the Microsoft Store signs it)"
     return
 }
 if ($NoInstall) { return }
 
-# --- installazione per l'utente corrente (nessun permesso di amministratore)
+# --- installation for the current user (no administrator rights)
 $dest = Join-Path $env:LOCALAPPDATA 'Programs\AI Meter'
 
-# ferma l'istanza in esecuzione, sia come eseguibile sia come script
+# Stop the running instance, whether executable or script.
 Get-Process AIMeter -ErrorAction SilentlyContinue | Stop-Process -Force
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
     Where-Object { $_.CommandLine -like '*AIMeter.ps1*' } |
@@ -249,8 +249,8 @@ if ($Mode -eq 'exe') { $s.IconLocation = "$target,0" }
 $s.Description = 'Sessioni e limiti dei modelli AI'
 $s.Save()
 
-# l'avvio automatico, se attivo, segue la modalità installata: collegamento in Esecuzione automatica
-# (la vecchia voce nella chiave Run si sposta lì)
+# Start-up, if enabled, follows the installed mode: a shortcut in the Startup folder
+# (the old entry in the Run key moves there).
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'AI Meter.lnk'
 if ((Get-ItemProperty $runKey -Name 'AI Meter' -ErrorAction SilentlyContinue) -or (Test-Path $startup)) {
@@ -263,4 +263,4 @@ if ((Get-ItemProperty $runKey -Name 'AI Meter' -ErrorAction SilentlyContinue) -o
     $a.Description = 'AI Meter'
     $a.Save()
 }
-Write-Host "Installato in $dest (modalità $Mode, collegamento nel menu Start)"
+Write-Host "Installed in $dest ($Mode mode, Start menu shortcut)"

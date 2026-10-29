@@ -15,310 +15,6 @@ using System.Windows.Shell;
 
 namespace AIMeter
 {
-    /// <summary>
-    /// A service defined in providers\*.json: authentication, usage endpoint and response mapping.
-    /// The definition format is documented in docs/PROVIDERS.md.
-    /// </summary>
-    internal sealed class ServiceDefinition
-    {
-        public string Id, Name, Description, Monogram, Origin;
-        public uint ColorLight = 0xFF5B5FC7, ColorDark = 0xFFA9ACF5;
-        public Dictionary<string, object> Raw;
-
-        public Dictionary<string, object> Auth { get { return Json.Obj(Raw, "auth"); } }
-        public string AuthType { get { return Json.Str(Auth, "type") ?? "none"; } }
-        /// <summary>Whether the service authenticates with an API key.</summary>
-        public bool UsesKey { get { return AuthType == "key"; } }
-        public string KeyPage { get { return Json.Str(Auth, "page"); } }
-
-        public static ServiceDefinition FromJson(string text, string origin)
-        {
-            var d = Json.Parse(text);
-            string id = Json.Str(d, "id");
-            if (d == null || string.IsNullOrEmpty(id) || !Regex.IsMatch(id, "^[a-z0-9][a-z0-9-]{1,31}$")) return null;
-            var def = new ServiceDefinition
-            {
-                Id = id, Raw = d, Origin = origin,
-                Name = Json.Str(d, "name") ?? id,
-                Description = Json.Str(d, "description"),
-            };
-            def.Monogram = Json.Str(d, "monogram") ?? def.Name.Substring(0, 1).ToUpperInvariant();
-            var color = Json.Obj(d, "color");
-            uint c;
-            if (ParseColor(Json.Str(color, "light"), out c)) def.ColorLight = c;
-            if (ParseColor(Json.Str(color, "dark"), out c)) def.ColorDark = c;
-            // Register translations supplied by the definition.
-            var i18n = Json.Obj(d, "i18n");
-            if (i18n != null)
-                foreach (var lang in i18n)
-                {
-                    var t = lang.Value as Dictionary<string, object>;
-                    if (t != null) foreach (var kv in t) if (kv.Value is string) L.Register(lang.Key, kv.Key, (string)kv.Value);
-                }
-            return def;
-        }
-
-        private static bool ParseColor(string s, out uint c)
-        {
-            c = 0;
-            if (s == null || !Regex.IsMatch(s, "^#[0-9a-fA-F]{6}$")) return false;
-            c = 0xFF000000 | uint.Parse(s.Substring(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-            return true;
-        }
-
-        /// <summary>Detect installed files, commands on PATH, or environment variables.</summary>
-        private bool? detected;
-
-        public bool Detected()
-        {
-            if (detected == null) detected = DetectNow();
-            // Recheck discovered credentials because another app or WSL may become available later.
-            return detected.Value || KeyFinder.Find(this) != null;
-        }
-
-        private bool DetectNow()
-        {
-            var det = Json.Obj(Raw, "detect");
-            if (det == null) return false;
-            if (Strings(det, "paths").Any(p => { string f = Expand(p); return File.Exists(f) || Directory.Exists(f); })) return true;
-            if (Strings(det, "env").Any(v => !string.IsNullOrEmpty(Env(v)))) return true;
-            if (Strings(det, "commands").Any(c => OnPath(c) != null)) return true;
-            return false;
-        }
-
-        /// <summary>Find an installed image or executable icon; null falls back to a monogram.</summary>
-        public string LogoFile()
-        {
-            var logo = Json.Obj(Raw, "logo");
-            foreach (var p in Strings(logo, "file").Concat(Strings(logo, "exe")))
-            {
-                string f = Expand(p);
-                if (File.Exists(f)) return f;
-            }
-            return null;
-        }
-
-        /// <summary>
-        /// Resolve the definition's logo image or dark-theme variant from its own directory.
-        /// Built-in definitions also support embedded resources and the bundled providers directory.
-        /// </summary>
-        public Stream LogoImage(bool dark)
-        {
-            var logo = Json.Obj(Raw, "logo");
-            string name = (dark ? Json.Str(logo, "imageDark") : null) ?? Json.Str(logo, "image");
-            if (string.IsNullOrEmpty(name)) return null;
-            name = Path.GetFileName(name);   // Only accept a filename beside the definition.
-            try
-            {
-                if (Origin == "built-in")
-                {
-                    var s = typeof(ServiceDefinition).Assembly.GetManifestResourceStream("providers." + name);
-                    if (s != null) return s;
-                    string f = Path.Combine(Program.Home, "providers", name);
-                    return File.Exists(f) ? File.OpenRead(f) : null;
-                }
-                string own = Path.Combine(Path.GetDirectoryName(Origin), name);
-                return File.Exists(own) ? File.OpenRead(own) : null;
-            }
-            catch (IOException) { return null; }
-            catch (UnauthorizedAccessException) { return null; }
-            catch (ArgumentException) { return null; }
-        }
-
-        // ------------------------------------------------------------ shared utilities
-        public static IEnumerable<string> Strings(Dictionary<string, object> d, string key)
-        {
-            object v;
-            if (d == null || !d.TryGetValue(key, out v) || v == null) return new string[0];
-            if (v is string) return new[] { (string)v };
-            var list = v as IEnumerable;
-            return list == null ? new string[0] : list.OfType<string>().ToArray();
-        }
-
-        /// <summary>Expand Windows environment variables and the user's home directory.</summary>
-        public static string Expand(string p)
-        {
-            if (string.IsNullOrEmpty(p)) return p;
-            if (p.StartsWith("~")) p = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + p.Substring(1);
-            return Environment.ExpandEnvironmentVariables(p).Replace('/', '\\');
-        }
-
-        public static string Env(string name)
-        {
-            return Environment.GetEnvironmentVariable(name)
-                   ?? Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
-        }
-
-        public static string OnPath(string exe)
-        {
-            var path = (Environment.GetEnvironmentVariable("PATH") ?? "") + ";" + (Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User) ?? "");
-            foreach (var dir in path.Split(';'))
-            {
-                if (dir.Trim().Length == 0) continue;
-                try { string f = Path.Combine(Environment.ExpandEnvironmentVariables(dir.Trim()), exe); if (File.Exists(f)) return f; }
-                catch (ArgumentException) { }
-            }
-            return null;
-        }
-    }
-
-    /// <summary>Load built-in definitions and user definitions from %APPDATA%\AIMeter\providers.</summary>
-    internal static class Definitions
-    {
-        private static List<ServiceDefinition> all;
-        /// <summary>Ignore definitions whose ids belong to providers implemented in code.</summary>
-        private static readonly string[] Reserved = { "claude", "openai", "copilot", "antigravity", "local" };
-
-        public static string UserFolder { get { return Path.Combine(Settings.Folder, "providers"); } }
-
-        public static IList<ServiceDefinition> All { get { if (all == null) all = Load(); return all; } }
-
-        public static ServiceDefinition Get(string id) { return All.FirstOrDefault(d => d.Id == id); }
-
-        private static List<ServiceDefinition> Load()
-        {
-            var byId = new Dictionary<string, ServiceDefinition>();
-            Action<string, string> add = (text, origin) =>
-            {
-                ServiceDefinition d;
-                try { d = ServiceDefinition.FromJson(text, origin); }
-                catch (Exception) { d = null; }
-                if (d != null && !Reserved.Contains(d.Id)) byId[d.Id] = d;   // User definitions override built-in definitions with the same id.
-            };
-            // Load embedded definitions first, followed by bundled and user files.
-            var asm = typeof(Definitions).Assembly;
-            foreach (var n in asm.GetManifestResourceNames().Where(n => n.StartsWith("providers.") && n.EndsWith(".json")).OrderBy(n => n))
-                using (var s = asm.GetManifestResourceStream(n))
-                using (var r = new StreamReader(s, Encoding.UTF8)) add(r.ReadToEnd(), "built-in");
-            foreach (var dir in new[] { Path.Combine(Program.Home, "providers"), UserFolder })
-            {
-                try
-                {
-                    if (!Directory.Exists(dir)) continue;
-                    foreach (var f in Directory.GetFiles(dir, "*.json").OrderBy(f => f))
-                        add(File.ReadAllText(f, Encoding.UTF8), dir == UserFolder ? f : "built-in");
-                }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-            }
-            return byId.Values.OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
-        }
-    }
-
-    /// <summary>
-    /// JSON paths support dotted fields, array indices, filters and "$" for the root.
-    /// </summary>
-    internal static class JPath
-    {
-        private static readonly Regex Token = new Regex(@"([^.\[\]]+)|\[([^\]]*)\]");
-
-        public static object Get(object root, string path)
-        {
-            if (string.IsNullOrEmpty(path) || path == "$") return root;
-            object cur = root;
-            foreach (Match m in Token.Matches(path.StartsWith("$.") ? path.Substring(2) : path))
-            {
-                if (cur == null) return null;
-                if (m.Groups[1].Success)
-                {
-                    var d = cur as Dictionary<string, object>;
-                    object v;
-                    cur = d != null && d.TryGetValue(m.Groups[1].Value, out v) ? v : null;
-                    continue;
-                }
-                var list = cur as IList;
-                if (list == null) return null;
-                string sel = m.Groups[2].Value;
-                int i;
-                if (int.TryParse(sel, NumberStyles.Integer, CultureInfo.InvariantCulture, out i))
-                {
-                    if (i < 0) i += list.Count;
-                    cur = i >= 0 && i < list.Count ? list[i] : null;
-                }
-                else cur = list.Cast<object>().FirstOrDefault(x => Matches(x, sel));
-            }
-            return cur;
-        }
-
-        /// <summary>Match an array item using field=value or field!=value.</summary>
-        public static bool Matches(object item, string filter)
-        {
-            if (string.IsNullOrEmpty(filter)) return true;
-            bool not = filter.Contains("!=");
-            var parts = filter.Split(new[] { not ? "!=" : "=" }, 2, StringSplitOptions.None);
-            if (parts.Length < 2) return Truthy(Get(item, filter));
-            bool eq = string.Equals(Str(Get(item, parts[0].Trim())), parts[1].Trim(), StringComparison.OrdinalIgnoreCase);
-            return not ? !eq : eq;
-        }
-
-        public static string Str(object v)
-        {
-            if (v == null) return null;
-            if (v is bool) return (bool)v ? "true" : "false";
-            return Convert.ToString(v, CultureInfo.InvariantCulture);
-        }
-
-        public static double? Num(object v)
-        {
-            if (v == null || v is bool) return null;
-            if (v is string)
-            {
-                double d;
-                return double.TryParse((string)v, NumberStyles.Float, CultureInfo.InvariantCulture, out d) ? d : (double?)null;
-            }
-            try { return Convert.ToDouble(v, CultureInfo.InvariantCulture); }
-            catch (FormatException) { return null; }
-            catch (InvalidCastException) { return null; }
-        }
-
-        public static bool Truthy(object v)
-        {
-            if (v == null) return false;
-            if (v is bool) return (bool)v;
-            if (v is string) return ((string)v).Length > 0 && (string)v != "false" && (string)v != "0";
-            var n = Num(v);
-            if (n != null) return n.Value != 0;
-            var c = v as ICollection;
-            return c == null || c.Count > 0;
-        }
-
-        /// <summary>Parse ISO dates or Unix timestamps, distinguishing seconds from milliseconds by magnitude.</summary>
-        public static DateTime? Date(object v)
-        {
-            var n = Num(v);
-            if (n != null && !(v is string && ((string)v).Contains("-"))) return n.Value > 1e11 ? Json.FromUnixMs(n) : Json.FromUnix(n);
-            return Json.FromIso(Str(v));
-        }
-    }
-
-    /// <summary>Store user-supplied API keys encrypted with the current user's DPAPI protection.</summary>
-    internal static class ApiKeys
-    {
-        private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("AIMeter.ApiKey");
-        private static string FilePath(string id) { return Path.Combine(Settings.Folder, "keys", id + ".bin"); }
-
-        public static bool Has(string id) { return File.Exists(FilePath(id)); }
-
-        public static string Get(string id)
-        {
-            try
-            {
-                if (!Has(id)) return null;
-                return Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(FilePath(id)), Entropy, DataProtectionScope.CurrentUser));
-            }
-            catch (CryptographicException) { return null; }
-            catch (IOException) { return null; }
-        }
-
-        public static void Save(string id, string key)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath(id)));
-            File.WriteAllBytes(FilePath(id), ProtectedData.Protect(Encoding.UTF8.GetBytes(key.Trim()), Entropy, DataProtectionScope.CurrentUser));
-        }
-
-        public static void Remove(string id) { try { File.Delete(FilePath(id)); } catch (IOException) { } }
-    }
-
     /// <summary>Collect usage according to a JSON service definition.</summary>
     internal sealed class DefinedProvider : Provider
     {
@@ -492,18 +188,34 @@ namespace AIMeter
             if (field != null)
             {
                 var doc = Json.ParseAny(token);
-                var exp = JPath.Date(JPath.Get(doc, Json.Str(a, "expires")));
-                if (exp != null && exp < DateTime.Now.AddMinutes(1)) return null;
+                if (ExpiresSoon(JPath.Get(doc, Json.Str(a, "expires")))) return null;
                 token = JPath.Str(JPath.Get(doc, field));
                 if (string.IsNullOrEmpty(token)) return null;
             }
             token = token.Trim('"');
-            if (Json.Bool(a, "jwt"))
-            {
-                var exp = JPath.Date(JPath.Get(JwtClaims(token), "exp"));
-                if (exp != null && exp < DateTime.Now.AddMinutes(1)) return null;
-            }
+            if (Json.Bool(a, "jwt") && ExpiresSoon(JPath.Get(JwtClaims(token), "exp"))) return null;
             return token;
+        }
+
+        /// <summary>Whether a credential expiry value lies within the next minute; unknown expiries are not treated as expired.</summary>
+        private static bool ExpiresSoon(object expiry)
+        {
+            var at = JPath.Date(expiry);
+            return at != null && at < DateTime.Now.AddMinutes(1);
+        }
+
+        /// <summary>Keep a raw response beside the settings for diagnostics and definition authors.</summary>
+        private void SaveRaw(string suffix, string text)
+        {
+            try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + suffix), text, new UTF8Encoding(false)); }
+            catch (IOException) { }
+        }
+
+        /// <summary>Whether the service refused the credential (401 or 403).</summary>
+        private static bool Refused(WebException e)
+        {
+            var response = e.Response as HttpWebResponse;
+            return response != null && (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden);
         }
 
         private static Dictionary<string, object> JwtClaims(string jwt)
@@ -574,9 +286,7 @@ namespace AIMeter
             try
             {
                 string text = Send(req, token);
-                // Keep the usage response for diagnostics and definition authors.
-                try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + "-usage-raw.json"), text, new UTF8Encoding(false)); }
-                catch (IOException) { }
+                SaveRaw("-usage-raw.json", text);
                 var doc = Json.ParseAny(text);
                 plan = JPath.Str(JPath.Get(doc, Json.Str(D.Raw, "plan")));
                 if (Json.Str(D.Raw, "plan") == null) plan = null;
@@ -593,8 +303,7 @@ namespace AIMeter
             }
             catch (WebException e)
             {
-                var hr = e.Response as HttpWebResponse;
-                if (hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden))
+                if (Refused(e))
                 {
                     problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "The API key was not accepted: check it in Settings" : "Sign-in expired: sign in again");
                     live = null;
@@ -603,11 +312,6 @@ namespace AIMeter
             catch (IOException) { }
         }
 
-        /// <summary>
-        /// Fetch additional usage with an optional separate credential; cache each response independently.
-        /// After authentication failures, retry the main credential after six hours or an extra key after one hour.
-        /// Changing either credential invalidates its cached response and authentication backoff.
-        /// </summary>
         private readonly Dictionary<int, DateTime> moreBlocked = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, Usage> moreCache = new Dictionary<int, Usage>();
         private readonly Dictionary<int, string> moreCredentials = new Dictionary<int, string>();
@@ -615,6 +319,11 @@ namespace AIMeter
         /// <summary>Extra credential slots to offer in Settings after authentication is rejected.</summary>
         public static readonly HashSet<string> NeedsExtraKey = new HashSet<string>();
 
+        /// <summary>
+        /// Fetch additional usage with an optional separate credential; cache each response independently.
+        /// After authentication failures, retry the main credential after six hours or an extra key after one hour.
+        /// Changing either credential invalidates its cached response and authentication backoff.
+        /// </summary>
         private void FetchMore(string token)
         {
             var list = Items(D.Raw, "more").ToList();
@@ -643,8 +352,7 @@ namespace AIMeter
                 try
                 {
                     string text = Send(req, own ?? token);
-                    try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + "-more" + i + "-raw.json"), text, new UTF8Encoding(false)); }
-                    catch (IOException) { }
+                    SaveRaw("-more" + i + "-raw.json", text);
                     var extra = Map(Json.ParseAny(text), spec);
                     if (extra != null) { moreCache[i] = extra; fresh = true; }
                     moreBlocked.Remove(i);
@@ -652,8 +360,7 @@ namespace AIMeter
                 }
                 catch (WebException e)
                 {
-                    var hr = e.Response as HttpWebResponse;
-                    if (hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden))
+                    if (Refused(e))
                     {
                         moreBlocked[i] = DateTime.Now.AddHours(own == null ? 6 : 1);
                         if (slot != null) lock (NeedsExtraKey) NeedsExtraKey.Add(D.Id + "." + slot);
@@ -767,7 +474,7 @@ namespace AIMeter
             var w = new UsageWindow
             {
                 Label = Json.Str(spec, "label") ?? "Usage",
-                Short = Json.Str(spec, "short") ?? "",
+                Short = UsageWindow.NormaliseShort(Json.Str(spec, "short") ?? ""),
                 ResetsAt = JPath.Date(JPath.Get(doc, Json.Str(spec, "resets"))),
                 StartedAt = JPath.Date(JPath.Get(doc, Json.Str(spec, "starts"))),
             };
@@ -813,177 +520,5 @@ namespace AIMeter
             if (currency != null) return new Money { Currency = currency }.Format(x);
             return x.ToString("N" + (int)(Json.Num(v, "decimals") ?? 0), L.Culture);
         }
-    }
-
-    /// <summary>Prompt for a service API key and save it encrypted on this PC.</summary>
-    internal sealed class ApiKeyWindow : Window
-    {
-        public event Action Saved;
-
-        public ApiKeyWindow(ServiceDefinition d) : this(d, null) { }
-
-        /// <summary>An optional slot saves an extra credential as &lt;id&gt;.&lt;slot&gt;; null selects the main key.</summary>
-        public ApiKeyWindow(ServiceDefinition d, string slot)
-        {
-            var extra = slot == null ? null : Json.Obj(Json.Obj(d.Raw, "keys"), slot);
-            string keyPage = extra != null ? Json.Str(extra, "page") : d.KeyPage;
-            Title = extra != null ? L.T(Json.Str(extra, "label") ?? slot) + " · " + d.Name : L.F("Connect {0}", d.Name);
-            Width = 460;
-            SizeToContent = SizeToContent.Height;
-            ResizeMode = ResizeMode.NoResize;
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            FontFamily = Theme.Font;
-            UseLayoutRounding = true;
-            Icon = Controller.AppIconImage();
-            Program.Brand(this);
-            WindowChrome.SetWindowChrome(this, new WindowChrome { CaptionHeight = 32, GlassFrameThickness = new Thickness(-1), UseAeroCaptionButtons = true, ResizeBorderThickness = new Thickness(0) });
-            SourceInitialized += (o, e) => Ui.ApplyBackdrop(this, 2, false);
-
-            var root = new StackPanel { Margin = new Thickness(24, 40, 24, 24) };
-            var h = Ui.Text(Title, 20, "Text", FontWeights.SemiBold);
-            h.FontFamily = Theme.DisplayFont;
-            root.Children.Add(h);
-            var info = Ui.Text((extra != null && Json.Str(extra, "description") != null ? L.T(Json.Str(extra, "description")) + " " : "")
-                + L.F("Paste an API key of your {0} account. AI Meter uses it only to read your usage; it is encrypted with Windows data protection and stays on this PC.", d.Name), 13, "Text2");
-            info.TextWrapping = TextWrapping.Wrap;
-            info.TextTrimming = TextTrimming.None;
-            info.Margin = new Thickness(0, 8, 0, 16);
-            root.Children.Add(info);
-
-            var box = new PasswordBox { BorderThickness = new Thickness(0), Background = System.Windows.Media.Brushes.Transparent, FontSize = 14, Padding = new Thickness(0) };
-            box.SetResourceReference(Control.ForegroundProperty, "Text");
-            box.SetResourceReference(PasswordBox.CaretBrushProperty, "Text");
-            var frame = new Border { CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1, 1, 1, 2), Padding = new Thickness(10, 6, 10, 6), Child = box };
-            frame.SetResourceReference(Border.BackgroundProperty, "Control");
-            frame.SetResourceReference(Border.BorderBrushProperty, "ControlStroke");
-            box.GotKeyboardFocus += (o, e) => frame.SetResourceReference(Border.BorderBrushProperty, "Accent");
-            box.LostKeyboardFocus += (o, e) => frame.SetResourceReference(Border.BorderBrushProperty, "ControlStroke");
-            root.Children.Add(frame);
-
-            var buttons = new DockPanel { Margin = new Thickness(0, 18, 0, 0), LastChildFill = false };
-            if (keyPage != null)
-            {
-                var link = new Button { Content = L.T("Create a key"), Padding = new Thickness(0, 0, 4, 1), FontSize = 13 };
-                link.SetResourceReference(StyleProperty, "LinkButton");
-                link.Click += (o, e) => { try { System.Diagnostics.Process.Start(keyPage); } catch (Exception) { } };
-                DockPanel.SetDock(link, Dock.Left);
-                buttons.Children.Add(link);
-            }
-            var cancel = new Button { Content = L.T("Cancel") };
-            cancel.SetResourceReference(StyleProperty, "StdButton");
-            cancel.Click += (o, e) => Close();
-            DockPanel.SetDock(cancel, Dock.Right);
-            var save = new Button { Content = L.T("Save"), Margin = new Thickness(0, 0, 8, 0), IsEnabled = false, IsDefault = true };
-            save.SetResourceReference(StyleProperty, "AccentButton");
-            save.Click += (o, e) => { ApiKeys.Save(slot == null ? d.Id : d.Id + "." + slot, box.Password); if (Saved != null) Saved(); Close(); };
-            DockPanel.SetDock(save, Dock.Right);
-            buttons.Children.Add(cancel);
-            buttons.Children.Add(save);
-            box.PasswordChanged += (o, e) => save.IsEnabled = box.Password.Trim().Length >= 8;
-            root.Children.Add(buttons);
-            Content = root;
-            Loaded += (o, e) => box.Focus();
-        }
-    }
-
-    /// <summary>Read SQLite values using the Windows-provided winsqlite3.dll library in read-only mode.</summary>
-    internal static class Sqlite
-    {
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_open_v2(byte[] file, out IntPtr db, int flags, IntPtr vfs);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_prepare_v2(IntPtr db, byte[] sql, int n, out IntPtr stmt, IntPtr tail);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_step(IntPtr stmt);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern IntPtr sqlite3_column_blob(IntPtr stmt, int col);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_column_bytes(IntPtr stmt, int col);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_finalize(IntPtr stmt);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_close(IntPtr db);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_busy_timeout(IntPtr db, int ms);
-
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_column_count(IntPtr stmt);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern int sqlite3_column_type(IntPtr stmt, int col);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern long sqlite3_column_int64(IntPtr stmt, int col);
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.StdCall)] private static extern double sqlite3_column_double(IntPtr stmt, int col);
-
-        private const int SQLITE_OPEN_READONLY = 1, SQLITE_ROW = 100;
-
-        /// <summary>
-        /// Return up to maxRows from a read-only query, preserving integer, float, text and null values.
-        /// Return null if the database cannot be opened or the query fails, including unsupported schemas.
-        /// </summary>
-        public static List<object[]> Rows(string path, string sql, int maxRows)
-        {
-            if (string.IsNullOrEmpty(sql) || !File.Exists(path)) return null;
-            IntPtr db = IntPtr.Zero, stmt = IntPtr.Zero;
-            try
-            {
-                if (sqlite3_open_v2(Z(path), out db, SQLITE_OPEN_READONLY, IntPtr.Zero) != 0) return null;
-                sqlite3_busy_timeout(db, 1000);
-                if (sqlite3_prepare_v2(db, Z(sql), -1, out stmt, IntPtr.Zero) != 0) return null;
-                var rows = new List<object[]>();
-                int cols = sqlite3_column_count(stmt);
-                while (rows.Count < maxRows && sqlite3_step(stmt) == SQLITE_ROW)
-                {
-                    var row = new object[cols];
-                    for (int c = 0; c < cols; c++)
-                    {
-                        switch (sqlite3_column_type(stmt, c))
-                        {
-                            case 1: row[c] = sqlite3_column_int64(stmt, c); break;
-                            case 2: row[c] = sqlite3_column_double(stmt, c); break;
-                            case 5: row[c] = null; break;
-                            default:
-                                int n = sqlite3_column_bytes(stmt, c);
-                                IntPtr p = sqlite3_column_blob(stmt, c);
-                                if (n <= 0 || p == IntPtr.Zero) { row[c] = ""; break; }
-                                var bytes = new byte[n];
-                                Marshal.Copy(p, bytes, 0, n);
-                                row[c] = Encoding.UTF8.GetString(bytes);
-                                break;
-                        }
-                    }
-                    rows.Add(row);
-                }
-                return rows;
-            }
-            catch (DllNotFoundException) { return null; }
-            catch (EntryPointNotFoundException) { return null; }
-            finally
-            {
-                if (stmt != IntPtr.Zero) sqlite3_finalize(stmt);
-                if (db != IntPtr.Zero) sqlite3_close(db);
-            }
-        }
-
-        /// <summary>Quote an identifier value read from the database for use in SQL.</summary>
-        public static string Quote(string s) { return "'" + (s ?? "").Replace("'", "''") + "'"; }
-
-        public static string ReadValue(string path, string sql)
-        {
-            if (string.IsNullOrEmpty(sql) || !File.Exists(path)) return null;
-            IntPtr db = IntPtr.Zero, stmt = IntPtr.Zero;
-            try
-            {
-                if (sqlite3_open_v2(Z(path), out db, SQLITE_OPEN_READONLY, IntPtr.Zero) != 0) return null;
-                sqlite3_busy_timeout(db, 2000);
-                if (sqlite3_prepare_v2(db, Z(sql), -1, out stmt, IntPtr.Zero) != 0) return null;
-                if (sqlite3_step(stmt) != SQLITE_ROW) return null;
-                int n = sqlite3_column_bytes(stmt, 0);
-                IntPtr p = sqlite3_column_blob(stmt, 0);
-                if (n <= 0 || p == IntPtr.Zero) return null;
-                var bytes = new byte[n];
-                Marshal.Copy(p, bytes, 0, n);
-                // VS Code and its derivatives store text as UTF-8 or, occasionally, UTF-16.
-                bool utf16 = n >= 2 && bytes[1] == 0;
-                return (utf16 ? Encoding.Unicode : Encoding.UTF8).GetString(bytes);
-            }
-            catch (DllNotFoundException) { return null; }
-            catch (EntryPointNotFoundException) { return null; }
-            finally
-            {
-                if (stmt != IntPtr.Zero) sqlite3_finalize(stmt);
-                if (db != IntPtr.Zero) sqlite3_close(db);
-            }
-        }
-
-        private static byte[] Z(string s) { return Encoding.UTF8.GetBytes(s + "\0"); }
     }
 }

@@ -8,11 +8,11 @@ using System.Text;
 namespace AIMeter
 {
     /// <summary>
-    /// Ciò che serve a tutti i servizi durante una raccolta: processi in esecuzione, stato di WSL,
-    /// cache dei file e letture efficienti. Regole:
-    ///  - ogni file viene interpretato solo quando cambia (cache per data di modifica e dimensione);
-    ///  - dei log grandi si legge solo la coda;
-    ///  - WSL non viene mai avviato: lo si legge solo se la sua VM è già accesa.
+    /// What every service needs during a collection: running processes, WSL state,
+    /// file cache and efficient reads. Rules:
+    ///  - each file is parsed only when it changes (cached by modification time and size);
+    ///  - only the tail of large logs is read;
+    ///  - WSL is never started: it is read only if its VM is already running.
     /// </summary>
     internal sealed class Probe
     {
@@ -33,7 +33,7 @@ namespace AIMeter
 
         public Probe(Settings s) { S = s; }
 
-        /// <summary>Aggiorna processi e stato di WSL all'inizio di ogni raccolta.</summary>
+        /// <summary>Refreshes processes and WSL state at the start of each collection.</summary>
         public void Begin(bool allowNetwork, bool savingPower)
         {
             AllowNetwork = allowNetwork;
@@ -57,7 +57,7 @@ namespace AIMeter
         public string WslRoot { get { return @"\\wsl.localhost\" + S.WslDistro; } }
         public string WslHome { get { return WslRoot + @"\home\" + S.WslUser; } }
 
-        /// <summary>La home in WSL se la distribuzione è accesa, altrimenti null: per chi legge file senza una raccolta in corso.</summary>
+        /// <summary>The WSL home if the distribution is running, otherwise null: for readers outside a collection.</summary>
         public static volatile string WslHomeUp;
 
         private void RefreshWslState()
@@ -70,19 +70,19 @@ namespace AIMeter
         {
             bool vm = Procs.ContainsValue("vmmemwsl") || Procs.ContainsValue("vmmem");
             if (!vm || string.IsNullOrEmpty(S.WslDistro)) { wslUp = false; vmSeen = false; return; }
-            // la VM appena comparsa si controlla subito, poi ogni minuto se la distribuzione è attiva e ogni 5 se non lo è.
-            // Non si allunga di più: aprire \\wsl.localhost di una distribuzione appena fermata la riavvierebbe.
-            // wsl.exe -l interroga solo il servizio di Windows, non avvia processi in Linux.
+            // A VM that has just appeared is checked immediately, then every minute if the distribution is active and every 5 if not.
+            // No longer than that: opening \\wsl.localhost of a distribution that has just stopped would restart it.
+            // wsl.exe -l queries only the Windows service; it starts no processes in Linux.
             if (vmSeen && (DateTime.Now - wslCheckedAt).TotalSeconds < (wslUp ? 60 : 300)) return;
             vmSeen = true;
             wslCheckedAt = DateTime.Now;
-            // la VM può essere accesa per un'altra distribuzione: chiediamo quali sono attive, senza avviarne nessuna
+            // The VM may be running for another distribution: ask which ones are active, without starting any.
             string output = Run("wsl.exe", "-l --running -q", 8000, Encoding.Unicode);
             wslUp = output != null && output.Split('\n').Any(l => l.Trim().Trim('\0').Equals(S.WslDistro, StringComparison.OrdinalIgnoreCase));
             if (wslUp && !Directory.Exists(WslHome)) DetectWslUser();
         }
 
-        /// <summary>L'utente Linux può chiamarsi diversamente da quello di Windows: prende la home che contiene i dati di un servizio.</summary>
+        /// <summary>The Linux user may be named differently from the Windows one: picks the home holding a service's data.</summary>
         private void DetectWslUser()
         {
             foreach (var home in SafeDirs(WslRoot + @"\home"))
@@ -104,7 +104,7 @@ namespace AIMeter
             return v;
         }
 
-        /// <summary>Valore legato a una chiave fissa, calcolato una volta sola (es. l'intestazione di un log che non cambia).</summary>
+        /// <summary>Value bound to a fixed key, computed only once (e.g. the header of a log that does not change).</summary>
         public T Once<T>(string key, Func<T> load) where T : class
         {
             CacheEntry e;
@@ -114,7 +114,7 @@ namespace AIMeter
             return v;
         }
 
-        /// <summary>Legge un JSON quando cambia e ne conserva solo i campi indicati (mai il documento intero).</summary>
+        /// <summary>Reads a JSON file when it changes and keeps only the given fields (never the whole document).</summary>
         public Dictionary<string, object> CachedFields(FileInfo fi, params string[] keys)
         {
             return Cached("json:" + fi.FullName, fi, () => Keep(Json.ParseFile(fi.FullName), keys)) as Dictionary<string, object>;
@@ -129,7 +129,7 @@ namespace AIMeter
             return small;
         }
 
-        /// <summary>Svuota la cache delle voci per file non più esistenti, una volta ogni tanto.</summary>
+        /// <summary>Occasionally clears cache entries for files that no longer exist.</summary>
         public void Trim()
         {
             foreach (var k in cache.Keys.ToList())
@@ -140,7 +140,7 @@ namespace AIMeter
             }
         }
 
-        // ================================================================ file e processi
+        // ================================================================ files and processes
         public static IEnumerable<FileInfo> SafeFiles(string dir, string pattern)
         {
             try { return Directory.Exists(dir) ? new DirectoryInfo(dir).GetFiles(pattern) : new FileInfo[0]; }
@@ -214,7 +214,7 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { return null; }
         }
 
-        /// <summary>Esegue un programma senza finestra e ne restituisce l'output (null se fallisce o va oltre il tempo).</summary>
+        /// <summary>Runs a program without a window and returns its output (null if it fails or times out).</summary>
         public static string Run(string exe, string args, int timeoutMs, Encoding outputEncoding)
         {
             try
@@ -238,17 +238,17 @@ namespace AIMeter
         }
     }
 
-    /// <summary>Un servizio AI monitorato: sa se è attivo nelle impostazioni e raccoglie sessioni e limiti.</summary>
+    /// <summary>A monitored AI service: knows whether it is enabled in Settings and collects sessions and limits.</summary>
     internal abstract class Provider
     {
         public abstract string Id { get; }
         public abstract bool Enabled(Settings s);
         public abstract ProviderState Collect(Probe p);
-        /// <summary>Forza la prossima lettura via rete (pulsante Aggiorna, login appena fatto, risveglio).</summary>
+        /// <summary>Forces the next read over the network (Refresh button, fresh sign-in, resume).</summary>
         public virtual void InvalidateNetwork() { }
     }
 
-    /// <summary>Orchestratore: per ogni servizio attivo raccoglie lo stato, condividendo processi, WSL e cache.</summary>
+    /// <summary>Orchestrator: collects the state of each enabled service, sharing processes, WSL and cache.</summary>
     internal sealed class Collector
     {
         private readonly Probe probe;
@@ -276,7 +276,7 @@ namespace AIMeter
             {
                 if (!p.Enabled(probe.S)) continue;
                 try { snap.Providers.Add(p.Collect(probe)); }
-                catch (Exception ex) { Trace.WriteLine(p.Id + ": " + ex); }   // un servizio difettoso non ferma gli altri
+                catch (Exception ex) { Trace.WriteLine(p.Id + ": " + ex); }   // A faulty service does not stop the others.
             }
             return snap;
         }

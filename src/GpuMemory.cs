@@ -9,8 +9,8 @@ using Microsoft.Win32;
 namespace AIMeter
 {
     /// <summary>
-    /// Memoria della GPU: quanta ne usa ogni processo e quanta ne ha la scheda video, dai contatori di Windows (PDH)
-    /// (gli stessi di Gestione attività). I modelli in WSL risultano a carico del processo vmmemWSL.
+    /// GPU memory: how much each process uses and how much the graphics card has, from Windows (PDH) counters
+    /// (the same as Task Manager). Models in WSL are charged to the vmmemWSL process.
     /// </summary>
     internal static class GpuMemory
     {
@@ -20,13 +20,13 @@ namespace AIMeter
         private static long used;
         private static long total = -1;
 
-        /// <summary>Memoria video in uso per processo (byte), letta al massimo ogni 15 secondi.</summary>
+        /// <summary>Video memory in use per process (bytes), read at most every 15 seconds.</summary>
         public static Dictionary<uint, long> ByProcess { get { Refresh(); return byPid; } }
 
-        /// <summary>Memoria video in uso su tutta la scheda principale (byte).</summary>
+        /// <summary>Video memory in use across the whole primary card (bytes).</summary>
         public static long Used { get { Refresh(); return used; } }
 
-        /// <summary>Memoria video della scheda più capiente (byte), 0 se sconosciuta.</summary>
+        /// <summary>Video memory of the largest card (bytes), 0 if unknown.</summary>
         public static long Total
         {
             get
@@ -48,8 +48,8 @@ namespace AIMeter
         private struct RawItem { public IntPtr Name; public RawCounter Raw; }
 
         /// <summary>
-        /// Contatore "Dedicated Usage" di "GPU Process Memory" (la VRAM, come in Gestione attività), con PDH: nomi inglesi
-        /// su ogni lingua di Windows e un costo di avvio molto minore della lettura dell'intera categoria.
+        /// The "Dedicated Usage" counter of "GPU Process Memory" (VRAM, as in Task Manager), through PDH: English names
+        /// in every Windows language and a far lower start-up cost than reading the whole category.
         /// </summary>
         private static void Refresh()
         {
@@ -85,14 +85,14 @@ namespace AIMeter
                     }
                 }
                 finally { Marshal.FreeHGlobal(buf); }
-                // occupazione della scheda: la somma dei processi (approssima per eccesso la memoria condivisa tra processi)
+                // Card usage: the sum of the processes (overestimates memory shared between processes).
                 used = Math.Min(map.Values.Sum(), Total > 0 ? Total : long.MaxValue);
             }
             catch (DllNotFoundException) { }
             catch (EntryPointNotFoundException) { }
             finally { if (map.Count > 0) byPid = map; }
         }
-        /// <summary>Dalla configurazione del driver video (la stessa fonte delle informazioni di sistema).</summary>
+        /// <summary>From the video driver configuration (the same source as System Information).</summary>
         private static long ReadTotal()
         {
             long best = 0;

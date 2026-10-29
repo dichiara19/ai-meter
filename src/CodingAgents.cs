@@ -9,9 +9,9 @@ using System.Text;
 namespace AIMeter
 {
     /// <summary>
-    /// Sessioni delle CLI di programmazione (OpenCode, Pi, Gemini CLI, Qwen Code, Goose, Crush, Cline, Kilo): titolo,
-    /// cartella, modello usato e contesto occupato, dai loro file locali su Windows e in WSL (se è già acceso).
-    /// Si mostrano le sessioni attive negli ultimi 30 minuti. Solo lettura.
+    /// Sessions of coding CLIs (OpenCode, Pi, Gemini CLI, Qwen Code, Goose, Crush, Cline, Kilo): title,
+    /// folder, model in use and context occupied, from their local files on Windows and in WSL (if already running).
+    /// Sessions active in the last 30 minutes are shown. Read-only.
     /// </summary>
     internal sealed class CodingAgents
     {
@@ -20,13 +20,13 @@ namespace AIMeter
         private List<Session> last = new List<Session>();
         private DateTime scannedAt = DateTime.MinValue;
 
-        /// <summary>Una sessione letta dai file, prima di diventare una riga dell'interfaccia.</summary>
+        /// <summary>A session read from files, before it becomes an interface row.</summary>
         private sealed class Found
         {
             public string Agent, Title, Model, Cwd;
             public DateTime Updated;
             public int Context;
-            /// <summary>Il contenuto dice che la risposta è in corso; vale solo se il file è stato scritto da meno di Fresh minuti.</summary>
+            /// <summary>The content says the reply is in progress; valid only if the file was written less than Fresh minutes ago.</summary>
             public bool Pending;
             public double Fresh = 10;
             public bool Working { get { return Pending && (DateTime.Now - Updated).TotalMinutes < Fresh; } }
@@ -46,7 +46,7 @@ namespace AIMeter
             return last;
         }
 
-        /// <summary>Sessioni trovate in una cartella utente qualsiasi (usato anche per provare i formati).</summary>
+        /// <summary>Sessions found in any user folder (also used to test the formats).</summary>
         internal List<Session> ScanHome(Probe p, string home) { return Scan(p, new List<Place> { new Place { Home = home, Where = "Windows" } }); }
 
         private List<Session> Scan(Probe p, List<Place> places)
@@ -85,10 +85,10 @@ namespace AIMeter
 
         private static bool Recent(FileInfo f) { return f.Exists && (DateTime.Now - f.LastWriteTime).TotalMinutes <= RecentMinutes; }
 
-        // ================================================================ database SQLite
+        // ================================================================ SQLite databases
         /// <summary>
-        /// Il database da aprire. Quelli in WAL dentro WSL non si aprono via \\wsl.localhost (memoria condivisa non
-        /// disponibile): se ne copia il file con il suo WAL in una cartella temporanea, solo quando cambiano.
+        /// The database to open. WAL databases inside WSL cannot be opened through \\wsl.localhost (shared memory is not
+        /// available): the file and its WAL are copied to a temporary folder, only when they change.
         /// </summary>
         internal static string Openable(string path)
         {
@@ -116,7 +116,7 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { return null; }
         }
 
-        /// <summary>Il file che cambia a ogni scrittura: il WAL se c'è, altrimenti il database.</summary>
+        /// <summary>The file that changes on every write: the WAL if present, otherwise the database.</summary>
         private static FileInfo Stamp(string db)
         {
             var wal = new FileInfo(db + "-wal");
@@ -126,7 +126,7 @@ namespace AIMeter
         private static string S0(object[] row, int i) { return row.Length > i && row[i] != null ? Convert.ToString(row[i], CultureInfo.InvariantCulture) : null; }
         private static double N0(object[] row, int i) { return row.Length > i ? (JPath.Num(row[i]) ?? 0) : 0; }
 
-        // ================================================================ OpenCode (e Kilo, che ne è un fork)
+        // ================================================================ OpenCode (and Kilo, a fork of it)
         private static IEnumerable<Found> OpenCodeLike(Probe p, Place pl, string agent, string dir, string file)
         {
             string db = Path.Combine(pl.Home, dir, file);
@@ -147,7 +147,7 @@ namespace AIMeter
                 {
                     var f = new Found { Agent = agent, Title = S0(r, 1), Cwd = S0(r, 2), Updated = Json.FromUnixMs(N0(r, 4)) ?? DateTime.MinValue };
                     f.Model = JPath.Str(JPath.Get(Json.ParseAny(S0(r, 3) ?? ""), "id"));
-                    // ultimo messaggio: modello effettivo, token e se la risposta è ancora in corso
+                    // Last message: actual model, tokens and whether the reply is still in progress.
                     var msg = Sqlite.Rows(path, "SELECT data FROM message WHERE session_id = " + Sqlite.Quote(S0(r, 0)) + " ORDER BY time_created DESC LIMIT 1", 1);
                     var data = msg != null && msg.Count > 0 ? Json.ParseAny(S0(msg[0], 0) ?? "") : null;
                     if (JPath.Str(JPath.Get(data, "role")) == "assistant")
@@ -200,7 +200,7 @@ namespace AIMeter
                     lastStop = JPath.Str(JPath.Get(e, "message.stopReason"));
                     f.Model = JPath.Str(JPath.Get(e, "message.model")) ?? f.Model;
                     var u = JPath.Get(e, "message.usage");
-                    // stessa formula di Pi; le risposte interrotte o con errore non contano
+                    // Same formula as Pi; interrupted or failed replies do not count.
                     if (u != null && lastStop != "aborted" && lastStop != "error")
                     {
                         int ctx = (int)(JPath.Num(JPath.Get(u, "totalTokens")) ?? 0);
@@ -210,7 +210,7 @@ namespace AIMeter
                 }
             }
             if (f.Title == null) f.Title = FirstUserText(fi.FullName, e => JPath.Str(JPath.Get(e, "message.role")) == "user" ? JPath.Get(e, "message.content") : null);
-            // il ciclo dell'agente è in corso se l'ultimo messaggio non è una risposta conclusa
+            // The agent loop is in progress if the last message is not a completed reply.
             f.Pending = !(lastRole == "assistant" && (lastStop == "stop" || lastStop == "length" || lastStop == "aborted" || lastStop == "error"));
             f.Fresh = 3;
             return f;
@@ -278,7 +278,7 @@ namespace AIMeter
                 {
                     var f = (Found)p.Cached("agent:qwen:" + fi.FullName, fi, () => QwenFile(fi));
                     if (f == null) continue;
-                    // file "runtime" scritto finché la sessione interattiva è aperta, con il PID del processo
+                    // "runtime" file written while the interactive session is open, with the process PID.
                     var rt = Json.ParseFile(Path.Combine(chats, Path.GetFileNameWithoutExtension(fi.Name) + ".runtime.json"));
                     uint pid = (uint)(JPath.Num(JPath.Get(rt, "pid")) ?? 0);
                     bool open = rt != null && (pl.Where != "Windows" || p.Procs.ContainsKey(pid));
@@ -337,7 +337,7 @@ namespace AIMeter
             });
         }
 
-        // ================================================================ Crush (un database per progetto, elencati in projects.json)
+        // ================================================================ Crush (one database per project, listed in projects.json)
         private static IEnumerable<Found> Crush(Probe p, Place pl)
         {
             string index = pl.Where == "Windows"
@@ -395,13 +395,13 @@ namespace AIMeter
             }).ToList();
         }
 
-        // ================================================================ utilità
+        // ================================================================ utilities
         private static IEnumerable<string> Lines(string text)
         {
             return (text ?? "").Split('\n').Select(l => l.Trim().TrimStart('\uFEFF')).Where(l => l.StartsWith("{"));
         }
 
-        /// <summary>Il testo del primo messaggio dell'utente, come titolo quando la sessione non ne ha uno.</summary>
+        /// <summary>The text of the user's first message, used as the title when the session has none.</summary>
         private static string FirstUserText(string path, Func<object, object> content)
         {
             string head = HeadText(path, 65536);

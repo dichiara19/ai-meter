@@ -1,6 +1,6 @@
-﻿# Rigenera le immagini del README (docs\media) con i componenti veri dell'interfaccia e i dati dimostrativi.
+﻿# Regenerates the README images (docs\media) with the real interface components and the demo data.
 #   powershell -ExecutionPolicy Bypass -File tools\render-media.ps1 [-Lang en]
-# La GIF richiede ffmpeg (su Windows o in WSL).
+# The GIF requires ffmpeg (on Windows or in WSL).
 param([string]$Lang = 'en')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -18,7 +18,7 @@ $src = @(Get-ChildItem (Join-Path $root 'src\*.cs') | ForEach-Object FullName) +
 Add-Type -Path $src -ReferencedAssemblies $refs
 Write-Host ([AIMeter.MediaRenderer]::Run($out, $frames, $Lang))
 
-# GIF: senza canale alfa (così ogni fotogramma salva solo ciò che cambia), palette sui fotogrammi, ripetizione infinita
+# GIF: no alpha channel (so each frame stores only what changes), palette from the frames, infinite loop.
 $gif = Join-Path $out 'demo.gif'
 $vf = 'fps=15,format=rgb24,split[a][b];[a]palettegen=max_colors=128:stats_mode=full:reserve_transparent=0[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle'
 if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {

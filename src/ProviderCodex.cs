@@ -232,7 +232,7 @@ namespace AIMeter
         private static UsageWindow Window(string prefix, int mins, double used, DateTime? resets)
         {
             string label = mins == 300 ? "Session 5 h" : mins == 10080 ? "Week" : mins >= 60 ? (mins / 60) + " h" : mins + " min";
-            string sh = prefix != null ? "m" : mins == 300 ? "5h" : mins == 10080 ? "7g" : (mins / 60) + "h";
+            string sh = prefix != null ? "m" : mins == 300 ? UsageWindow.ShortFiveHours : mins == 10080 ? UsageWindow.ShortWeek : (mins / 60) + "h";
             return new UsageWindow
             {
                 Label = label, Suffix = prefix, Short = sh, Used = used, ResetsAt = resets,

@@ -6,7 +6,7 @@ using Microsoft.Win32;
 
 namespace AIMeter
 {
-    /// <summary>Colori e stili ricalcati sui token Fluent di Windows 11.</summary>
+    /// <summary>Colours and styles modelled on the Windows 11 Fluent tokens.</summary>
     internal static class Theme
     {
         public static bool Dark { get; private set; }
@@ -32,8 +32,8 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Tema della barra delle applicazioni: segue la "modalità di Windows" (SystemUsesLightTheme),
-        /// che può differire dalla modalità delle app.
+        /// Taskbar theme: follows the "Windows mode" (SystemUsesLightTheme),
+        /// which may differ from the app mode.
         /// </summary>
         public static bool TaskbarIsDark()
         {
@@ -80,7 +80,7 @@ namespace AIMeter
                 add("Flyout", 0xFF2C2C2C); add("FlyoutStroke", 0x33000000);
                 add("Caution", 0xFFFCE100); add("Critical", 0xFFFF99A4); add("Success", 0xFF6CCB5F); add("Info", 0xFF60CDFF);
                 add("Claude", 0xFFE08A6A); add("OpenAI", 0xFF3DD68C); add("Copilot", 0xFFC297FF); add("Antigravity", 0xFF8AB4F8);
-                foreach (var def in Definitions.All) add("Brand." + def.Id, def.ColorDark);
+                foreach (var def in Definitions.All) add("Brand." + def.Id, def.ColourDark);
             }
             else
             {
@@ -95,12 +95,12 @@ namespace AIMeter
                 add("Flyout", 0xFFF9F9F9); add("FlyoutStroke", 0x0F000000);
                 add("Caution", 0xFF9D5D00); add("Critical", 0xFFC42B1C); add("Success", 0xFF0F7B0F); add("Info", 0xFF005FB8);
                 add("Claude", 0xFFC2603D); add("OpenAI", 0xFF0E8A5F); add("Copilot", 0xFF8250DF); add("Antigravity", 0xFF1A73E8);
-                foreach (var def in Definitions.All) add("Brand." + def.Id, def.ColorLight);
+                foreach (var def in Definitions.All) add("Brand." + def.Id, def.ColourLight);
             }
             return d;
         }
 
-        /// <summary>Colore d'accento di Windows, nella variante usata dai controlli Fluent.</summary>
+        /// <summary>Windows accent colour, in the variant used by Fluent controls.</summary>
         private static void SystemAccent(bool dark, out Color fill, out Color text)
         {
             fill = dark ? C(0xFF60CDFF) : C(0xFF005FB8);
@@ -129,7 +129,7 @@ namespace AIMeter
 
   <Style x:Key='FocusNone'><Setter Property='Control.Template'><Setter.Value><ControlTemplate/></Setter.Value></Setter></Style>
 
-  <!-- pulsante icona (barra del titolo dei widget) -->
+  <!-- icon button (widget title bar) -->
   <Style x:Key='IconButton' TargetType='Button'>
     <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
     <Setter Property='Foreground' Value='{DynamicResource Text2}'/>
@@ -150,7 +150,7 @@ namespace AIMeter
     </Setter.Value></Setter>
   </Style>
 
-  <!-- pulsante standard Fluent -->
+  <!-- standard Fluent button -->
   <Style x:Key='StdButton' TargetType='Button'>
     <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
     <Setter Property='Foreground' Value='{DynamicResource Text}'/>
@@ -185,7 +185,7 @@ namespace AIMeter
     </Setter.Value></Setter>
   </Style>
 
-  <!-- link testuale (HyperlinkButton) -->
+  <!-- text link (HyperlinkButton) -->
   <Style x:Key='LinkButton' TargetType='Button'>
     <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
     <Setter Property='Foreground' Value='{DynamicResource AccentText}'/>
@@ -202,7 +202,7 @@ namespace AIMeter
     </Setter.Value></Setter>
   </Style>
 
-  <!-- interruttore Fluent (ToggleSwitch) su CheckBox -->
+  <!-- Fluent toggle switch (ToggleSwitch) on CheckBox -->
   <Style x:Key='ToggleSwitch' TargetType='CheckBox'>
     <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
     <Setter Property='Foreground' Value='{DynamicResource Text}'/>
@@ -240,7 +240,7 @@ namespace AIMeter
     </Setter.Value></Setter>
   </Style>
 
-  <!-- ComboBox Fluent -->
+  <!-- Fluent ComboBox -->
   <Style x:Key='ComboToggle' TargetType='ToggleButton'>
     <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
     <Setter Property='Template'><Setter.Value>
@@ -298,7 +298,7 @@ namespace AIMeter
     </Setter.Value></Setter>
   </Style>
 
-  <!-- menu contestuale Fluent -->
+  <!-- Fluent context menu -->
   <Style TargetType='ContextMenu'>
     <Setter Property='FontFamily' Value='Segoe UI Variable Text, Segoe UI'/>
     <Setter Property='Foreground' Value='{DynamicResource Text}'/>
@@ -356,7 +356,7 @@ namespace AIMeter
     </Setter.Value></Setter>
   </Style>
 
-  <!-- barra di scorrimento sottile -->
+  <!-- thin scroll bar -->
   <Style x:Key='ThumbStyle' TargetType='Thumb'>
     <Setter Property='Template'><Setter.Value>
       <ControlTemplate TargetType='Thumb'><Border CornerRadius='2' Background='{DynamicResource ControlStrong}'/></ControlTemplate>

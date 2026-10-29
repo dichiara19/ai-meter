@@ -12,7 +12,7 @@ using System.Windows.Threading;
 
 namespace AIMeter
 {
-    /// <summary>Widget sul desktop: resta sempre sotto le altre finestre, come parte dello sfondo.</summary>
+    /// <summary>Desktop widget: always stays below other windows, as part of the wallpaper.</summary>
     internal sealed class DesktopWidget : Window
     {
         private readonly Controller C;
@@ -90,7 +90,7 @@ namespace AIMeter
             if (s.Providers.Count == 0) { body.Children.Add(EmptyState()); return; }
             foreach (var p in s.Providers)
             {
-                if (p.Models != null && !p.Running && p.Sessions.Count == 0) continue;   // modelli locali: la scheda solo se c'è qualcosa da mostrare
+                if (p.IsIdleLocal) continue;   // Local models: show the card only when there is something to display.
                 string id = p.Id;
                 string list = id + ".sessions";
                 var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.Login, C.IsExpanded(list), () => C.ToggleExpanded(list));
@@ -109,8 +109,8 @@ namespace AIMeter
     }
 
     /// <summary>
-    /// Pillola in sovrimpressione: minuscola, non ruba il focus, sparisce a schermo intero.
-    /// Due micro-pulsanti: riduci a icona (anelli live) e chiudi. Dall'icona un clic la riapre.
+    /// Floating pill: tiny, never steals focus, hides during full-screen use.
+    /// Two micro-buttons: minimise to an icon (live rings) and close. One click on the icon reopens it.
     /// </summary>
     internal sealed class OverlayPill : Window
     {
@@ -122,8 +122,8 @@ namespace AIMeter
         {
             C = c;
             Title = "AI Meter - overlay";
-            // niente SizeToContent: con WindowChrome WPF aggiunge il bordo di sistema e lascia una fascia vuota.
-            // La dimensione la calcoliamo noi dal contenuto (vedi Fit).
+            // No SizeToContent: with WindowChrome, WPF adds the system border and leaves an empty strip.
+            // The size is computed here from the content (see Fit).
             SizeToContent = SizeToContent.Manual;
             Width = 120; Height = 36;
             Topmost = true;
@@ -152,7 +152,7 @@ namespace AIMeter
         {
             var five = s.Providers.Where(p => p.Models == null).Select(p => Tuple.Create(p, Ui.Primary(p))).ToList();
             var icon = Ui.RingIcon(five, 24);
-            // un pulsante vero: clic, tastiera e strumenti di accessibilità lo riespandono allo stesso modo
+            // A real button: click, keyboard and accessibility tools all expand it again in the same way.
             var b = new Button { Content = icon, Padding = new Thickness(6), Cursor = Cursors.Hand };
             b.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
             System.Windows.Automation.AutomationProperties.SetName(b, L.T("Expand AI Meter"));
@@ -168,7 +168,7 @@ namespace AIMeter
             row.Margin = new Thickness(10, 6, 8, 6);
             outer.Children.Add(row);
 
-            // colonna di due micro-pulsanti, separata da una linea sottile
+            // Column of two micro-buttons, separated by a thin line.
             var div = new Border { Width = 1, Margin = new Thickness(0, 6, 0, 6) };
             div.SetResourceReference(Border.BackgroundProperty, "Divider");
             outer.Children.Add(div);
@@ -189,9 +189,9 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Dimensiona la finestra esattamente sul contenuto e la riancora all'angolo scelto.
-        /// Windows non scende sotto un'altezza minima per le finestre con cornice: l'icona ridotta diventa
-        /// un quadrato di quel lato, con gli anelli al centro.
+        /// Sizes the window exactly to its content and re-anchors it to the chosen corner.
+        /// Windows does not go below a minimum height for framed windows: the minimised icon becomes
+        /// a square of that side, with the rings centred.
         /// </summary>
         private void Fit()
         {
@@ -214,7 +214,7 @@ namespace AIMeter
         }
     }
 
-    /// <summary>Pannello a comparsa: dall'area di notifica (con focus) o al passaggio sulla pillola (senza).</summary>
+    /// <summary>Flyout panel: from the notification area (with focus) or when hovering over the pill (without).</summary>
     internal sealed class Flyout : Window
     {
         private readonly Controller C;
@@ -222,10 +222,10 @@ namespace AIMeter
         private readonly TextBlock footer;
         private readonly TranslateTransform slide = new TranslateTransform();
         public bool HoverMode { get; private set; }
-        /// <summary>Aperto dalla pillola nella barra: senza focus, si chiude quando un'altra app passa in primo piano.</summary>
+        /// <summary>Opened from the taskbar pill: without focus, it closes when another app comes to the foreground.</summary>
         public bool TaskbarMode { get; private set; }
-        /// <summary>Bordo inferiore a cui resta appoggiato quando si apre sopra la barra: se il contenuto cambia altezza,
-        /// cresce o si accorcia verso l'alto invece di staccarsi dalla barra. Nullo quando si apre verso il basso.</summary>
+        /// <summary>Bottom edge it stays anchored to when opened above the taskbar: if the content changes height,
+        /// it grows or shrinks upwards instead of detaching from the taskbar. Null when it opens downwards.</summary>
         private double? bottomEdge;
 
         public Flyout(Controller c)
@@ -277,16 +277,16 @@ namespace AIMeter
             if (s.Providers.Count == 0) body.Children.Add(DesktopWidget.EmptyState());
             foreach (var p in s.Providers)
             {
-                if (p.Models != null && !p.Running && p.Sessions.Count == 0) continue;   // modelli locali: la scheda solo se c'è qualcosa da mostrare
+                if (p.IsIdleLocal) continue;   // Local models: show the card only when there is something to display.
                 var card = Ui.ProviderCard(p, true, null, C.Login);
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
                 body.Children.Add(card);
             }
-            // un dato non in tempo reale è segnalato nella scheda del servizio, non qui
+            // Stale data is flagged on the service card, not here.
             footer.Text = L.F("Updated at {0}", s.Taken.ToString("HH:mm", L.Culture));
         }
 
-        /// <summary>Apertura dall'area di notifica, sopra la barra delle applicazioni, come i pannelli di sistema.</summary>
+        /// <summary>Opening from the notification area, above the taskbar, like the system flyouts.</summary>
         public void ShowFromTray()
         {
             HoverMode = false;
@@ -304,7 +304,7 @@ namespace AIMeter
             Animate(edge == 1 ? -16 : 16);
         }
 
-        /// <summary>Apertura accanto alla pillola, senza prendere il focus.</summary>
+        /// <summary>Opening next to the pill, without taking focus.</summary>
         public void ShowNear(Window anchor)
         {
             HoverMode = true;
@@ -321,15 +321,15 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Apertura dalla pillola nella barra: appoggiato sopra la barra, dal lato della pillola,
-        /// entra scorrendo orizzontalmente come il pannello Widget di Windows.
+        /// Opening from the taskbar pill: anchored above the taskbar, on the pill's side,
+        /// it slides in horizontally like the Windows Widgets panel.
         /// </summary>
         public void ShowFromTaskbar(bool fromLeft)
         {
             HoverMode = false;
             MaxHeight = SystemParameters.WorkArea.Height - 24;
-            // senza attivazione: la pillola nella barra non prende il focus, quindi Windows potrebbe negarlo anche al pannello.
-            // Si chiude cliccando altrove (cambio di app in primo piano) o di nuovo sulla pillola.
+            // No activation: the taskbar pill does not take focus, so Windows might deny it to the panel too.
+            // It closes when clicking elsewhere (another app comes to the foreground) or on the pill again.
             ShowActivated = false;
             Show();
             TaskbarMode = true;

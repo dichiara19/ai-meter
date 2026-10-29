@@ -36,7 +36,7 @@ Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypas
 **Code**
 - C# 5, compiled by `csc.exe` of .NET Framework 4.8 with `/langversion:5`. That means no string interpolation, `?.`, `nameof` or expression-bodied members. Pull requests that don't build are caught by CI.
 - No NuGet packages and no new dependencies. The app uses WPF and the Windows APIs only; no WebView, no Electron.
-- Match the style of the surrounding code. Write comments in English, explaining behavior or constraints that are not obvious from the code. Translate existing comments when revising a file.
+- Match the style of the surrounding code. Write comments in British English, explaining behavior or constraints that are not obvious from the code. Translate existing comments when revising a file.
 - Keep it light. No tight polling loops and no timers under a second. Read files only when they change and large logs only from their tail. Never wake WSL: it is read only when it is already running.
 
 **Strings**
