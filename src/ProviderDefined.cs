@@ -66,9 +66,9 @@ namespace AIMeter
             return true;
         }
 
-        /// <summary>Detect installed files, commands on PATH, or environment variables.</summary>
         private bool? detected;
 
+        /// <summary>Detect installed files, commands on PATH, or environment variables.</summary>
         public bool Detected()
         {
             if (detected == null) detected = DetectNow();
@@ -603,11 +603,6 @@ namespace AIMeter
             catch (IOException) { }
         }
 
-        /// <summary>
-        /// Fetch additional usage with an optional separate credential; cache each response independently.
-        /// After authentication failures, retry the main credential after six hours or an extra key after one hour.
-        /// Changing either credential invalidates its cached response and authentication backoff.
-        /// </summary>
         private readonly Dictionary<int, DateTime> moreBlocked = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, Usage> moreCache = new Dictionary<int, Usage>();
         private readonly Dictionary<int, string> moreCredentials = new Dictionary<int, string>();
@@ -615,6 +610,11 @@ namespace AIMeter
         /// <summary>Extra credential slots to offer in Settings after authentication is rejected.</summary>
         public static readonly HashSet<string> NeedsExtraKey = new HashSet<string>();
 
+        /// <summary>
+        /// Fetch additional usage with an optional separate credential; cache each response independently.
+        /// After authentication failures, retry the main credential after six hours or an extra key after one hour.
+        /// Changing either credential invalidates its cached response and authentication backoff.
+        /// </summary>
         private void FetchMore(string token)
         {
             var list = Items(D.Raw, "more").ToList();
@@ -953,7 +953,7 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Quote an identifier value read from the database for use in SQL.</summary>
+        /// <summary>Quote a value as a single-quoted SQL string literal, doubling embedded quotes.</summary>
         public static string Quote(string s) { return "'" + (s ?? "").Replace("'", "''") + "'"; }
 
         public static string ReadValue(string path, string sql)

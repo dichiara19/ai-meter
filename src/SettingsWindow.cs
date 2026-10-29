@@ -31,7 +31,7 @@ namespace AIMeter
         private DateTime lastCpuAt;
         private bool compact;
 
-        /// <summary>Current page: services, service:&lt;id&gt;, display, notifications, general or about.</summary>
+        /// <summary>Current page: services, service:&lt;id&gt;, display, notifications, history, general or about.</summary>
         private string current = "services";
 
         private static readonly string[][] Sections =
@@ -525,7 +525,7 @@ namespace AIMeter
             Hint(L.T("Do not disturb and Focus in Windows hold these notifications like any other."));
         }
 
-        // ------------------------------------------------------------ general
+        // ------------------------------------------------------------ history
         private void BuildHistory()
         {
             Header(L.T("Usage history"));
@@ -538,6 +538,7 @@ namespace AIMeter
                 Row(null, L.T("Value for consumption"), L.T("Rate the useful work obtained relative to the quota or money consumed."), null));
         }
 
+        // ------------------------------------------------------------ general
         private void BuildGeneral()
         {
             Header(L.T("General"));
