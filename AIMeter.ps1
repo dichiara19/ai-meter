@@ -39,6 +39,6 @@ catch {
     $detail = if ($_.Exception.InnerException) { $_.Exception.InnerException.ToString() } else { $_.Exception.ToString() }
     "$(Get-Date -Format s)  $detail" | Add-Content $log -Encoding UTF8
     Add-Type -AssemblyName System.Windows.Forms
-    [void][System.Windows.Forms.MessageBox]::Show("AI Meter non è riuscito ad avviarsi. Dettagli in:`n$log", 'AI Meter')
+    [void][System.Windows.Forms.MessageBox]::Show("AI Meter could not start. Details in:`n$log", 'AI Meter')
     exit 1
 }

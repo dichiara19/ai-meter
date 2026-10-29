@@ -110,8 +110,8 @@ function Invoke-Csc([string]$out, [string[]]$extra = @()) {
     & "$fw\csc.exe" /nologo /target:winexe /optimize+ /platform:anycpu /langversion:5 `
         "/out:$out" "/win32icon:$(Join-Path $root 'assets\app.ico')" "/win32manifest:$(Join-Path $bin 'app.manifest')" `
         @refs @res @extra @src
-    if ($LASTEXITCODE -ne 0) { throw "Compilazione fallita" }
-    Write-Host "Compilato: $out"
+    if ($LASTEXITCODE -ne 0) { throw "Compilation failed" }
+    Write-Host "Compiled: $out"
 }
 Invoke-Csc (Join-Path $bin 'AIMeter.exe')
 
@@ -191,11 +191,11 @@ if ($Package) {
     # makepri and makeappx from the Windows SDK (present on GitHub Actions runners).
     $kit = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
         Sort-Object FullName | Select-Object -Last 1
-    if (-not $kit) { Write-Warning "Windows SDK non trovato: contenuto del pacchetto pronto in $layout, MSIX non creato"; return }
+    if (-not $kit) { Write-Warning "Windows SDK not found: package contents ready in $layout, MSIX not created"; return }
     $sdk = $kit.DirectoryName
     $cfg = Join-Path $work 'priconfig.xml'
     & "$sdk\makepri.exe" createconfig /cf $cfg /dq en-US /pv 10.0.0 /o | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "makepri createconfig fallito" }
+    if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed" }
     # A single resources.pri with every scale (no separate resource packages, which only bundles need)
     # and the six interface languages as package languages.
     $x = [IO.File]::ReadAllText($cfg)
@@ -203,11 +203,11 @@ if ($Package) {
     $x = $x.Replace('name="Language" value="en-US"', 'name="Language" value="en-US;it-IT;es-ES;fr-FR;de-DE;pt-PT"')
     [IO.File]::WriteAllText($cfg, $x)
     & "$sdk\makepri.exe" new /pr $layout /cf $cfg /mn (Join-Path $layout 'AppxManifest.xml') /of (Join-Path $layout 'resources.pri') /o
-    if ($LASTEXITCODE -ne 0) { throw "makepri fallito" }
+    if ($LASTEXITCODE -ne 0) { throw "makepri failed" }
     $msix = Join-Path $bin 'AIMeter.msix'
     & "$sdk\makeappx.exe" pack /d $layout /p $msix /o
-    if ($LASTEXITCODE -ne 0) { throw "makeappx fallito" }
-    Write-Host "Pacchetto: $msix (versione $version, non firmato: lo firma il Microsoft Store)"
+    if ($LASTEXITCODE -ne 0) { throw "makeappx failed" }
+    Write-Host "Package: $msix (version $version, unsigned: the Microsoft Store signs it)"
     return
 }
 if ($NoInstall) { return }
@@ -263,4 +263,4 @@ if ((Get-ItemProperty $runKey -Name 'AI Meter' -ErrorAction SilentlyContinue) -o
     $a.Description = 'AI Meter'
     $a.Save()
 }
-Write-Host "Installato in $dest (modalità $Mode, collegamento nel menu Start)"
+Write-Host "Installed in $dest ($Mode mode, Start menu shortcut)"
