@@ -9,6 +9,7 @@ namespace AIMeter
     internal sealed class ConsumptionNotice
     {
         internal string EpisodeId, Account, Title, Text;
+        internal int Generation;
         internal DateTime EventUtc;
     }
 
@@ -51,12 +52,14 @@ namespace AIMeter
 
         private readonly HistoryStore store;
         private readonly Dictionary<string, BaselineSummary> references = new Dictionary<string, BaselineSummary>();
+        private volatile int generation = -1;
+        internal int Generation { get { return store.Generation; } }
         private List<ReadinessResult> readiness = new List<ReadinessResult>();
 
         internal ConsumptionMonitor(HistoryStore store) { this.store = store; }
 
         /// <summary>Readiness from the latest batch, for settings and the dashboard. Never touches the archive.</summary>
-        internal List<ReadinessResult> Readiness { get { lock (references) return readiness; } }
+        internal List<ReadinessResult> Readiness { get { lock (references) return generation == store.Generation ? readiness : new List<ReadinessResult>(); } }
 
         /// <summary>Process readings recorded since the last call. Returns notices to display, at most one per account.</summary>
         /// <param name="notifySinceUtc">Notifications are enabled from this instant; null when they are off.</param>
@@ -65,6 +68,11 @@ namespace AIMeter
             var notices = new List<ConsumptionNotice>();
             var ready = store.Transaction(db =>
             {
+                if (generation != store.Generation)
+                {
+                    lock (references) references.Clear();
+                    generation = store.Generation;
+                }
                 long cursor = MetadataLong(db, Cursor);
                 var rows = db.Query(@"SELECT provider,account,metric,source,plan,allowance,currency,measured,captured,resets,percent,quality
                     FROM observations WHERE captured>? AND (percent IS NOT NULL OR quality IN ('unavailable','estimated'))
@@ -94,6 +102,7 @@ namespace AIMeter
                 return AllReadiness(db, nowUtc, zone);
             });
             lock (references) readiness = ready;
+            foreach (var notice in notices) notice.Generation = generation;
             return notices;
         }
 
@@ -117,6 +126,7 @@ namespace AIMeter
             {
                 // A late reading rewrites the intervals around it. Rebuild this scope silently: no retrospective notices.
                 builder = Rebuild(db, scope, nowUtc);
+                lock (references) references.Clear();
                 pending = 0;
             }
             else
@@ -124,6 +134,11 @@ namespace AIMeter
                 foreach (var reading in readings)
                 {
                     var interval = builder.Feed(reading, gap);
+                    if (builder.ContinuityBroken)
+                    {
+                        pending = 0;
+                        db.Execute("UPDATE consumption_episodes SET normal=0 WHERE scope=? AND state<>?", scope.Key, AlertEpisode.Resolved);
+                    }
                     if (interval == null) continue;
                     Insert(db, scope, interval);
                     if (interval.EndUtc >= nowUtc.AddMinutes(-FreshMinutes))
@@ -163,6 +178,9 @@ namespace AIMeter
         {
             string referenceSince;
             var b = ReferenceFor(db, scope, interval.EndUtc, zone, out referenceSince);
+            var open = db.Query("SELECT id,resets,normal,baseline FROM consumption_episodes WHERE scope=? AND state<>? ORDER BY opened DESC LIMIT 1", scope.Key, AlertEpisode.Resolved);
+            if (open.Count > 0 && IntervalBuilder.SameCycle(open[0][1] == null ? (DateTime?)null : Utc(open[0][1]), interval.ResetsUtc))
+                b = FrozenBaseline(Json.Parse((string)open[0][3]));
             var result = ConsumptionAnalysis.Readiness(scope, b, interval.EndUtc, nowUtc, ReferenceChanged(db, scope, interval.EndUtc, zone));
             // Learning, unavailable or changed references pause evaluation; they neither open nor resolve episodes.
             if (result.State != ReadinessState.Ready) return 0;
@@ -171,7 +189,6 @@ namespace AIMeter
                 scope.Key, HistoryStore.Stamp(interval.EndUtc.AddMinutes(-60)), HistoryStore.Stamp(interval.EndUtc)).Select(Interval).ToList();
             var evidence = ConsumptionAnalysis.Sustained(recent, b) ?? ConsumptionAnalysis.Fast(interval, b);
 
-            var open = db.Query("SELECT id,resets,normal FROM consumption_episodes WHERE scope=? AND state<>? ORDER BY opened DESC LIMIT 1", scope.Key, AlertEpisode.Resolved);
             if (open.Count > 0)
             {
                 string id = (string)open[0][0];
@@ -232,26 +249,45 @@ namespace AIMeter
                 AlertEpisode.Resolved, HistoryStore.Stamp(atUtc), reason, reason, id, AlertEpisode.Resolved);
         }
 
+        /// <summary>Use the exact thresholds saved when the episode opened, including across restarts.</summary>
+        private static BaselineSummary FrozenBaseline(Dictionary<string, object> json)
+        {
+            return new BaselineSummary
+            {
+                Context = Json.Str(json, "context"), TimeZone = Json.Str(json, "timeZone"),
+                FromUtc = DateTime.Parse(Json.Str(json, "fromUtc"), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                ToUtc = DateTime.Parse(Json.Str(json, "toUtc"), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                ObservedDays = (int)(Json.Num(json, "observedDays") ?? 0), ActiveDays = (int)(Json.Num(json, "activeDays") ?? 0),
+                ActiveIntervals = (int)(Json.Num(json, "activeIntervals") ?? 0), SustainedWindows = (int)(Json.Num(json, "sustainedWindows") ?? 0),
+                MedianRate = Json.Num(json, "medianPointsPerHour") ?? 0, FastThreshold = Json.Num(json, "fastThresholdPointsPerHour") ?? 0,
+                SustainedMedian = Json.Num(json, "sustainedMedianPointsPerHour") ?? 0, SustainedThreshold = Json.Num(json, "sustainedThresholdPointsPerHour") ?? 0,
+            };
+        }
+
         /// <summary>The reference for this scope and local day, cached until the day, zone or reference changes.</summary>
         private BaselineSummary ReferenceFor(HistoryDatabase db, ConsumptionScope scope, DateTime atUtc, TimeZoneInfo zone, out string since)
         {
-            var row = db.Query("SELECT reference_since FROM consumption_scopes WHERE scope=?", scope.Key);
-            since = row.Count == 0 || row[0][0] == null ? "" : Convert.ToString(row[0][0], CultureInfo.InvariantCulture);
-            DateTime day = ConsumptionAnalysis.LocalDay(atUtc, zone);
-            string key = scope.Key + "|" + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "|" + zone.Id + "|" + since + "|" + ConsumptionAnalysis.AlgorithmVersion;
-            BaselineSummary b;
-            if (references.TryGetValue(key, out b)) return b;
-            if (references.Count > 200) references.Clear();
+            lock (references)
+            {
+                var row = db.Query("SELECT reference_since FROM consumption_scopes WHERE scope=?", scope.Key);
+                since = row.Count == 0 || row[0][0] == null ? "" : Convert.ToString(row[0][0], CultureInfo.InvariantCulture);
+                DateTime day = ConsumptionAnalysis.LocalDay(atUtc, zone);
+                string key = scope.Key + "|" + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "|" + zone.Id + "|" + since + "|" + ConsumptionAnalysis.AlgorithmVersion;
+                BaselineSummary b;
+                if (references.TryGetValue(key, out b)) return b;
+                if (references.Count > 200) references.Clear();
 
-            // Learn only from completed prior local days, within the rolling window and the current reference.
-            DateTime to = HistoryStore.Time(HistoryAnalysis.DayStart(day, zone)).ToUniversalTime();
-            DateTime from = HistoryStore.Time(HistoryAnalysis.DayStart(day.AddDays(-ConsumptionAnalysis.HistoryDays), zone)).ToUniversalTime();
-            if (since.Length > 0) from = new[] { from, Utc(since) }.Max();
-            var completed = db.Query("SELECT starts,ends,points,resets FROM consumption_intervals WHERE scope=? AND version=? AND starts>=? AND ends<?",
-                scope.Key, ConsumptionAnalysis.AlgorithmVersion, HistoryStore.Stamp(from), HistoryStore.Stamp(to)).Select(Interval).ToList();
-            b = ConsumptionAnalysis.Reference(completed, zone, atUtc, from, to);
-            references[key] = b;
-            return b;
+                // Learn only from completed prior local days, within the rolling window and the current reference.
+                DateTime to = HistoryStore.Time(HistoryAnalysis.DayStart(day, zone)).ToUniversalTime();
+                DateTime from = HistoryStore.Time(HistoryAnalysis.DayStart(day.AddDays(-ConsumptionAnalysis.HistoryDays), zone)).ToUniversalTime();
+                if (since.Length > 0) from = new[] { from, Utc(since) }.Max();
+                var completed = db.Query(@"SELECT starts,ends,points,resets FROM consumption_intervals i WHERE scope=? AND version=? AND starts>=? AND ends<?
+                    AND NOT EXISTS(SELECT 1 FROM consumption_episodes e WHERE e.scope=i.scope AND e.opened<i.ends AND COALESCE(e.resolved,e.last)>i.starts)",
+                    scope.Key, ConsumptionAnalysis.AlgorithmVersion, HistoryStore.Stamp(from), HistoryStore.Stamp(to)).Select(Interval).ToList();
+                b = ConsumptionAnalysis.Reference(completed, zone, atUtc, from, to);
+                references[key] = b;
+                return b;
+            }
         }
 
         /// <summary>Episodes opened on four of the previous seven days suggest the reference itself has changed.</summary>

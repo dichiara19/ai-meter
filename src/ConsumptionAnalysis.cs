@@ -69,12 +69,14 @@ namespace AIMeter
         internal const double ResetToleranceMinutes = 10;
 
         internal QuotaReading Anchor, Last;
+        internal bool ContinuityBroken { get; private set; }
         internal readonly Dictionary<string, int> Exclusions = new Dictionary<string, int>();
 
         /// <summary>Feed one reading in measurement order. Returns a completed interval, or null.</summary>
         /// <param name="coverageGap">Whether a recorded collection interruption overlaps the span since the previous reading.</param>
         internal ConsumptionInterval Feed(QuotaReading reading, Func<DateTime, DateTime, bool> coverageGap)
         {
+            ContinuityBroken = false;
             if (reading.Quality != "measured" || !reading.Percent.HasValue || !HistoryStore.Finite(reading.Percent.Value)
                 || reading.Percent.Value < 0 || reading.Percent.Value > 100)
                 return Break(null, "unusable-reading");
@@ -98,7 +100,7 @@ namespace AIMeter
 
         private ConsumptionInterval Break(QuotaReading restart, string reason)
         {
-            if (reason != null) Exclude(reason);
+            if (reason != null) { Exclude(reason); ContinuityBroken = true; }
             Anchor = Last = restart;
             return null;
         }
@@ -291,8 +293,8 @@ namespace AIMeter
             bool weekend = IsWeekend(LocalDay(atUtc, zone));
             var subset = completed.Where(i => IsWeekend(LocalDay(i.EndUtc, zone)) == weekend).ToList();
             var contextual = Summarise(subset, zone, weekend ? "weekend" : "weekday", fromUtc, toUtc);
-            bool sufficient = contextual.ActiveDays >= 4 && contextual.ActiveIntervals >= 30 && contextual.Weeks >= 2
-                && contextual.SustainedWindows >= MinimumSustainedWindows / 2 && contextual.StabilitySpread <= MaximumStabilitySpread;
+            bool sufficient = contextual.ActiveDays >= MinimumActiveDays && contextual.ActiveIntervals >= MinimumActiveIntervals && contextual.Weeks >= 2
+                && contextual.SustainedWindows >= MinimumSustainedWindows && contextual.StabilitySpread <= MaximumStabilitySpread;
             if (!sufficient) return general;
             // Contextual readiness inherits the general data minima.
             contextual.ObservedDays = general.ObservedDays;

@@ -46,7 +46,7 @@ namespace AIMeter
             List<ConsumptionNotice> consumption;
             lock (pendingConsumption) { consumption = pendingConsumption.ToList(); pendingConsumption.Clear(); }
             // A notice delayed past its relevance stays visible in the history instead of interrupting late.
-            consumption = consumption.Where(c => Settings.ConsumptionAlerts && (DateTime.UtcNow - c.EventUtc).TotalMinutes <= 30).ToList();
+            consumption = consumption.Where(c => Settings.HistoryEnabled && Settings.ConsumptionAlerts && c.Generation == Consumption.Generation && (DateTime.UtcNow - c.EventUtc).TotalMinutes <= 30).ToList();
             if (list.Count == 0 && consumption.Count == 0) { if (!SuggestConsumptionAlerts()) NotifyFeedback(); return; }
             Action open = () => { if (!flyout.IsVisible) ToggleFlyout(); };
             if (list.Count == 0)
