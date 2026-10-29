@@ -156,7 +156,10 @@ namespace AIMeter
                 Row(Ui.Glyph("", 20, "Text"), "AI Meter", null, Button(L.T("Open data folder"), () => Process.Start("explorer.exe", "\"" + Settings.Folder + "\""), false), statsText),
                 Row(Ui.Glyph("", 20, "Text"), L.T("Privacy"),
                     L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off."),
-                    Button(L.T("Source code"), () => Process.Start("https://github.com/dichiara19/ai-meter#privacy-policy"), false)));
+                    Button(L.T("Source code"), () => Process.Start("https://github.com/dichiara19/ai-meter#privacy-policy"), false)),
+                Row(Ui.Glyph("", 20, "Text"), L.T("Sample data"),
+                    L.T("Show invented figures to preview AI Meter without signing in to any service. Not saved: real data returns at the next start."),
+                    Toggle(Program.Demo, v => C.SetSampleData(v))));
             UpdateStats();
         }
 

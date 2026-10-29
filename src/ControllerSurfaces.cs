@@ -38,6 +38,38 @@ namespace AIMeter
             UpdateVisibility();
         }
 
+        /// <summary>
+        /// Show the first-launch consent window before any surface or network request starts.
+        /// The launch counts as done only once the window closes. Returns whether sample data was requested.
+        /// </summary>
+        private bool AskFirstRunConsent()
+        {
+            var welcome = new WelcomeWindow(Settings);
+            welcome.ShowDialog();
+            Settings.FirstRunDone = true;
+            Settings.Save();
+            return welcome.SampleDataRequested;
+        }
+
+        /// <summary>
+        /// Switch between invented sample data and real readings without restarting. The choice is not saved;
+        /// sample data never reaches the history, notifications or the alert state.
+        /// </summary>
+        public void SetSampleData(bool on)
+        {
+            if (Program.Demo == on) return;
+            Program.Demo = on;
+            if (on && historyWindow != null) historyWindow.Close();
+            if (on)
+            {
+                balloonAction = null;
+                tray.ShowBalloonTip(15000, L.T("Showing sample data"),
+                    L.T("The figures are invented. Choose Leave sample data from the notification area menu, or turn it off in Settings → About."), Forms.ToolTipIcon.Info);
+            }
+            if (settingsWindow != null) settingsWindow.Dispatcher.BeginInvoke(new Action(settingsWindow.Build), DispatcherPriority.Background);
+            RefreshNow();
+        }
+
         public void OpenSettings()
         {
             if (settingsWindow == null)

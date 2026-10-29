@@ -119,18 +119,6 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { return null; }
         }
 
-        /// <summary>
-        /// On first launch, explain which data leaves this PC and how to disable network collection.
-        /// Only enabled services' own usage endpoints are contacted.
-        /// </summary>
-        private void ShowPrivacyNotice()
-        {
-            balloonAction = OpenSettings;
-            tray.ShowBalloonTip(20000, L.T("AI Meter is running"),
-                L.T("It reads sessions and limits from local files. Only real-time Claude limits contact Anthropic with your Claude Code login: you can turn them off in Settings."),
-                Forms.ToolTipIcon.Info);
-        }
-
         public static string Version
         {
             get
@@ -155,6 +143,7 @@ namespace AIMeter
         public void ShowMenu(Window anchor)
         {
             var menu = new ContextMenu();
+            if (Program.Demo) menu.Items.Add(Item(L.T("Leave sample data"), "\uE711", () => SetSampleData(false)));
             menu.Items.Add(Item(L.T("Open panel"), "\uE8A7", () => ToggleFlyout()));
             if (!Program.Demo) menu.Items.Add(Item(L.T("Usage history"), "\uE9D9", OpenHistory));
             menu.Items.Add(new Separator());
