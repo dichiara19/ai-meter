@@ -6,7 +6,7 @@ The standalone application keeps its C# 5 / .NET Framework 4.8 build, existing d
 
 | Component | Responsibility | Lifetime / dependencies |
 | --- | --- | --- |
-| `Controller` in `App.cs` | Compose the services; schedule collection; handle lock/sleep, settings, notifications and windows. | Application host. Creates no history worker or UI polling loop. |
+| `Controller` (`Controller.cs` and its `Controller*.cs` parts) | Compose the services; schedule collection; handle lock/sleep, settings, notifications and windows. | Application host. Creates no history worker or UI polling loop. |
 | `HistoryCollector` | Read changed local sources and emit whitelisted numeric events. | Uses existing read-only adapters and the already-running WSL check. Source cursors belong to the archive transaction. |
 | `HistoryStore` | Own the schema, transactions, scopes, deduplication, feedback, export and deletion. | Receives an explicit archive path. Opens and disposes connections per operation; serialises operations through one gate. |
 | `HistoryDatabase` | Bind parameters, execute commands, stream rows and release SQLite handles. | Windows SQLite ABI only; all user/source values use bindings. The repository owns SQL and schema choices. |
