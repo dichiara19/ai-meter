@@ -188,18 +188,34 @@ namespace AIMeter
             if (field != null)
             {
                 var doc = Json.ParseAny(token);
-                var exp = JPath.Date(JPath.Get(doc, Json.Str(a, "expires")));
-                if (exp != null && exp < DateTime.Now.AddMinutes(1)) return null;
+                if (ExpiresSoon(JPath.Get(doc, Json.Str(a, "expires")))) return null;
                 token = JPath.Str(JPath.Get(doc, field));
                 if (string.IsNullOrEmpty(token)) return null;
             }
             token = token.Trim('"');
-            if (Json.Bool(a, "jwt"))
-            {
-                var exp = JPath.Date(JPath.Get(JwtClaims(token), "exp"));
-                if (exp != null && exp < DateTime.Now.AddMinutes(1)) return null;
-            }
+            if (Json.Bool(a, "jwt") && ExpiresSoon(JPath.Get(JwtClaims(token), "exp"))) return null;
             return token;
+        }
+
+        /// <summary>Whether a credential expiry value lies within the next minute; unknown expiries are not treated as expired.</summary>
+        private static bool ExpiresSoon(object expiry)
+        {
+            var at = JPath.Date(expiry);
+            return at != null && at < DateTime.Now.AddMinutes(1);
+        }
+
+        /// <summary>Keep a raw response beside the settings for diagnostics and definition authors.</summary>
+        private void SaveRaw(string suffix, string text)
+        {
+            try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + suffix), text, new UTF8Encoding(false)); }
+            catch (IOException) { }
+        }
+
+        /// <summary>Whether the service refused the credential (401 or 403).</summary>
+        private static bool Refused(WebException e)
+        {
+            var response = e.Response as HttpWebResponse;
+            return response != null && (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden);
         }
 
         private static Dictionary<string, object> JwtClaims(string jwt)
@@ -270,9 +286,7 @@ namespace AIMeter
             try
             {
                 string text = Send(req, token);
-                // Keep the usage response for diagnostics and definition authors.
-                try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + "-usage-raw.json"), text, new UTF8Encoding(false)); }
-                catch (IOException) { }
+                SaveRaw("-usage-raw.json", text);
                 var doc = Json.ParseAny(text);
                 plan = JPath.Str(JPath.Get(doc, Json.Str(D.Raw, "plan")));
                 if (Json.Str(D.Raw, "plan") == null) plan = null;
@@ -289,8 +303,7 @@ namespace AIMeter
             }
             catch (WebException e)
             {
-                var hr = e.Response as HttpWebResponse;
-                if (hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden))
+                if (Refused(e))
                 {
                     problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "The API key was not accepted: check it in Settings" : "Sign-in expired: sign in again");
                     live = null;
@@ -339,8 +352,7 @@ namespace AIMeter
                 try
                 {
                     string text = Send(req, own ?? token);
-                    try { File.WriteAllText(Path.Combine(Settings.Folder, D.Id + "-more" + i + "-raw.json"), text, new UTF8Encoding(false)); }
-                    catch (IOException) { }
+                    SaveRaw("-more" + i + "-raw.json", text);
                     var extra = Map(Json.ParseAny(text), spec);
                     if (extra != null) { moreCache[i] = extra; fresh = true; }
                     moreBlocked.Remove(i);
@@ -348,8 +360,7 @@ namespace AIMeter
                 }
                 catch (WebException e)
                 {
-                    var hr = e.Response as HttpWebResponse;
-                    if (hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden))
+                    if (Refused(e))
                     {
                         moreBlocked[i] = DateTime.Now.AddHours(own == null ? 6 : 1);
                         if (slot != null) lock (NeedsExtraKey) NeedsExtraKey.Add(D.Id + "." + slot);

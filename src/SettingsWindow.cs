@@ -196,6 +196,13 @@ namespace AIMeter
 
         private void Changed() { S.Save(); C.ApplySettings(); }
 
+        /// <summary>The service's state in the latest snapshot, or null before the first update.</summary>
+        private ProviderState LastState(string id)
+        {
+            var last = C.Last;
+            return last == null ? null : last.Providers.FirstOrDefault(x => x.Id == id);
+        }
+
         /// <summary>Rebuild the page when a setting changes other controls.</summary>
         private void Rebuild() { Dispatcher.BeginInvoke(new Action(Build), System.Windows.Threading.DispatcherPriority.Background); }
 

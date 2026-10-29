@@ -70,7 +70,7 @@ namespace AIMeter
                 if (def != null && def.UsesKey && !ApiKeys.Has(def.Id) && !def.Detected()) return L.T("Add an API key to read your usage.");
                 return s.Id == "local" ? L.T("Off") : Found(Detected(s.Id)).Trim();
             }
-            var p = C.Last == null ? null : C.Last.Providers.FirstOrDefault(x => x.Id == s.Id);
+            var p = LastState(s.Id);
             if (s.Id == "claude") return ClaudeStatus(p);
             if (p == null) return L.T("Waiting for the first update");
             if (p.Models != null)
@@ -102,7 +102,7 @@ namespace AIMeter
             }
 
             // Let users choose which limits, spending summaries and models appear in a service card.
-            var prov = C.Last == null ? null : C.Last.Providers.FirstOrDefault(x => x.Id == s.Id);
+            var prov = LastState(s.Id);
             if (prov == null || prov.Usage == null || prov.Models != null) return;
             var vis = new List<FrameworkElement>();
             foreach (var w in prov.Usage.Windows.Where(x => !x.Hidden))
@@ -130,7 +130,7 @@ namespace AIMeter
 
         private string Description(string id)
         {
-            var claude = C.Last == null ? null : C.Last.Providers.FirstOrDefault(p => p.Id == "claude");
+            var claude = LastState("claude");
             switch (id)
             {
                 case "claude":
@@ -277,7 +277,7 @@ namespace AIMeter
         /// </summary>
         private void AddLimitRow(List<FrameworkElement> rows, string id)
         {
-            var p = C.Last == null ? null : C.Last.Providers.FirstOrDefault(x => x.Id == id);
+            var p = LastState(id);
             // Include monetary values, estimated budgets and temporarily cached rows.
             var windows = p == null || p.Usage == null ? new List<UsageWindow>() : p.Usage.Windows.Where(w => w.HasPercent || w.Hidden || w.Budget || w.NoBar || w.CachedAt.HasValue).ToList();
             string cur;

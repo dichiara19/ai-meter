@@ -143,20 +143,7 @@ namespace AIMeter
             var stack = new StackPanel();
 
             // Clickable header.
-            var head = new DockPanel { Background = Brushes.Transparent, Cursor = toggle != null ? Cursors.Hand : null };
-            var logo = Logo(p.Id, 20);
-            logo.Margin = new Thickness(0, 0, 10, 0);
-            DockPanel.SetDock(logo, Dock.Left);
-            head.Children.Add(logo);
-
-            if (toggle != null)
-            {
-                var chev = Glyph(expanded ? "" : "", 10, "Text3");
-                chev.Margin = new Thickness(10, 0, 2, 0);
-                DockPanel.SetDock(chev, Dock.Right);
-                head.Children.Add(chev);
-                head.MouseLeftButtonUp += (o, e) => { toggle(); e.Handled = true; };
-            }
+            var head = CardHeader(Logo(p.Id, 20), expanded, toggle);
 
             var count = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             if (p.Running)
@@ -323,6 +310,22 @@ namespace AIMeter
             return Card(stack, new Thickness(14, 12, 14, 12));
         }
 
+        /// <summary>A card header with the icon on the left and, when the card can fold, a chevron that toggles it.</summary>
+        private static DockPanel CardHeader(FrameworkElement icon, bool expanded, Action toggle)
+        {
+            var head = new DockPanel { Background = Brushes.Transparent, Cursor = toggle != null ? Cursors.Hand : null };
+            icon.Margin = new Thickness(0, 0, 10, 0);
+            DockPanel.SetDock(icon, Dock.Left);
+            head.Children.Add(icon);
+            if (toggle == null) return head;
+            var chev = Glyph(expanded ? "" : "", 10, "Text3");
+            chev.Margin = new Thickness(10, 0, 2, 0);
+            DockPanel.SetDock(chev, Dock.Right);
+            head.Children.Add(chev);
+            head.MouseLeftButtonUp += (o, e) => { toggle(); e.Handled = true; };
+            return head;
+        }
+
         /// <summary>A clickable row that counts agent sessions and shows or hides their list.</summary>
         private static FrameworkElement SessionSummary(List<Session> sessions, bool open, Action toggle)
         {
@@ -348,20 +351,9 @@ namespace AIMeter
         public static Border LocalCard(ProviderState p, bool expanded, Action toggle)
         {
             var stack = new StackPanel();
-            var head = new DockPanel { Background = Brushes.Transparent, Cursor = toggle != null ? Cursors.Hand : null };
             var icon = Glyph(LocalGlyph, 18, "Text");
             icon.Width = 20;
-            icon.Margin = new Thickness(0, 0, 10, 0);
-            DockPanel.SetDock(icon, Dock.Left);
-            head.Children.Add(icon);
-            if (toggle != null)
-            {
-                var chev = Glyph(expanded ? "" : "", 10, "Text3");
-                chev.Margin = new Thickness(10, 0, 2, 0);
-                DockPanel.SetDock(chev, Dock.Right);
-                head.Children.Add(chev);
-                head.MouseLeftButtonUp += (o, e) => { toggle(); e.Handled = true; };
-            }
+            var head = CardHeader(icon, expanded, toggle);
             var count = Text(!p.Running ? L.T("no server running") : p.Models.Count == 0 ? L.T("none loaded") : L.N(p.Models.Count, "{0} loaded", "{0} loaded"), 12, p.Models.Count > 0 ? "Text2" : "Text3");
             count.VerticalAlignment = VerticalAlignment.Center;
             DockPanel.SetDock(count, Dock.Right);

@@ -38,17 +38,7 @@ namespace AIMeter
                     bmp = IconFromExe(file);
                 else if (file != null)
                 {
-                    try
-                    {
-                        var bi = new BitmapImage();
-                        bi.BeginInit();
-                        bi.UriSource = new Uri(file);
-                        bi.DecodePixelWidth = 64;   // Enough for 16-32 logical pixels at common DPI settings without excessive memory.
-                        bi.CacheOption = BitmapCacheOption.OnLoad;
-                        bi.EndInit();
-                        bi.Freeze();
-                        bmp = bi;
-                    }
+                    try { bmp = FromStream(File.OpenRead(file)); }
                     catch (Exception) { bmp = null; }
                 }
                 if (bmp == null)
@@ -77,7 +67,7 @@ namespace AIMeter
                     var bi = new BitmapImage();
                     bi.BeginInit();
                     bi.StreamSource = s;
-                    bi.DecodePixelWidth = 64;
+                    bi.DecodePixelWidth = 64;   // Enough for 16-32 logical pixels at common DPI settings without excessive memory.
                     bi.CacheOption = BitmapCacheOption.OnLoad;
                     bi.EndInit();
                     bi.Freeze();

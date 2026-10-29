@@ -57,12 +57,17 @@ namespace AIMeter
         }
 
         // ================================================================ panel and pill
-        public void ToggleFlyout()
+        public void ToggleFlyout() { ToggleFlyout(() => flyout.ShowFromTray()); }
+
+        public void ToggleFlyoutFromTaskbar(TaskbarPill anchor) { ToggleFlyout(() => flyout.ShowFromTaskbar(anchor.OnLeft)); }
+
+        /// <summary>Hide a pinned panel, or render and show it with the given placement.</summary>
+        private void ToggleFlyout(Action show)
         {
             if (flyout.IsVisible && !flyout.HoverMode) { flyout.Hide(); return; }
             if ((DateTime.Now - flyoutHiddenAt).TotalMilliseconds < 300) return; // This click has just closed the panel.
             if (Last != null) flyout.Render(Last);
-            flyout.ShowFromTray();
+            show();
             UpdateVisibility();
             RefreshNow();
         }
@@ -128,16 +133,6 @@ namespace AIMeter
                 dock.Place();
             }
             UpdateVisibility();
-        }
-
-        public void ToggleFlyoutFromTaskbar(TaskbarPill anchor)
-        {
-            if (flyout.IsVisible && !flyout.HoverMode) { flyout.Hide(); return; }
-            if ((DateTime.Now - flyoutHiddenAt).TotalMilliseconds < 300) return; // This click has just closed the panel.
-            if (Last != null) flyout.Render(Last);
-            flyout.ShowFromTaskbar(anchor.OnLeft);
-            UpdateVisibility();
-            RefreshNow();
         }
 
         /// <summary>The taskbar pill and floating overlay are mutually exclusive.</summary>
