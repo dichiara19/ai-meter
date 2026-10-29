@@ -661,10 +661,6 @@ namespace AIMeter
             tray.BalloonTipClicked += (o, e) => { var a = balloonAction; balloonAction = null; if (a != null) a(); };
         }
 
-        /// <summary>
-        /// On first launch, explain which data leaves this PC and how to disable network collection.
-        /// Only enabled services' own usage endpoints are contacted.
-        /// </summary>
         /// <summary>Show limit notifications together because Windows displays only the latest balloon. Clicking opens the panel.</summary>
         private void Notify(Snapshot s)
         {
@@ -721,6 +717,10 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { return null; }
         }
 
+        /// <summary>
+        /// On first launch, explain which data leaves this PC and how to disable network collection.
+        /// Only enabled services' own usage endpoints are contacted.
+        /// </summary>
         private void ShowPrivacyNotice()
         {
             balloonAction = OpenSettings;
