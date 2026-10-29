@@ -184,39 +184,42 @@ namespace AIMeter
                         Toggle(S.LocalAgents, v => { S.LocalAgents = v; Changed(); })));
                     break;
                 default:
-                    var d = Definitions.Get(id);
-                    if (d != null && d.UsesKey)
-                    {
-                        var found = ApiKeys.Has(d.Id) ? null : KeyFinder.Find(d);
-                        string text = ApiKeys.Has(d.Id) ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.")
-                                    : found != null ? L.F("Using the key found in {0}. AI Meter reads it where it is and sends it only to {1}.", found.Source, d.Name)
-                                    : L.T("Add an API key to read your usage.");
-                        rows.Add(Row(null, L.T("API key"), text,
-                            ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false)
-                                              : Button(found != null ? L.T("Use another key…") : L.T("Add key…"), () => C.EnterApiKey(d), found == null)));
-                        // Offer extra credentials only when needed or already saved.
-                        var keys = Json.Obj(d.Raw, "keys");
-                        if (keys != null)
-                            foreach (var kv in keys)
-                            {
-                                string slot = kv.Key;
-                                var spec = kv.Value as Dictionary<string, object>;
-                                bool saved = ApiKeys.Has(d.Id + "." + slot);
-                                bool needed;
-                                lock (DefinedProvider.NeedsExtraKey) needed = DefinedProvider.NeedsExtraKey.Contains(d.Id + "." + slot);
-                                if (!saved && !needed) continue;
-                                rows.Add(Row(null, L.T(Json.Str(spec, "label") ?? slot),
-                                    saved ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.") : L.T(Json.Str(spec, "description") ?? ""),
-                                    saved ? Button(L.T("Remove"), () => { ApiKeys.Remove(d.Id + "." + slot); C.RefreshNow(); Build(); }, false)
-                                          : Button(L.T("Add key…"), () => C.EnterApiKey(d, slot), true)));
-                            }
-                    }
+                    AddKeyRows(rows, Definitions.Get(id));
                     break;
             }
             var def2 = Definitions.Get(id);
             if (def2 != null && Json.Obj(def2.Raw, "spend") != null) rows.Add(BudgetRow(def2));
             if (id != "local") AddLimitRow(rows, id);
             return rows;
+        }
+
+        /// <summary>API-key rows for a key-based service: the main key, then extra keys that are saved or were requested.</summary>
+        private void AddKeyRows(List<FrameworkElement> rows, ServiceDefinition d)
+        {
+            if (d == null || !d.UsesKey) return;
+            var found = ApiKeys.Has(d.Id) ? null : KeyFinder.Find(d);
+            string text = ApiKeys.Has(d.Id) ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.")
+                        : found != null ? L.F("Using the key found in {0}. AI Meter reads it where it is and sends it only to {1}.", found.Source, d.Name)
+                        : L.T("Add an API key to read your usage.");
+            rows.Add(Row(null, L.T("API key"), text,
+                ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false)
+                                  : Button(found != null ? L.T("Use another key…") : L.T("Add key…"), () => C.EnterApiKey(d), found == null)));
+            // Offer extra credentials only when needed or already saved.
+            var keys = Json.Obj(d.Raw, "keys");
+            if (keys != null)
+                foreach (var kv in keys)
+                {
+                    string slot = kv.Key;
+                    var spec = kv.Value as Dictionary<string, object>;
+                    bool saved = ApiKeys.Has(d.Id + "." + slot);
+                    bool needed;
+                    lock (DefinedProvider.NeedsExtraKey) needed = DefinedProvider.NeedsExtraKey.Contains(d.Id + "." + slot);
+                    if (!saved && !needed) continue;
+                    rows.Add(Row(null, L.T(Json.Str(spec, "label") ?? slot),
+                        saved ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.") : L.T(Json.Str(spec, "description") ?? ""),
+                        saved ? Button(L.T("Remove"), () => { ApiKeys.Remove(d.Id + "." + slot); C.RefreshNow(); Build(); }, false)
+                              : Button(L.T("Add key…"), () => C.EnterApiKey(d, slot), true)));
+                }
         }
 
         /// <summary>Edit a credit service's budget amount and period; an empty amount disables it.</summary>

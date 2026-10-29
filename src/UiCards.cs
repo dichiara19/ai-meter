@@ -141,8 +141,25 @@ namespace AIMeter
             if (p.Models != null) return LocalCard(p, expanded, toggle);
             string brand = BrandBrush(p.Id);
             var stack = new StackPanel();
+            stack.Children.Add(ProviderHeader(p, brand, expanded, toggle));
 
-            // Clickable header.
+            // Limits.
+            var limits = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
+            if (p.Usage != null && p.Usage.Windows.Count > 0)
+                foreach (var w in p.Usage.Windows.Where(x => !x.Hidden && !RowHidden(p.Id, x.Key)).Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
+            else if (!p.NeedsLogin)
+                limits.Children.Add(new TextBlock { Text = L.T("No limit data yet"), FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
+            stack.Children.Add(limits);
+
+            AddUsageNotes(stack, p);
+            AddTipAndNotice(stack, p, brand, login);
+            if (expanded && p.Sessions.Count > 0) AddSessions(stack, p, brand, sessionsOpen, toggleSessions);
+            return Card(stack, new Thickness(14, 12, 14, 12));
+        }
+
+        /// <summary>The clickable header: logo, name, plan badge and the running and busy session counts.</summary>
+        private static DockPanel ProviderHeader(ProviderState p, string brand, bool expanded, Action toggle)
+        {
             var head = CardHeader(Logo(p.Id, 20), expanded, toggle);
 
             var count = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -180,16 +197,12 @@ namespace AIMeter
                 title.Children.Add(badge);
             }
             head.Children.Add(title);
-            stack.Children.Add(head);
+            return head;
+        }
 
-            // Limits.
-            var limits = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
-            if (p.Usage != null && p.Usage.Windows.Count > 0)
-                foreach (var w in p.Usage.Windows.Where(x => !x.Hidden && !RowHidden(p.Id, x.Key)).Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
-            else if (!p.NeedsLogin)
-                limits.Children.Add(new TextBlock { Text = L.T("No limit data yet"), FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
-            stack.Children.Add(limits);
-
+        /// <summary>Cached-data marker, weekly breakdown, extra credits, period spending and today's models.</summary>
+        private static void AddUsageNotes(StackPanel stack, ProviderState p)
+        {
             // Mark cached provider usage once in the card.
             if (p.Usage != null && p.Usage.Source != "live" && string.IsNullOrEmpty(p.Notice))
             {
@@ -246,8 +259,11 @@ namespace AIMeter
                               + string.Join("\n", ms.Select(m => L.F("{0}: {1}, {2} tokens, {3} replies", m.Model, money.Format(m.Cost), Tokens((int)Math.Min(int.MaxValue, m.Tokens)), m.Replies)));
                 stack.Children.Add(box);
             }
+        }
 
-            // Show the active unused-quota or wait-instead-of-paying tip.
+        /// <summary>The active unused-quota or wait-instead-of-paying tip, then the service notice with an optional sign-in link.</summary>
+        private static void AddTipAndNotice(StackPanel stack, ProviderState p, string brand, Action<string> login)
+        {
             if (p.Tip != null)
             {
                 var tip = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
@@ -284,30 +300,30 @@ namespace AIMeter
                 note.Children.Add(nt);
                 stack.Children.Add(note);
             }
+        }
 
-            if (expanded && p.Sessions.Count > 0)
+        /// <summary>Open desktop apps, then agent sessions, folded behind a summary row when the caller supports it.</summary>
+        private static void AddSessions(StackPanel stack, ProviderState p, string brand, bool sessionsOpen, Action toggleSessions)
+        {
+            var div = new Border { Height = 1, Margin = new Thickness(-14, 12, -14, 6) };
+            div.SetResourceReference(Border.BackgroundProperty, "Divider");
+            stack.Children.Add(div);
+            // Open desktop apps stay visible; agent sessions fold behind a summary row when the caller supports it.
+            foreach (var s in p.Sessions.Where(s => s.Status == "app")) stack.Children.Add(SessionRow(s, brand));
+            var ordered = p.Sessions.Where(s => s.Status != "app")
+                .OrderByDescending(s => s.Status == "busy")
+                .ThenByDescending(s => s.Updated).ToList();
+            if (ordered.Count > 0 && toggleSessions != null) stack.Children.Add(SessionSummary(ordered, sessionsOpen, toggleSessions));
+            if (sessionsOpen || toggleSessions == null)
             {
-                var div = new Border { Height = 1, Margin = new Thickness(-14, 12, -14, 6) };
-                div.SetResourceReference(Border.BackgroundProperty, "Divider");
-                stack.Children.Add(div);
-                // Open desktop apps stay visible; agent sessions fold behind a summary row when the caller supports it.
-                foreach (var s in p.Sessions.Where(s => s.Status == "app")) stack.Children.Add(SessionRow(s, brand));
-                var ordered = p.Sessions.Where(s => s.Status != "app")
-                    .OrderByDescending(s => s.Status == "busy")
-                    .ThenByDescending(s => s.Updated).ToList();
-                if (ordered.Count > 0 && toggleSessions != null) stack.Children.Add(SessionSummary(ordered, sessionsOpen, toggleSessions));
-                if (sessionsOpen || toggleSessions == null)
+                foreach (var s in ordered.Take(6)) stack.Children.Add(SessionRow(s, brand));
+                if (ordered.Count > 6)
                 {
-                    foreach (var s in ordered.Take(6)) stack.Children.Add(SessionRow(s, brand));
-                    if (ordered.Count > 6)
-                    {
-                        var more = Text(L.F("+{0} more sessions", ordered.Count - 6), 11.5, "Text3");
-                        more.Margin = new Thickness(18, 2, 0, 0);
-                        stack.Children.Add(more);
-                    }
+                    var more = Text(L.F("+{0} more sessions", ordered.Count - 6), 11.5, "Text3");
+                    more.Margin = new Thickness(18, 2, 0, 0);
+                    stack.Children.Add(more);
                 }
             }
-            return Card(stack, new Thickness(14, 12, 14, 12));
         }
 
         /// <summary>A card header with the icon on the left and, when the card can fold, a chevron that toggles it.</summary>
@@ -374,52 +390,7 @@ namespace AIMeter
                 stack.Children.Add(row);
             }
 
-            foreach (var m in p.Models)
-            {
-                var block = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
-                var top = new DockPanel();
-                string mem = m.Vram > 0 ? GpuMemory.Format(m.Vram) : m.Ram > 0 ? GpuMemory.Format(m.Ram) : null;
-                if (mem != null)
-                {
-                    var r = Text(mem, 13, "Text", FontWeights.SemiBold);
-                    r.Margin = new Thickness(8, 0, 0, 0);
-                    DockPanel.SetDock(r, Dock.Right);
-                    top.Children.Add(r);
-                }
-                var dot = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Margin = new Thickness(1, 0, 9, 0), VerticalAlignment = VerticalAlignment.Center };
-                dot.SetResourceReference(Border.BackgroundProperty, m.Busy > 0 ? "Success" : "Track");
-                DockPanel.SetDock(dot, Dock.Left);
-                top.Children.Add(dot);
-                var title = Text(m.Name, 13, "Text", FontWeights.SemiBold);
-                title.TextTrimming = TextTrimming.CharacterEllipsis;
-                top.Children.Add(title);
-                block.Children.Add(top);
-
-                var facts = LocalFacts(m).Where(f => !f.Contains("VRAM") || mem == null).ToList();
-                if (m.Detail != null) facts.Insert(1, m.Detail);
-                var meta = Text(string.Join(" · ", facts), 11.5, "Text3");
-                meta.Margin = new Thickness(18, 1, 0, 0);
-                meta.TextTrimming = TextTrimming.CharacterEllipsis;
-                block.Children.Add(meta);
-
-                // Show context usage for the active request when the server reports it.
-                if (m.Context > 0 && m.ContextUsed > 0)
-                {
-                    double left = 100 - Math.Min(100, m.ContextUsed * 100.0 / m.Context);
-                    var bar = Bar(left, LevelBrush(left, "Info"), 3);
-                    bar.Margin = new Thickness(18, 5, 0, 0);
-                    bar.ToolTip = L.F("Context in use: {0} of {1} tokens", Tokens(m.ContextUsed), Tokens(m.Context));
-                    block.Children.Add(bar);
-                }
-                block.ToolTip = m.Name + "\n" + string.Join(" · ", LocalFacts(m)) + (m.Slots > 0 ? "\n" + L.F("Requests in progress: {0} of {1}", m.Busy, m.Slots) : "");
-                foreach (var s in m.Sessions.Take(4))
-                {
-                    var sr = SessionRow(s, "Info");
-                    sr.Margin = new Thickness(18, 2, 0, 0);
-                    block.Children.Add(sr);
-                }
-                stack.Children.Add(block);
-            }
+            foreach (var m in p.Models) stack.Children.Add(LocalModelBlock(m));
 
             // CLI sessions without a matching loaded model, including cloud and unreachable servers.
             if (expanded && p.Sessions.Count > 0)
@@ -440,6 +411,54 @@ namespace AIMeter
                 stack.Children.Add(none);
             }
             return Card(stack, new Thickness(14, 12, 14, 12));
+        }
+
+        /// <summary>One loaded model: memory, server facts, context in use and the CLI sessions attached to it.</summary>
+        private static FrameworkElement LocalModelBlock(LocalModel m)
+        {
+            var block = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+            var top = new DockPanel();
+            string mem = m.Vram > 0 ? GpuMemory.Format(m.Vram) : m.Ram > 0 ? GpuMemory.Format(m.Ram) : null;
+            if (mem != null)
+            {
+                var r = Text(mem, 13, "Text", FontWeights.SemiBold);
+                r.Margin = new Thickness(8, 0, 0, 0);
+                DockPanel.SetDock(r, Dock.Right);
+                top.Children.Add(r);
+            }
+            var dot = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Margin = new Thickness(1, 0, 9, 0), VerticalAlignment = VerticalAlignment.Center };
+            dot.SetResourceReference(Border.BackgroundProperty, m.Busy > 0 ? "Success" : "Track");
+            DockPanel.SetDock(dot, Dock.Left);
+            top.Children.Add(dot);
+            var title = Text(m.Name, 13, "Text", FontWeights.SemiBold);
+            title.TextTrimming = TextTrimming.CharacterEllipsis;
+            top.Children.Add(title);
+            block.Children.Add(top);
+
+            var facts = LocalFacts(m).Where(f => !f.Contains("VRAM") || mem == null).ToList();
+            if (m.Detail != null) facts.Insert(1, m.Detail);
+            var meta = Text(string.Join(" · ", facts), 11.5, "Text3");
+            meta.Margin = new Thickness(18, 1, 0, 0);
+            meta.TextTrimming = TextTrimming.CharacterEllipsis;
+            block.Children.Add(meta);
+
+            // Show context usage for the active request when the server reports it.
+            if (m.Context > 0 && m.ContextUsed > 0)
+            {
+                double left = 100 - Math.Min(100, m.ContextUsed * 100.0 / m.Context);
+                var bar = Bar(left, LevelBrush(left, "Info"), 3);
+                bar.Margin = new Thickness(18, 5, 0, 0);
+                bar.ToolTip = L.F("Context in use: {0} of {1} tokens", Tokens(m.ContextUsed), Tokens(m.Context));
+                block.Children.Add(bar);
+            }
+            block.ToolTip = m.Name + "\n" + string.Join(" · ", LocalFacts(m)) + (m.Slots > 0 ? "\n" + L.F("Requests in progress: {0} of {1}", m.Busy, m.Slots) : "");
+            foreach (var s in m.Sessions.Take(4))
+            {
+                var sr = SessionRow(s, "Info");
+                sr.Margin = new Thickness(18, 2, 0, 0);
+                block.Children.Add(sr);
+            }
+            return block;
         }
     }
 }
