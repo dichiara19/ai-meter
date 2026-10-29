@@ -112,4 +112,6 @@ jobs:
             AIMeter-script.zip
             docs/media/history-dark.png
             docs/media/history-light.png
+            docs/media/consumption-dark.png
+            docs/media/consumption-light.png
           body_path: RELEASE_NOTES.md

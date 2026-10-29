@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 
 namespace AIMeter
 {
@@ -26,7 +27,101 @@ namespace AIMeter
             test("Deleting history resets consumption readiness and episodes", DeleteConsumption);
             test("A version 1 archive upgrades in place", SchemaUpgrade);
             test("Consumption days follow daylight-saving rules", DaylightSaving);
+            test("Sparse weekend history falls back to a ready general reference", WeekendFallback);
+            test("Continuity breaks are distinguishable from incomplete intervals", BrokenContinuity);
+            test("Episode thresholds survive new training data and history deletion clears the live monitor", ReferenceLifecycle);
             test("Consumption strings are translated in every supported language", Translations);
+        }
+
+        private static void WeekendFallback()
+        {
+            var from = new DateTime(2026, 1, 5, 0, 0, 0, DateTimeKind.Utc);
+            var intervals = new List<ConsumptionInterval>();
+            for (int day = 0; day < 14; day++) for (int n = 0; n < 18; n++)
+            {
+                var at = from.AddDays(day).AddHours(10).AddMinutes(n * 5);
+                intervals.Add(new ConsumptionInterval { StartUtc = at, EndUtc = at.AddMinutes(5), Points = 0.2 });
+            }
+            var now = from.AddDays(19).AddHours(12);
+            var reference = ConsumptionAnalysis.Reference(intervals, TimeZoneInfo.Utc, now, from, now.Date);
+            var scope = new ConsumptionScope { Provider = "fixture", Account = "a", Source = "live", Metric = "week" };
+            Assert(reference.Context == "all" && ConsumptionAnalysis.Readiness(scope, reference, now, now, false).State == ReadinessState.Ready,
+                "A sparse weekend profile disabled a usable general reference.");
+        }
+
+        private static void BrokenContinuity()
+        {
+            var builder = new IntervalBuilder();
+            var at = Start.ToUniversalTime();
+            Func<int, double, QuotaReading> reading = (minutes, points) => new QuotaReading
+                { MeasuredUtc = at.AddMinutes(minutes), Percent = points, Quality = "measured", ResetsUtc = at.AddDays(1) };
+            builder.Feed(reading(0, 0), null);
+            builder.Feed(reading(1, 1), null);
+            Assert(!builder.ContinuityBroken, "An incomplete interval broke continuity.");
+            builder.Feed(reading(30, 3), null);
+            Assert(builder.ContinuityBroken, "A gap did not break continuity.");
+            builder.Feed(reading(31, 4), null);
+            Assert(!builder.ContinuityBroken, "The break leaked into the next reading.");
+            builder.Feed(reading(32, 2), null);
+            Assert(builder.ContinuityBroken, "A decrease did not break continuity.");
+        }
+
+        private static void ReferenceLifecycle()
+        {
+            var store = Store(); Fixture fixture;
+            var monitor = Detected(store, out fixture, Start);
+            var episode = monitor.Episodes(DateTime.MinValue, "", 100).First();
+            var now = Start.AddDays(31).AddHours(12).ToUniversalTime();
+            var baseline = episode.Baseline;
+            baseline["fastThresholdPointsPerHour"] = 1.0;
+            baseline["sustainedWindows"] = 0;
+            store.Transaction(db =>
+            {
+                db.Execute("UPDATE consumption_episodes SET state='open',resolved=NULL,resets=?,baseline=? WHERE id=?",
+                    HistoryStore.Stamp(now.AddDays(1)), Json.Serialize(baseline), episode.Id);
+                // Make the newly trained reference radically different from the saved episode reference.
+                db.Execute("UPDATE consumption_intervals SET points=50");
+                return 0;
+            });
+            var restarted = new ConsumptionMonitor(store);
+            store.Transaction(db =>
+            {
+                var row = db.Query("SELECT provider,account,metric,source,plan,allowance,currency FROM consumption_scopes WHERE scope=?", episode.Scope)[0];
+                var scope = new ConsumptionScope { Provider = (string)row[0], Account = (string)row[1], Metric = (string)row[2], Source = (string)row[3], Plan = row[4] as string,
+                    Allowance = row[5] == null ? (double?)null : Convert.ToDouble(row[5]), Currency = row[6] as string };
+                var interval = new ConsumptionInterval { StartUtc = now.AddMinutes(-5), EndUtc = now, Points = 3, ResetsUtc = now.AddDays(1) };
+                typeof(ConsumptionMonitor).GetMethod("Evaluate", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(restarted,
+                    new object[] { db, scope, interval, 0, now, (DateTime?)Start.ToUniversalTime(), TimeZoneInfo.Local, new List<ConsumptionNotice>() });
+                var evidence = AnomalyEvidence.FromJson(Json.Parse((string)db.Query("SELECT evidence FROM consumption_episodes WHERE id=?", episode.Id)[0][0]));
+                Assert(evidence.EndUtc == now && evidence.ThresholdPerHour == 13, "An open episode used newly learned thresholds after restart.");
+                var referenceMethod = typeof(ConsumptionMonitor).GetMethod("ReferenceFor", BindingFlags.Instance | BindingFlags.NonPublic);
+                object[] referenceArgs = { db, scope, now, TimeZoneInfo.Local, null };
+                var before = (BaselineSummary)referenceMethod.Invoke(new ConsumptionMonitor(store), referenceArgs);
+                var suspect = episode.OpenedUtc.AddMinutes(1);
+                db.Execute("INSERT OR REPLACE INTO consumption_intervals VALUES(?,?,?,?,?,?)", scope.Key, HistoryStore.Stamp(suspect),
+                    HistoryStore.Stamp(suspect.AddMinutes(5)), 99, HistoryStore.Stamp(now.AddDays(1)), ConsumptionAnalysis.AlgorithmVersion);
+                var after = (BaselineSummary)referenceMethod.Invoke(new ConsumptionMonitor(store), referenceArgs);
+                Assert(before.Intervals == after.Intervals, "An interval inside a suspicious episode trained the reference.");
+                db.Execute("UPDATE consumption_scopes SET pending=1 WHERE scope=?", scope.Key);
+                db.Execute("UPDATE consumption_episodes SET normal=5 WHERE id=?", episode.Id);
+                var measured = now.AddMinutes(30);
+                var rows = new List<object[]> { new object[] { scope.Provider, scope.Account, scope.Metric, scope.Source, scope.Plan, scope.Allowance, scope.Currency,
+                    HistoryStore.Stamp(measured), HistoryStore.Stamp(measured), HistoryStore.Stamp(now.AddDays(1)), 50.0, "measured" } };
+                typeof(ConsumptionMonitor).GetMethod("ProcessScope", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(restarted,
+                    new object[] { db, scope, rows, new Func<DateTime, DateTime, bool>((a, b) => true), measured, null, TimeZoneInfo.Local, new List<ConsumptionNotice>() });
+                Assert(Convert.ToInt32(db.Query("SELECT pending FROM consumption_scopes WHERE scope=?", scope.Key)[0][0]) == 0,
+                    "Weak departures persisted across a collection gap.");
+                Assert(Convert.ToInt32(db.Query("SELECT normal FROM consumption_episodes WHERE id=?", episode.Id)[0][0]) == 0,
+                    "Recovery observations persisted across a collection gap.");
+                return 0;
+            });
+            monitor.Process(now, null, TimeZoneInfo.Local);
+            int generation = monitor.Generation;
+            store.Clear();
+            Assert(monitor.Readiness.Count == 0 && monitor.Generation != generation, "Deletion left readiness or pending-notice generation valid.");
+            Insert(store, fixture, new[] { Start.AddDays(31).AddHours(13), Start.AddDays(31).AddHours(13).AddMinutes(5) });
+            monitor.Process(Start.AddDays(31).AddHours(13).AddMinutes(5).ToUniversalTime(), null, TimeZoneInfo.Local);
+            Assert(monitor.Readiness.All(r => r.State == ReadinessState.Learning && r.Baseline.ActiveIntervals == 0), "Deletion reused the cached reference on the same day.");
         }
 
         private static void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }

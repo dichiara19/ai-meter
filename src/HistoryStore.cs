@@ -284,6 +284,8 @@ namespace AIMeter
             }
         }
 
+        internal volatile int Generation;
+
         internal void Clear()
         {
             lock (gate) using (var db = Open())
@@ -297,6 +299,7 @@ namespace AIMeter
                     Started = DateTime.Now;
                     db.Execute("INSERT INTO metadata VALUES('started',?)", Stamp(Started).ToString(CultureInfo.InvariantCulture));
                     db.Execute("COMMIT");
+                    Generation++;
                 }
                 catch { db.Execute("ROLLBACK"); throw; }
                 // Reclaim pages and remove deleted text from the active database and WAL.

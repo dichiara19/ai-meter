@@ -147,6 +147,14 @@ namespace AIMeter
                 tabs.SelectedIndex = 0; frame.Background = Brushes.Transparent;
                 var scene = MediaRenderer.HistoryShot(frame, prefix == "history-dark");
                 MediaRenderer.Save(scene, Path.Combine(output, prefix + "-release.png"), 2);
+                // Show the existing overview scrolled to the real consumption card.
+                var overview = (StackPanel)typeof(HistoryWindow).GetField("overview", flags).GetValue(window);
+                var scroll = (ScrollViewer)((Border)((TabItem)tabs.Items[0]).Content).Child;
+                var target = (FrameworkElement)overview.Children[report.Models.Count > 0 ? 3 : 2];
+                frame.UpdateLayout();
+                scroll.ScrollToVerticalOffset(target.TranslatePoint(new Point(), overview).Y);
+                frame.UpdateLayout();
+                MediaRenderer.Save(scene, Path.Combine(output, prefix + "-consumption-release.png"), 2);
             }
             window.Close();
         }
