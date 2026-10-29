@@ -33,7 +33,7 @@ Claude, ChatGPT/Codex and GitHub Copilot need custom sign-in flows and stay in c
 
 | Field | Meaning |
 |---|---|
-| `id` | Lowercase letters, digits and `-`. `claude`, `openai`, `copilot` and `local` are reserved. |
+| `id` | Lowercase letters, digits and `-`. `claude`, `openai`, `copilot`, `antigravity` and `local` are reserved. |
 | `name`, `description` | Shown in Settings and in the panel. Write them in English and translate them in `i18n`. |
 | `monogram` | Letter shown when there is no logo (default: first letter of `name`). |
 | `color` | Brand color for light and dark theme, `#RRGGBB`. |
