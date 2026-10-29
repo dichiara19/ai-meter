@@ -42,6 +42,7 @@ namespace AIMeter
             Test("Changing credentials clears history and extra cache", ChangedCredential);
             Test("Changing accounts isolates threshold alerts", AlertIdentity);
             Test("Changing accounts discards previous forecast pace", ForecastIdentity);
+            Test("Short bursts only forecast the near future", ForecastHorizon);
             Test("Extra-key backoff applies until the key changes", ExtraBackoff);
             Test("Missing choices survive a restart and expire after ten days", MissingChoice);
             Test("Money changes invalidate the render signature", MoneySignature);
@@ -449,6 +450,37 @@ namespace AIMeter
             u.Identity = Scope("account-b"); w.Used = 20;
             forecast.Apply(snapshot);
             Assert(w.PacePerHour > 9 && w.PacePerHour < 11, "The new account inherited the old account's pace.");
+        }
+
+        /// <summary>Apply two readings of one window, fifteen minutes apart, and return the window.</summary>
+        private static UsageWindow ForecastAfter(double startedHoursAgo, double resetsInHours, double before, double after)
+        {
+            var now = DateTime.Now;
+            var w = new UsageWindow { Label = "Window", Used = before, StartedAt = now.AddHours(-startedHoursAgo), ResetsAt = now.AddHours(resetsInHours) };
+            var u = new Usage { Source = "live", Identity = Scope("account"), At = now.AddMinutes(-15) }; u.Windows.Add(w);
+            var snapshot = SnapshotFor(new ProviderState { Id = "fixture", Usage = u });
+            var forecast = new Forecaster();
+            forecast.Apply(snapshot);
+            u.At = now; w.Used = after;
+            forecast.Apply(snapshot);
+            return w;
+        }
+
+        private static void ForecastHorizon()
+        {
+            // The reported case: one point used in a burst, eleven hours into a weekly window.
+            var weekly = ForecastAfter(11, 157, 0, 1);
+            Assert(weekly.PacePerHour > 3, "The recent burst pace was not measured.");
+            Assert(weekly.RunsOutAt == null, "A short burst forecast the end of a weekly limit.");
+
+            var session = ForecastAfter(2, 3, 60, 75);
+            Assert(session.RunsOutAt.HasValue && session.RunsOutAt.Value < DateTime.Now.AddHours(1), "An imminent session exhaustion was not forecast.");
+
+            var sustained = ForecastAfter(96, 72, 89, 90);
+            Assert(sustained.RunsOutAt.HasValue, "A sustained weekly average did not forecast exhaustion.");
+
+            var early = ForecastAfter(2, 166, 4, 5);
+            Assert(early.RunsOutAt == null, "The average of a window's first hours forecast the whole week.");
         }
 
         private static void MissingChoice()
