@@ -96,6 +96,13 @@ namespace AIMeter
             Focusable(expander, L.T(title)); return expander;
         }
 
+        /// <summary>Translated label for a stored limit key ("Label|Suffix").</summary>
+        internal static string MetricLabel(string metric)
+        {
+            var parts = metric.Split(new[] { '|' }, 2);
+            return L.T(parts[0]) + (parts.Length > 1 && parts[1].Length > 0 ? " · " + parts[1] : "");
+        }
+
         internal static string ProviderName(string id)
         {
             if (id == "claude") return "Claude";

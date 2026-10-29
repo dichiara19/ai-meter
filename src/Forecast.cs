@@ -40,11 +40,7 @@ namespace AIMeter
                         t.Samples.Add(new Sample { At = p.Usage.At, Used = w.Used });
                     t.Samples.RemoveAll(x => (now - x.At).TotalMinutes > 90);
                     w.PacePerHour = Pace(t.Samples, w, now);
-                    if (w.PacePerHour > 0.05)
-                    {
-                        var at = now.AddHours((100 - w.Used) / w.PacePerHour.Value);
-                        if (at < w.ResetsAt.Value) w.RunsOutAt = at;
-                    }
+                    w.RunsOutAt = RunsOut(t.Samples, w, now);
                 }
             }
         }
@@ -70,6 +66,36 @@ namespace AIMeter
             else if (w.StartedAt.HasValue && (now - w.StartedAt.Value).TotalMinutes >= 15 && w.Used >= 3)
                 perHour = w.Used / (now - w.StartedAt.Value).TotalHours;
             return perHour;
+        }
+
+        /// <summary>How many times the observed span a recent pace may be projected forward.</summary>
+        internal const double RecentHorizon = 4;
+
+        /// <summary>
+        /// Forecast exhaustion before the reset, or null when the evidence cannot support it.
+        /// A recent burst only predicts the near future: its projection must fall within RecentHorizon
+        /// times the observed span, so minutes of activity after a weekly reset never forecast the week.
+        /// Longer projections use the window average once a tenth of the window has elapsed.
+        /// </summary>
+        private static DateTime? RunsOut(List<Sample> samples, UsageWindow w, DateTime now)
+        {
+            double left = 100 - w.Used;
+            if (w.PacePerHour > 0.05 && samples.Count >= 2)
+            {
+                double span = (samples[samples.Count - 1].At - samples[0].At).TotalHours;
+                double hours = left / w.PacePerHour.Value;
+                if (hours <= span * RecentHorizon) return Before(now.AddHours(hours), w);
+            }
+
+            if (!w.StartedAt.HasValue || !w.Length.HasValue || w.Used < 3) return null;
+            double elapsed = (now - w.StartedAt.Value).TotalHours;
+            if (elapsed < Math.Max(0.25, w.Length.Value.TotalHours * 0.1)) return null;
+            return Before(now.AddHours(left * elapsed / w.Used), w);
+        }
+
+        private static DateTime? Before(DateTime at, UsageWindow w)
+        {
+            return at < w.ResetsAt.Value ? at : (DateTime?)null;
         }
     }
 

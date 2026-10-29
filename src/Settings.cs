@@ -56,6 +56,9 @@ namespace AIMeter
         public bool TipsUnused { get; set; }        // Suggest quota that would otherwise expire unused.
         public bool TipsShort { get; set; }         // Also suggest short-session quota, which consumes enclosing long-window limits.
         public bool TipsWait { get; set; }          // Suggest waiting for a reset instead of paying for extra usage.
+        public bool ConsumptionAlerts { get; set; }             // Opt-in: notify consumption unusual for this user's history.
+        public DateTime ConsumptionAlertsSince { get; set; }    // Only episodes starting after opting in are notified.
+        public bool ConsumptionSuggested { get; set; }          // The one-time suggestion was shown or dismissed.
 
         /// <summary>Hidden service-card rows keyed by limit identity, *spend or *models.</summary>
         public System.Collections.Generic.Dictionary<string, bool> HiddenRows { get; set; }

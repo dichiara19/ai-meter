@@ -46,7 +46,25 @@ namespace AIMeter
         private bool initialised;
         private static readonly long EpochTicks = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
 
+        internal const int SchemaVersion = 2;
+
         internal HistoryStore(string path) { FilePath = path; }
+
+        /// <summary>Run work in one immediate transaction under the writer gate; any exception rolls everything back.</summary>
+        internal T Transaction<T>(Func<HistoryDatabase, T> work)
+        {
+            lock (gate) using (var db = Open())
+            {
+                db.Execute("BEGIN IMMEDIATE");
+                try
+                {
+                    T result = work(db);
+                    db.Execute("COMMIT");
+                    return result;
+                }
+                catch { db.Execute("ROLLBACK"); throw; }
+            }
+        }
         internal static long Stamp(DateTime at) { return (at.ToUniversalTime().Ticks - EpochTicks) / TimeSpan.TicksPerMillisecond; }
         internal static DateTime Time(object value) { return new DateTime(EpochTicks + Convert.ToInt64(value) * TimeSpan.TicksPerMillisecond, DateTimeKind.Utc).ToLocalTime(); }
         internal static string Hash(string text)
@@ -62,7 +80,7 @@ namespace AIMeter
                 db.Execute("PRAGMA foreign_keys=ON");
                 if (initialised) return db;
                 long version = Convert.ToInt64(db.Query("PRAGMA user_version")[0][0]);
-                if (version > 1) throw new IOException("The history archive was created by a newer version of AI Meter.");
+                if (version > SchemaVersion) throw new IOException("The history archive was created by a newer version of AI Meter.");
                 db.Execute("PRAGMA journal_mode=WAL");
                 db.Execute("PRAGMA synchronous=NORMAL");
                 db.Execute("BEGIN IMMEDIATE");
@@ -78,8 +96,14 @@ namespace AIMeter
                     db.Execute("CREATE INDEX IF NOT EXISTS events_time ON events(at)");
                     db.Execute("CREATE TABLE IF NOT EXISTS cursors (id TEXT PRIMARY KEY, position INTEGER NOT NULL, modified INTEGER NOT NULL) WITHOUT ROWID");
                     db.Execute("CREATE TABLE IF NOT EXISTS coverage (first INTEGER NOT NULL, last INTEGER NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(first,last,reason)) WITHOUT ROWID");
+                    // Version 2: consumption intervals, per-scope processing state and alert episodes (see ConsumptionMonitor).
+                    db.Execute("CREATE TABLE IF NOT EXISTS consumption_scopes (scope TEXT PRIMARY KEY, provider TEXT NOT NULL, account TEXT NOT NULL, metric TEXT NOT NULL, source TEXT NOT NULL, plan TEXT, allowance REAL, currency TEXT, anchor_at INTEGER, anchor_percent REAL, anchor_resets INTEGER, last_at INTEGER, last_percent REAL, last_resets INTEGER, pending INTEGER NOT NULL DEFAULT 0, reference_since INTEGER, previous_since INTEGER, reference_reason TEXT) WITHOUT ROWID");
+                    db.Execute("CREATE TABLE IF NOT EXISTS consumption_intervals (scope TEXT NOT NULL, starts INTEGER NOT NULL, ends INTEGER NOT NULL, points REAL NOT NULL, resets INTEGER, version INTEGER NOT NULL, PRIMARY KEY(scope,starts)) WITHOUT ROWID");
+                    db.Execute("CREATE INDEX IF NOT EXISTS consumption_intervals_end ON consumption_intervals(scope,ends)");
+                    db.Execute("CREATE TABLE IF NOT EXISTS consumption_episodes (id TEXT PRIMARY KEY, scope TEXT NOT NULL, provider TEXT NOT NULL, account TEXT NOT NULL, metric TEXT NOT NULL, resets INTEGER, state TEXT NOT NULL, opened INTEGER NOT NULL, last INTEGER NOT NULL, evidence TEXT NOT NULL, baseline TEXT NOT NULL, version INTEGER NOT NULL, eligible INTEGER NOT NULL, notified INTEGER, feedback TEXT, normal INTEGER NOT NULL DEFAULT 0, resolved INTEGER, reason TEXT) WITHOUT ROWID");
+                    db.Execute("CREATE INDEX IF NOT EXISTS consumption_episodes_time ON consumption_episodes(last)");
                     db.Execute("INSERT OR IGNORE INTO metadata VALUES('started',?)", Stamp(DateTime.Now).ToString(CultureInfo.InvariantCulture));
-                    db.Execute("PRAGMA user_version=1");
+                    db.Execute("PRAGMA user_version=" + SchemaVersion.ToString(CultureInfo.InvariantCulture));
                     db.Execute("COMMIT");
                 }
                 catch { db.Execute("ROLLBACK"); throw; }
@@ -235,8 +259,9 @@ namespace AIMeter
                 {
                     using (var writer = new StreamWriter(temporary, false, new UTF8Encoding(false)))
                     {
-                        writer.WriteLine(Json.Serialize(new { format = "ai-meter-history", version = 1, timeUnit = "unix-milliseconds", exportedUtc = DateTime.UtcNow.ToString("o") }));
-                        foreach (string table in new[] { "metadata", "observations", "sessions", "events", "coverage" })
+                        writer.WriteLine(Json.Serialize(new { format = "ai-meter-history", version = 2, timeUnit = "unix-milliseconds", exportedUtc = DateTime.UtcNow.ToString("o") }));
+                        // Processing state (file cursors and consumption scopes) is internal and not exported.
+                        foreach (string table in new[] { "metadata", "observations", "sessions", "events", "coverage", "consumption_intervals", "consumption_episodes" })
                         {
                             var columns = db.Query("PRAGMA table_info(" + table + ")").Select(row => (string)row[1]).ToArray();
                             db.Read("SELECT * FROM " + table, row =>
@@ -266,7 +291,9 @@ namespace AIMeter
                 db.Execute("BEGIN IMMEDIATE");
                 try
                 {
-                    foreach (string table in new[] { "events", "sessions", "observations", "coverage", "cursors", "metadata" }) db.Execute("DELETE FROM " + table);
+                    // Deleting history also resets consumption readiness, processing cursors and episodes.
+                    foreach (string table in new[] { "events", "sessions", "observations", "coverage", "cursors", "consumption_episodes", "consumption_intervals", "consumption_scopes", "metadata" })
+                        db.Execute("DELETE FROM " + table);
                     Started = DateTime.Now;
                     db.Execute("INSERT INTO metadata VALUES('started',?)", Stamp(Started).ToString(CultureInfo.InvariantCulture));
                     db.Execute("COMMIT");
