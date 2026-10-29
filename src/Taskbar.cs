@@ -17,7 +17,7 @@ namespace AIMeter
     {
         public Native.RECT Rect;     // Physical pixels.
         public int Edge;             // 0 left, 1 top, 2 right, 3 bottom.
-        public bool Centered;        // Centred icons (the Windows 11 default).
+        public bool Centred;        // Centred icons (the Windows 11 default).
         public bool WidgetsButton;   // Widgets (weather) button in the left corner.
         public bool AutoHide;
         public int TrayLeft;         // Left edge of the notification area, physical pixels (0 if unknown).
@@ -25,7 +25,7 @@ namespace AIMeter
         public bool Horizontal { get { return Edge == 1 || Edge == 3; } }
         public bool Usable { get { return Horizontal && Rect.Right > Rect.Left; } }
         /// <summary>Recommended side: the left corner is free only with centred icons and no Widgets button.</summary>
-        public string RecommendedSide { get { return Centered && !WidgetsButton ? "left" : "right"; } }
+        public string RecommendedSide { get { return Centred && !WidgetsButton ? "left" : "right"; } }
 
         public static TaskbarInfo Read()
         {
@@ -37,11 +37,11 @@ namespace AIMeter
                 {
                     object al = k == null ? null : k.GetValue("TaskbarAl");
                     object da = k == null ? null : k.GetValue("TaskbarDa");
-                    t.Centered = al == null || Convert.ToInt32(al) != 0;      // Absent = centred.
+                    t.Centred = al == null || Convert.ToInt32(al) != 0;      // Absent = centred.
                     t.WidgetsButton = da == null || Convert.ToInt32(da) != 0; // Absent = visible.
                 }
             }
-            catch (Exception) { t.Centered = true; t.WidgetsButton = true; }
+            catch (Exception) { t.Centred = true; t.WidgetsButton = true; }
             t.TrayLeft = Native.TrayLeft();
             return t;
         }
@@ -52,7 +52,7 @@ namespace AIMeter
             if (!Horizontal) return L.T("Detected: taskbar on the side of the screen. The taskbar pill works only with the taskbar at the bottom or top.");
 
             return L.F("Detected: taskbar {0}, icons {1}, Widgets button {2}. Recommended position: {3}.",
-                L.T(Edge == 3 ? "at the bottom" : "at the top"), L.T(Centered ? "centered" : "on the left"), L.T(WidgetsButton ? "visible" : "hidden"),
+                L.T(Edge == 3 ? "at the bottom" : "at the top"), L.T(Centred ? "centered" : "on the left"), L.T(WidgetsButton ? "visible" : "hidden"),
                 L.T(RecommendedSide == "left" ? "left corner" : "next to the notification area"));
         }
     }

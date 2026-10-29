@@ -22,7 +22,7 @@ namespace AIMeter
     internal sealed class ServiceDefinition
     {
         public string Id, Name, Description, Monogram, Origin;
-        public uint ColorLight = 0xFF5B5FC7, ColorDark = 0xFFA9ACF5;
+        public uint ColourLight = 0xFF5B5FC7, ColourDark = 0xFFA9ACF5;
         public Dictionary<string, object> Raw;
 
         public Dictionary<string, object> Auth { get { return Json.Obj(Raw, "auth"); } }
@@ -43,10 +43,10 @@ namespace AIMeter
                 Description = Json.Str(d, "description"),
             };
             def.Monogram = Json.Str(d, "monogram") ?? def.Name.Substring(0, 1).ToUpperInvariant();
-            var color = Json.Obj(d, "color");
+            var colour = Json.Obj(d, "color");
             uint c;
-            if (ParseColor(Json.Str(color, "light"), out c)) def.ColorLight = c;
-            if (ParseColor(Json.Str(color, "dark"), out c)) def.ColorDark = c;
+            if (ParseColour(Json.Str(colour, "light"), out c)) def.ColourLight = c;
+            if (ParseColour(Json.Str(colour, "dark"), out c)) def.ColourDark = c;
             // Register translations supplied by the definition.
             var i18n = Json.Obj(d, "i18n");
             if (i18n != null)
@@ -58,7 +58,7 @@ namespace AIMeter
             return def;
         }
 
-        private static bool ParseColor(string s, out uint c)
+        private static bool ParseColour(string s, out uint c)
         {
             c = 0;
             if (s == null || !Regex.IsMatch(s, "^#[0-9a-fA-F]{6}$")) return false;
