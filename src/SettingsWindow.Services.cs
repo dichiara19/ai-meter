@@ -113,6 +113,8 @@ namespace AIMeter
                 vis.Add(Row(null, L.T("Spend today, this week and this month"), null, RowToggle(s.Id, "*spend")));
             if (prov.Usage.TodayModels != null || credits)
                 vis.Add(Row(null, L.T("Models used today"), L.T("From OpenCode and Pi, with the cost they computed."), RowToggle(s.Id, "*models")));
+            if (prov.Usage.FreeModels != null || (def != null && Json.Obj(def.Raw, "freeModels") != null))
+                vis.Add(Row(null, L.T("Free models"), L.T("From the service's public model list, with the date each one stops being free when announced."), RowToggle(s.Id, "*free")));
             if (vis.Count == 0) return;
             Section(L.T("In the panel"));
             Hint(L.T("What this service's card shows in the panel and in the desktop widget. The pill shows the limit chosen in Limit in the taskbar."));

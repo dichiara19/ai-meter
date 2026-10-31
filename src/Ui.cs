@@ -44,12 +44,16 @@ namespace AIMeter
             return b;
         }
 
-        /// <summary>Default to the five-hour session, then a non-monetary limit, then a monetary service limit.</summary>
+        /// <summary>
+        /// Default to the five-hour session, then a main non-monetary limit, then a monetary service limit,
+        /// then a secondary limit.
+        /// </summary>
         public static UsageWindow Primary(Usage u)
         {
             if (u == null) return null;
-            return u.Windows.FirstOrDefault(w => w.Short == UsageWindow.ShortFiveHours) ?? u.Windows.FirstOrDefault(w => w.Spent == null && w.HasPercent)
+            return u.Windows.FirstOrDefault(w => w.Short == UsageWindow.ShortFiveHours) ?? u.Windows.FirstOrDefault(w => w.Spent == null && w.HasPercent && w.Short != "m")
                    // Use the service's monetary limit by default; a user budget requires an explicit choice.
+                   ?? u.Windows.FirstOrDefault(w => w.HasPercent && !w.Budget && !w.Hidden && w.Short != "m")
                    ?? u.Windows.FirstOrDefault(w => w.HasPercent && !w.Budget && !w.Hidden);
         }
 
@@ -81,16 +85,15 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Prefer the earliest forecast exhaustion before reset, then the smallest remaining percentage.
-        /// Break ties using the longest window, which blocks work for longer.
+        /// Select the smallest remaining percentage. A forecast only breaks ties: a five-hour session forecast to
+        /// run out must not hide a weekly limit with less room left. Then prefer the longest window, which blocks work for longer.
         /// </summary>
         public static UsageWindow Tightest(Usage u)
         {
             var list = u.Windows.Where(w => w.HasPercent).ToList();
             if (list.Count == 0) return null;
-            var running = list.Where(w => w.RunsOutAt.HasValue).OrderBy(w => w.RunsOutAt.Value).FirstOrDefault();
-            if (running != null) return running;
-            return list.OrderBy(w => Math.Round(w.Remaining)).ThenByDescending(w => w.Length ?? TimeSpan.Zero).First();
+            return list.OrderBy(w => Math.Round(w.Remaining)).ThenBy(w => w.RunsOutAt ?? DateTime.MaxValue)
+                       .ThenByDescending(w => w.Length ?? TimeSpan.Zero).First();
         }
 
         /// <summary>Warn about forecast exhaustion even when the current remaining percentage is high.</summary>

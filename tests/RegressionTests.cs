@@ -49,6 +49,10 @@ namespace AIMeter
             Test("Every supported language describes estimates, cached data and the welcome window", Translations);
             Test("Budgets reject non-finite amounts", InvalidBudget);
             Test("Earlier Italian window codes in definitions keep their length", LegacyWindowCodes);
+            Test("Automatic selection prefers less room over a session forecast", AutomaticRoom);
+            Test("A secondary limit is not the default pill limit", SecondaryDefault);
+            Test("A UTC period gives a counter its reset", UtcPeriod);
+            Test("Free models skip routers, paid and expired models", FreeModelList);
             StartupRegressionTests.Register(Test);
             HistoryRegressionTests.Register(Test);
             ConsumptionTests.Register(Test);
@@ -518,7 +522,7 @@ namespace AIMeter
                 Assert(L.T("Spending unavailable") != "Spending unavailable", "Missing unavailable translation for " + lang);
                 Assert(L.T("{0} estimated since {1}") != "{0} estimated since {1}", "Missing estimate translation for " + lang);
                 Assert(L.T("Last updated {0}") != "Last updated {0}", "Missing cached-data translation for " + lang);
-                foreach (var key in new[] { "Welcome to AI Meter", "Show in the taskbar", "Preview with sample data", "Sample data", "Leave sample data", "Showing sample data" })
+                foreach (var key in new[] { "Welcome to AI Meter", "Show in the taskbar", "Preview with sample data", "Sample data", "Leave sample data", "Showing sample data", "Free models", "free until {0}", "{0} free models" })
                     Assert(L.T(key) != key, "Missing welcome translation for " + lang + ": " + key);
             }
             L.Init("en");
@@ -545,6 +549,66 @@ namespace AIMeter
                 var window = (UsageWindow)limit.Invoke(null, new object[] { document, spec });
                 Assert(window != null && window.Length == pair.Value, "Wrong window length for short code " + pair.Key);
             }
+        }
+
+        private static void AutomaticRoom()
+        {
+            var now = DateTime.Now;
+            var u = new Usage();
+            var session = new UsageWindow { Label = "Session 5 h", Short = UsageWindow.ShortFiveHours, Used = 40, ResetsAt = now.AddHours(3), RunsOutAt = now.AddHours(1) };
+            var week = new UsageWindow { Label = "Week", Short = UsageWindow.ShortWeek, Used = 90, ResetsAt = now.AddDays(5) };
+            u.Windows.Add(session); u.Windows.Add(week);
+            Assert(Ui.Tightest(u) == week, "A session forecast hid a weekly limit with less room.");
+            week.Used = 20;
+            Assert(Ui.Tightest(u) == session, "Automatic ignored the session with less room.");
+            week.Used = 40;
+            Assert(Ui.Tightest(u) == session, "A forecast did not break an equal-room tie.");
+            session.RunsOutAt = null;
+            Assert(Ui.Tightest(u) == week, "An equal-room tie did not prefer the longer window.");
+        }
+
+        private static void SecondaryDefault()
+        {
+            var u = new Usage();
+            var free = new UsageWindow { Label = "Free model requests today", Short = "m", Used = 10 };
+            var key = new UsageWindow { Label = "Key limit", Short = "$", Used = 30, Spent = new Money { Used = 3, Limit = 10, Currency = "USD" } };
+            u.Windows.Add(key); u.Windows.Add(free);
+            Assert(Ui.Primary(u) == key, "A secondary counter replaced the service's own limit as default.");
+            u.Windows.Remove(key);
+            Assert(Ui.Primary(u) == free, "A lone secondary limit was not used as default.");
+        }
+
+        private static void UtcPeriod()
+        {
+            var limit = typeof(DefinedProvider).GetMethod("Limit", Private);
+            var document = new Dictionary<string, object> { { "used", 5 }, { "limit", 50 } };
+            var spec = new Dictionary<string, object> { { "label", "Free model requests today" }, { "short", "m" }, { "used", "used" }, { "limit", "limit" }, { "period", "day" } };
+            var w = (UsageWindow)limit.Invoke(null, new object[] { document, spec });
+            var midnight = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(1), DateTimeKind.Utc).ToLocalTime();
+            Assert(w != null && w.Used == 10, "Wrong percentage for a request counter.");
+            Assert(w.ResetsAt == midnight && w.StartedAt < DateTime.Now && w.Length.HasValue, "A UTC day counter did not reset at UTC midnight.");
+        }
+
+        private static void FreeModelList()
+        {
+            Func<string, string, string, string, object> model = (id, prompt, completion, expires) => new Dictionary<string, object>
+            {
+                { "id", id }, { "name", id }, { "context_length", 262144 }, { "expiration_date", expires },
+                { "pricing", new Dictionary<string, object> { { "prompt", prompt }, { "completion", completion } } },
+                { "architecture", new Dictionary<string, object> { { "input_modalities", new ArrayList { "text", "image" } } } },
+                { "supported_parameters", new ArrayList { "tools", "temperature" } },
+            };
+            string later = DateTime.Today.AddDays(30).ToString("yyyy-MM-dd"), soon = DateTime.Today.ToString("yyyy-MM-dd");
+            var doc = new Dictionary<string, object> { { "data", new ArrayList {
+                model("b/open:free", "0", "0", null), model("a/ending:free", "0", "0", later), model("c/today:free", "0", "0", soon),
+                model("d/expired:free", "0", "0", DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd")),
+                model("e/paid", "0.000001", "0.000002", null), model("openrouter/free", "0", "0", null) } } };
+            var list = FreeModels.Parse(doc);
+            Assert(list != null && list.Count == 3, "Wrong number of free models.");
+            Assert(list[0].Id == "c/today:free" && list[1].Id == "a/ending:free" && list[2].Id == "b/open:free", "Free models are not ordered by expiry.");
+            Assert(list[0].Tools && !list[0].Reasoning && list[0].Inputs == "text, image", "Free model features were not read.");
+            Assert(FreeModels.Line(list[0]).Contains(Ui.Tokens(262144)) && FreeModels.Line(list[0]).Contains("free until today"), "Free model line misses context or expiry.");
+            Assert(FreeModels.Context(1048576) == "1M" && FreeModels.Context(1000000) == "1M", "Wrong context format.");
         }
     }
 }
