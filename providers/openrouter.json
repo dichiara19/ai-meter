@@ -10,18 +10,23 @@
   "spend": { "total": "data.usage", "day": "data.usage_daily", "week": "data.usage_weekly", "month": "data.usage_monthly", "currency": "USD" },
   "limits": [
     { "label": "Key limit", "short": "$", "when": "data.limit", "used": "data.usage", "limit": "data.limit", "currency": "USD" },
-    { "label": "Spent with this key", "unless": "data.limit", "balance": "data.usage", "currency": "USD" }
+    { "label": "Spent with this key", "unless": "data.limit", "balance": "data.usage", "currency": "USD" },
+    { "label": "Free model requests today", "short": "m", "when": "data.free_model_daily_requests.limit", "used": "data.free_model_daily_requests.used", "limit": "data.free_model_daily_requests.limit", "period": "day" }
   ],
+  "notes": [
+    { "text": "Free models: {0} of {1} requests left today", "values": [{ "path": "data.free_model_daily_requests.remaining" }, { "path": "data.free_model_daily_requests.limit" }], "when": ["data.free_model_daily_requests.limit", "data.free_model_daily_requests.used"] }
+  ],
+  "freeModels": { "url": "https://openrouter.ai/api/v1/models", "interval": 360 },
   "more": [
     { "request": { "url": "https://openrouter.ai/api/v1/credits", "headers": { "Authorization": "Bearer {token}" } }, "key": "management",
       "limits": [ { "label": "Account credits", "short": "$", "used": "data.total_usage", "limit": "data.total_credits", "currency": "USD" } ] }
   ],
   "keys": { "management": { "label": "Management key", "description": "OpenRouter did not return your account credits with your API key; a management key can read them.", "page": "https://openrouter.ai/settings/management-keys" } },
   "i18n": {
-    "it": { "Spending and limit of your OpenRouter API key.": "Spesa e limite della tua chiave API di OpenRouter.", "Key limit": "Limite della chiave", "Spent with this key": "Speso con questa chiave" },
-    "es": { "Spending and limit of your OpenRouter API key.": "Gasto y límite de tu clave API de OpenRouter.", "Key limit": "Límite de la clave", "Spent with this key": "Gastado con esta clave" },
-    "fr": { "Spending and limit of your OpenRouter API key.": "Dépenses et limite de votre clé API OpenRouter.", "Key limit": "Limite de la clé", "Spent with this key": "Dépensé avec cette clé" },
-    "de": { "Spending and limit of your OpenRouter API key.": "Ausgaben und Limit deines OpenRouter-API-Schlüssels.", "Key limit": "Schlüssellimit", "Spent with this key": "Mit diesem Schlüssel ausgegeben" },
-    "pt": { "Spending and limit of your OpenRouter API key.": "Gastos e limite da sua chave de API do OpenRouter.", "Key limit": "Limite da chave", "Spent with this key": "Gasto com esta chave" }
+    "it": { "Spending and limit of your OpenRouter API key.": "Spesa e limite della tua chiave API di OpenRouter.", "Key limit": "Limite della chiave", "Spent with this key": "Speso con questa chiave", "Free model requests today": "Richieste ai modelli gratuiti oggi", "Free models: {0} of {1} requests left today": "Modelli gratuiti: {0} richieste rimaste su {1} oggi" },
+    "es": { "Spending and limit of your OpenRouter API key.": "Gasto y límite de tu clave API de OpenRouter.", "Key limit": "Límite de la clave", "Spent with this key": "Gastado con esta clave", "Free model requests today": "Solicitudes a modelos gratuitos hoy", "Free models: {0} of {1} requests left today": "Modelos gratuitos: quedan {0} de {1} solicitudes hoy" },
+    "fr": { "Spending and limit of your OpenRouter API key.": "Dépenses et limite de votre clé API OpenRouter.", "Key limit": "Limite de la clé", "Spent with this key": "Dépensé avec cette clé", "Free model requests today": "Requêtes aux modèles gratuits aujourd'hui", "Free models: {0} of {1} requests left today": "Modèles gratuits : {0} requêtes restantes sur {1} aujourd'hui" },
+    "de": { "Spending and limit of your OpenRouter API key.": "Ausgaben und Limit deines OpenRouter-API-Schlüssels.", "Key limit": "Schlüssellimit", "Spent with this key": "Mit diesem Schlüssel ausgegeben", "Free model requests today": "Anfragen an kostenlose Modelle heute", "Free models: {0} of {1} requests left today": "Kostenlose Modelle: heute noch {0} von {1} Anfragen" },
+    "pt": { "Spending and limit of your OpenRouter API key.": "Gastos e limite da sua chave de API do OpenRouter.", "Key limit": "Limite da chave", "Spent with this key": "Gasto com esta chave", "Free model requests today": "Solicitações a modelos gratuitos hoje", "Free models: {0} of {1} requests left today": "Modelos gratuitos: restam {0} de {1} solicitações hoje" }
   }
 }

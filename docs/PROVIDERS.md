@@ -46,6 +46,7 @@ Claude, ChatGPT/Codex and GitHub Copilot need custom sign-in flows and stay in c
 | `plan` | Path of the plan name in the answer, shown as a badge. |
 | `limits` | The bars, see below. |
 | `notes` | Extra lines under the bars, see below. |
+| `freeModels` | A request (`url`, `headers`, `interval` in minutes, default 360; `{token}` is filled as in `request`) for a model list in the OpenRouter format (`data[].pricing`, `expiration_date`, `context_length`). Text models with an explicit zero prompt and completion price are listed in the card (an empty `pricing` means unknown, not free), soonest to expire first. Read only while the usage request succeeds. |
 | `i18n` | Translations of your texts: `{ "it": { "English text": "Testo italiano" } }`. Languages: `it`, `es`, `fr`, `de`, `pt`. |
 
 ### `auth`
@@ -80,6 +81,7 @@ A path picks a value from the JSON answer: `data.usage`, `items[0].name`, `items
 | `balance` | Path of a balance with no limit: only the amount is shown, without a bar. |
 | `unlimited` | Path that, when true, shows *unlimited*. |
 | `starts`, `resets` | Paths of the start and reset time: ISO text, Unix seconds or milliseconds. With both, AI Meter knows the length of the window: it uses it for the forecast, the reset notification and the tip before a reset (`short` values `5h`, `7d`, `month` and `1d` also tell it the length). |
+| `period` | `day`, `week` (from Monday) or `month` in UTC: the window's start and reset, for counters whose answer has no reset field. |
 | `when`, `unless` | Paths (one or a list): the row is shown only if all `when` are true and no `unless` is. |
 
 ### `notes`

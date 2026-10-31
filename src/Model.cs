@@ -118,11 +118,13 @@ namespace AIMeter
         public Func<string> SpendNote;
         /// <summary>Today's models used through this service, as reported by OpenCode and Pi.</summary>
         public List<ModelCost> TodayModels;
+        /// <summary>Models the service offers at no cost, soonest to expire first.</summary>
+        public List<FreeModel> FreeModels;
 
         /// <summary>Copy usage with additional windows, preserving the original provider response.</summary>
         public Usage With(IEnumerable<UsageWindow> extra)
         {
-            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
+            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels };
             u.Windows.AddRange(Windows);
             u.Windows.AddRange(extra);
             return u;
@@ -149,7 +151,7 @@ namespace AIMeter
         /// <summary>Return the same data marked as cached.</summary>
         public Usage AsCache()
         {
-            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
+            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels };
         }
     }
 
@@ -224,6 +226,7 @@ namespace AIMeter
                         sb.Append(w.RunsOutAt.HasValue ? w.RunsOutAt.Value.Ticks / TimeSpan.TicksPerMinute / 5 : 0);
                     }
                     if (p.Usage.TodayModels != null) foreach (var m in p.Usage.TodayModels) sb.Append(m.Model).Append((int)(m.Cost * 100)).Append(m.Tokens >> 10);
+                    if (p.Usage.FreeModels != null) foreach (var m in p.Usage.FreeModels) sb.Append(m.Id).Append(m.Expires);
                 }
                 foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
                 if (p.Models != null) sb.Append(p.GpuUsed >> 28);
