@@ -46,7 +46,7 @@ Claude, ChatGPT/Codex and GitHub Copilot need custom sign-in flows and stay in c
 | `plan` | Path of the plan name in the answer, shown as a badge. |
 | `limits` | The bars, see below. |
 | `notes` | Extra lines under the bars, see below. |
-| `freeModels` | A request (`url`, `interval` in minutes, default 360) for a public model list in the OpenRouter format (`data[].pricing`, `expiration_date`, `context_length`). Models with zero prompt and completion price are listed in the card, soonest to expire first. Read only while the usage request succeeds. |
+| `freeModels` | A request (`url`, `headers`, `interval` in minutes, default 360; `{token}` is filled as in `request`) for a model list in the OpenRouter format (`data[].pricing`, `expiration_date`, `context_length`). Text models with an explicit zero prompt and completion price are listed in the card (an empty `pricing` means unknown, not free), soonest to expire first. Read only while the usage request succeeds. |
 | `i18n` | Translations of your texts: `{ "it": { "English text": "Testo italiano" } }`. Languages: `it`, `es`, `fr`, `de`, `pt`. |
 
 ### `auth`

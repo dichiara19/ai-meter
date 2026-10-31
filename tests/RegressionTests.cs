@@ -52,7 +52,7 @@ namespace AIMeter
             Test("Automatic selection prefers less room over a session forecast", AutomaticRoom);
             Test("A secondary limit is not the default pill limit", SecondaryDefault);
             Test("A UTC period gives a counter its reset", UtcPeriod);
-            Test("Free models skip routers, paid, expired and media models", FreeModelList);
+            Test("Free models skip routers, paid, unpriced, expired and media models", FreeModelList);
             StartupRegressionTests.Register(Test);
             HistoryRegressionTests.Register(Test);
             ConsumptionTests.Register(Test);
@@ -602,10 +602,13 @@ namespace AIMeter
             // A media generator with zero token prices, like Google Lyria, is not a free chat model.
             var audio = (Dictionary<string, object>)model("g/lyria", "0", "0", null);
             audio["architecture"] = new Dictionary<string, object> { { "output_modalities", new ArrayList { "text", "audio" } } };
+            // Experiential Labs lists models without prices as an empty pricing object: unknown, not free.
+            var unpriced = (Dictionary<string, object>)model("x/unpriced", null, null, null);
+            unpriced["pricing"] = new Dictionary<string, object>();
             var doc = new Dictionary<string, object> { { "data", new ArrayList {
                 model("b/open:free", "0", "0", null), model("a/ending:free", "0", "0", later), model("c/today:free", "0", "0", soon),
                 model("d/expired:free", "0", "0", DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd")),
-                model("e/paid", "0.000001", "0.000002", null), model("openrouter/free", "0", "0", null), audio } } };
+                model("e/paid", "0.000001", "0.000002", null), model("openrouter/free", "0", "0", null), audio, unpriced } } };
             var list = FreeModels.Parse(doc);
             Assert(list != null && list.Count == 3, "Wrong number of free models.");
             Assert(list[0].Id == "c/today:free" && list[1].Id == "a/ending:free" && list[2].Id == "b/open:free", "Free models are not ordered by expiry.");

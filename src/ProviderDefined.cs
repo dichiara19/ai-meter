@@ -391,9 +391,10 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Read the service's public model list ("freeModels": a request, default every 6 hours), only while the
-        /// service is on and its usage request succeeds. A failed request keeps the previous list and is retried
-        /// after FreeModelsRetryMinutes instead of the full interval.
+        /// Read the service's model list ("freeModels": a request, default every 6 hours), only while the
+        /// service is on and its usage request succeeds. The request may use {token}, as lists such as
+        /// Experiential Labs' need the key. A failed request keeps the previous list and is retried after
+        /// FreeModelsRetryMinutes instead of the full interval.
         /// </summary>
         private void FetchFreeModels(Probe p)
         {
@@ -403,7 +404,7 @@ namespace AIMeter
             double interval = Json.Num(req, "interval") ?? 360;
             if (!p.AllowNetwork || DateTime.Now < freeNextFetch) return;
             List<FreeModel> list = null;
-            try { list = FreeModels.Parse(Json.ParseAny(Send(req, ""))); }
+            try { list = FreeModels.Parse(Json.ParseAny(Send(req, Token() ?? ""))); }
             catch (WebException) { }
             catch (IOException) { }
             if (list != null) freeModels = list;
