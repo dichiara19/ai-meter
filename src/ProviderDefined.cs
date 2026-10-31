@@ -24,6 +24,8 @@ namespace AIMeter
         private DateTime fetchedAt = DateTime.MinValue;
         private string problem;   // Authentication notice shown when access is missing or expired.
         private string credentialScope, spendScope;
+        private List<FreeModel> freeModels;
+        private DateTime freeFetchedAt = DateTime.MinValue;
 
         public DefinedProvider(ServiceDefinition d) { D = d; }
 
@@ -47,6 +49,7 @@ namespace AIMeter
                 fetchedAt = DateTime.Now;
                 Fetch(req);
             }
+            FetchFreeModels(p);
             st.Plan = plan;
             if (live != null) st.Usage = Decorate((DateTime.Now - live.At).TotalMinutes > interval + 2 ? live.AsCache() : live, p, DateTime.Now);
             if (problem != null && live == null)
@@ -144,6 +147,7 @@ namespace AIMeter
             var result = u.With(extra);
             result.SpendNote = note;
             result.TodayModels = models.Count > 0 ? models : null;
+            result.FreeModels = freeModels != null && freeModels.Count > 0 ? freeModels : null;
             return result;
         }
 
@@ -385,6 +389,27 @@ namespace AIMeter
                 });
         }
 
+        /// <summary>
+        /// Read the service's public model list ("freeModels": a request, default every 6 hours), only while the
+        /// service is on and its usage request succeeds. A failed request keeps the previous list.
+        /// </summary>
+        private void FetchFreeModels(Probe p)
+        {
+            var req = Json.Obj(D.Raw, "freeModels");
+            if (req == null) return;
+            if (live == null) { freeModels = null; return; }
+            double interval = Json.Num(req, "interval") ?? 360;
+            if (!p.AllowNetwork || (DateTime.Now - freeFetchedAt).TotalMinutes < interval) return;
+            freeFetchedAt = DateTime.Now;
+            try
+            {
+                var list = FreeModels.Parse(Json.ParseAny(Send(req, "")));
+                if (list != null) freeModels = list;
+            }
+            catch (WebException) { }
+            catch (IOException) { }
+        }
+
         /// <summary>Send the configured request and return its response body.</summary>
         private string Send(Dictionary<string, object> req, string token)
         {
@@ -480,6 +505,13 @@ namespace AIMeter
             };
             if (Json.Str(spec, "resets") == null) w.ResetsAt = null;
             if (Json.Str(spec, "starts") == null) w.StartedAt = null;
+            // "period": the service's UTC day, week (from Monday) or month, for counters without reset fields.
+            string period = Json.Str(spec, "period");
+            if (period == "day" || period == "week" || period == "month")
+            {
+                w.StartedAt = SpendTracker.Start(period, DateTime.Now, true);
+                w.ResetsAt = SpendTracker.End(period, DateTime.Now, true);
+            }
             string currency = Currency(doc, spec);
 
             // A standalone balance has an amount but no percentage bar.

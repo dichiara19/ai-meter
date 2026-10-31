@@ -16,6 +16,17 @@ namespace AIMeter
         {
             // ======================================================================== Italian
             { "it", D(
+                "today", "oggi",
+                "tomorrow", "domani",
+                "{0} context", "contesto {0}",
+                "tools", "strumenti",
+                "reasoning", "ragionamento",
+                "free until {0}", "gratis fino a {0}",
+                "{0} free model", "{0} modello gratuito",
+                "{0} free models", "{0} modelli gratuiti",
+                "Free models, soonest to stop being free first:", "Modelli gratuiti, prima quelli che smettono di esserlo:",
+                "Free models", "Modelli gratuiti",
+                "From the service's public model list, with the date each one stops being free when announced.", "Dall'elenco pubblico dei modelli del servizio, con la data in cui ciascuno smette di essere gratuito, se annunciata.",
                 "Spending unavailable", "Spesa non disponibile",
                 "{0} estimated since {1}", "{0} stimati dal {1}",
                 "{0} estimated of {1}", "{0} stimati su {1}",
@@ -247,6 +258,17 @@ namespace AIMeter
 
             // ======================================================================== Spanish
             { "es", D(
+                "today", "hoy",
+                "tomorrow", "mañana",
+                "{0} context", "contexto de {0}",
+                "tools", "herramientas",
+                "reasoning", "razonamiento",
+                "free until {0}", "gratis hasta {0}",
+                "{0} free model", "{0} modelo gratuito",
+                "{0} free models", "{0} modelos gratuitos",
+                "Free models, soonest to stop being free first:", "Modelos gratuitos, primero los que dejan de serlo antes:",
+                "Free models", "Modelos gratuitos",
+                "From the service's public model list, with the date each one stops being free when announced.", "De la lista pública de modelos del servicio, con la fecha en que cada uno deja de ser gratuito, si se ha anunciado.",
                 "Spending unavailable", "Gasto no disponible",
                 "{0} estimated since {1}", "{0} estimados desde {1}",
                 "{0} estimated of {1}", "{0} estimados de {1}",
@@ -478,6 +500,17 @@ namespace AIMeter
 
             // ======================================================================== French
             { "fr", D(
+                "today", "aujourd'hui",
+                "tomorrow", "demain",
+                "{0} context", "contexte de {0}",
+                "tools", "outils",
+                "reasoning", "raisonnement",
+                "free until {0}", "gratuit jusqu'au {0}",
+                "{0} free model", "{0} modèle gratuit",
+                "{0} free models", "{0} modèles gratuits",
+                "Free models, soonest to stop being free first:", "Modèles gratuits, ceux qui cessent de l'être le plus tôt en premier :",
+                "Free models", "Modèles gratuits",
+                "From the service's public model list, with the date each one stops being free when announced.", "D'après la liste publique des modèles du service, avec la date à laquelle chacun cesse d'être gratuit, si elle est annoncée.",
                 "Spending unavailable", "Dépenses indisponibles",
                 "{0} estimated since {1}", "{0} estimés depuis le {1}",
                 "{0} estimated of {1}", "{0} estimés sur {1}",
@@ -709,6 +742,17 @@ namespace AIMeter
 
             // ======================================================================== German
             { "de", D(
+                "today", "heute",
+                "tomorrow", "morgen",
+                "{0} context", "{0} Kontext",
+                "tools", "Tools",
+                "reasoning", "Reasoning",
+                "free until {0}", "kostenlos bis {0}",
+                "{0} free model", "{0} kostenloses Modell",
+                "{0} free models", "{0} kostenlose Modelle",
+                "Free models, soonest to stop being free first:", "Kostenlose Modelle, zuerst die, die am frühesten kostenpflichtig werden:",
+                "Free models", "Kostenlose Modelle",
+                "From the service's public model list, with the date each one stops being free when announced.", "Aus der öffentlichen Modellliste des Dienstes, mit dem Datum, ab dem jedes Modell nicht mehr kostenlos ist, sofern angekündigt.",
                 "Spending unavailable", "Ausgaben nicht verfügbar",
                 "{0} estimated since {1}", "{0} geschätzt seit {1}",
                 "{0} estimated of {1}", "{0} geschätzt von {1}",
@@ -940,6 +984,17 @@ namespace AIMeter
 
             // ======================================================================== Portuguese
             { "pt", D(
+                "today", "hoje",
+                "tomorrow", "amanhã",
+                "{0} context", "contexto de {0}",
+                "tools", "ferramentas",
+                "reasoning", "raciocínio",
+                "free until {0}", "grátis até {0}",
+                "{0} free model", "{0} modelo gratuito",
+                "{0} free models", "{0} modelos gratuitos",
+                "Free models, soonest to stop being free first:", "Modelos gratuitos, primeiro os que deixam de ser gratuitos mais cedo:",
+                "Free models", "Modelos gratuitos",
+                "From the service's public model list, with the date each one stops being free when announced.", "Da lista pública de modelos do serviço, com a data em que cada um deixa de ser gratuito, quando anunciada.",
                 "Spending unavailable", "Gastos indisponíveis",
                 "{0} estimated since {1}", "{0} estimados desde {1}",
                 "{0} estimated of {1}", "{0} estimados de {1}",

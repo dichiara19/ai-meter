@@ -1,16 +1,9 @@
-## What changed in 0.8.3
+## What changed in 0.8.4
 
-A new installation now opens a welcome screen that asks before AI Meter does anything beyond reading local files:
-
-- **Show in the taskbar.** The indicator is placed inside the Windows taskbar only if you keep this on; otherwise AI Meter shows a widget on the desktop.
-- **Real-time limits.** Whether to read Claude limits from Anthropic with your existing Claude Code login.
-- **Use API keys already on this PC.** Looking for keys saved by OpenCode, Pi or Crush, or exported in shell profiles, is now off until you turn it on.
-
-Each choice can be changed later in Settings. Existing installations keep their current settings and do not see the screen.
-
-**Sample data** can now be switched on without restarting, from the welcome screen or Settings → About, and switched off from the notification area menu. It shows invented figures for previews and is never saved, recorded in the history or used for notifications.
-
-The Microsoft Store submission notes describe exactly which credentials are read and where each is sent. The regression suite contains 76 tests.
+- **Automatic limit choice fixed.** With *Limit in the taskbar → Automatic*, the pill now shows the limit with the least room left. Before, a five-hour session forecast to run out took precedence even when the weekly limit was lower, as happened with ChatGPT. A forecast now only breaks ties between limits with the same room.
+- **OpenRouter free models.** The OpenRouter card counts the models offered at no cost and lists those whose free period ends soonest, with the date. The tooltip shows every free model with its context window, inputs, tools and reasoning support. The list comes from OpenRouter's public model list, read every six hours while the service is on, and can be hidden in Settings → Services → OpenRouter → In the panel.
+- **OpenRouter free-model requests.** A new row shows today's free-model requests against the daily cap OpenRouter reports (50, or 1000 after buying at least 10 credits), resetting at midnight UTC. It can be picked for the pill; the default pill limit is unchanged.
+- Service definitions accept `period` (`day`, `week` or `month`, in UTC) for counters whose response has no reset time.
 
 ## Download
 

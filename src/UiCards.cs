@@ -259,6 +259,29 @@ namespace AIMeter
                               + string.Join("\n", ms.Select(m => L.F("{0}: {1}, {2} tokens, {3} replies", m.Model, money.Format(m.Cost), Tokens((int)Math.Min(int.MaxValue, m.Tokens)), m.Replies)));
                 stack.Children.Add(box);
             }
+            if (p.Usage != null && p.Usage.FreeModels != null && !RowHidden(p.Id, "*free"))
+            {
+                // Count the free models and list the ones whose free period ends soonest; the tooltip lists them all.
+                var fm = p.Usage.FreeModels;
+                var ending = fm.Where(m => m.Expires.HasValue).ToList();
+                var box = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+                box.Children.Add(Text(L.N(fm.Count, "{0} free model", "{0} free models"), 11.5, "Text3"));
+                foreach (var m in ending.Take(3))
+                {
+                    var row = new DockPanel { Margin = new Thickness(0, 1, 0, 0) };
+                    var until = Text(L.F("free until {0}", FreeModels.When(m.Expires.Value)), 11.5, m.Expires.Value <= DateTime.Today.AddDays(1) ? "Caution" : "Text2");
+                    until.Margin = new Thickness(8, 0, 0, 0);
+                    DockPanel.SetDock(until, Dock.Right);
+                    row.Children.Add(until);
+                    var modelName = Text(m.Name, 11.5, "Text2");
+                    modelName.TextTrimming = TextTrimming.CharacterEllipsis;
+                    row.Children.Add(modelName);
+                    box.Children.Add(row);
+                }
+                box.ToolTip = L.T("Free models, soonest to stop being free first:") + "\n" + string.Join("\n", fm.Take(25).Select(m => FreeModels.Line(m)))
+                              + (fm.Count > 25 ? "\n" + L.F("+{0} more", fm.Count - 25) : "");
+                stack.Children.Add(box);
+            }
         }
 
         /// <summary>The active unused-quota or wait-instead-of-paying tip, then the service notice with an optional sign-in link.</summary>
