@@ -161,6 +161,7 @@ namespace AIMeter
         public string Title;
         public string Status;     // "busy", "idle", "app"
         public string Model;
+        public string Provider;   // Provider id recorded by a coding agent ("openrouter"), used to place the session on its service card.
         public DateTime Updated;
         public string Note;       // Additional row details, such as context usage.
     }

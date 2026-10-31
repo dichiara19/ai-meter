@@ -224,15 +224,23 @@ namespace AIMeter
                         add(JPath.Str(JPath.Get(m, "providerID")), JPath.Str(JPath.Get(m, "modelID")), JPath.Num(JPath.Get(m, "cost")) ?? 0, tokens);
                     }
                 }
-                foreach (var dir in Probe.SafeDirs(Path.Combine(home, @".pi\agent\sessions")))
-                    foreach (var fi in Probe.SafeFiles(dir, "*.jsonl").Where(f => f.LastWriteTime >= DateTime.Today && f.Length < 32L * 1024 * 1024))
-                    {
-                        var entries = (List<PiCost>)p.Cached("costs:pi:" + fi.FullName + ":" + startMs, fi, () => PiToday(fi.FullName, startMs));
-                        foreach (var e in entries)
-                            if (piResponses.Add(e.Identity)) add(e.Provider, e.Model, e.Cost, e.Tokens);
-                    }
+                PiRootCosts(p, Path.Combine(home, @".pi\agent\sessions"), startMs, piResponses, add);
             }
+            // Pi runs that keep their sessions elsewhere (--session-dir, PI_CODING_AGENT_DIR) while they are running.
+            try { foreach (var folder in RunningAgents.PiSessionFolders(p)) PiRootCosts(p, folder.Path, startMs, piResponses, add); }
+            catch (Exception) { }
             return acc;
+        }
+
+        private static void PiRootCosts(Probe p, string root, long startMs, HashSet<string> piResponses, Action<string, string, double, long> add)
+        {
+            foreach (var dir in CodingAgents.PiSessionDirs(root))
+                foreach (var fi in Probe.SafeFiles(dir, "*.jsonl").Where(f => f.LastWriteTime >= DateTime.Today && f.Length < 32L * 1024 * 1024))
+                {
+                    var entries = (List<PiCost>)p.Cached("costs:pi:" + fi.FullName + ":" + startMs, fi, () => PiToday(fi.FullName, startMs));
+                    foreach (var e in entries)
+                        if (piResponses.Add(e.Identity)) add(e.Provider, e.Model, e.Cost, e.Tokens);
+                }
         }
 
         /// <summary>Read today's Pi replies, retaining an identity shared by copies in forked sessions.</summary>
