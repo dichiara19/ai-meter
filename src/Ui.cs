@@ -138,9 +138,10 @@ namespace AIMeter
 
         public static string ResetText(UsageWindow w, Usage u)
         {
-            if (w.ResetsAt.HasValue && w.StartedAt.HasValue && (w.ResetsAt.Value - w.StartedAt.Value).TotalHours <= 24)
+            if (w.ResetsAt.HasValue && w.StartedAt.HasValue && (w.ResetsAt.Value - w.StartedAt.Value).TotalHours < 24)
             {
-                // For short sessions, show the start, end and remaining time.
+                // For sessions shorter than a day, show the start, end and remaining time. A whole day would read
+                // as "01:00 → 01:00", so daily counters fall through to the reset phrase.
                 var r = w.ResetsAt.Value;
                 string span = w.StartedAt.Value.ToString("HH:mm", It) + " → " + r.ToString("HH:mm", It);
                 return r > DateTime.Now ? L.F("{0}, in {1}", span, Until(r)) : span;

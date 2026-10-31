@@ -17,7 +17,7 @@ namespace AIMeter
     }
 
     /// <summary>
-    /// Free models from an OpenRouter-format model list (GET /api/v1/models, public): zero prompt and completion
+    /// Free text models from an OpenRouter-format model list (GET /api/v1/models, public): zero prompt and completion
     /// price, with the announced expiration date. Routers such as openrouter/free are not models and are skipped.
     /// </summary>
     internal static class FreeModels
@@ -38,6 +38,9 @@ namespace AIMeter
                 var f = new FreeModel { Id = id, Name = Json.Str(m, "name") ?? id, Context = (long)(Json.Num(m, "context_length") ?? 0), Expires = Day(Json.Str(m, "expiration_date")) };
                 if (f.Expires.HasValue && f.Expires.Value < today) continue;
                 var arch = Json.Obj(m, "architecture");
+                // Media generators such as Lyria list zero token prices but are not chat models.
+                var outputs = arch != null && arch.ContainsKey("output_modalities") ? arch["output_modalities"] as IList : null;
+                if (outputs != null && outputs.OfType<string>().Any(o => o != "text")) continue;
                 var inputs = arch != null && arch.ContainsKey("input_modalities") ? arch["input_modalities"] as IList : null;
                 f.Inputs = inputs == null ? null : string.Join(", ", inputs.OfType<string>());
                 var parameters = m.ContainsKey("supported_parameters") ? m["supported_parameters"] as IList : null;

@@ -25,7 +25,8 @@ namespace AIMeter
         private string problem;   // Authentication notice shown when access is missing or expired.
         private string credentialScope, spendScope;
         private List<FreeModel> freeModels;
-        private DateTime freeFetchedAt = DateTime.MinValue;
+        private DateTime freeNextFetch = DateTime.MinValue;
+        private const double FreeModelsRetryMinutes = 15;
 
         public DefinedProvider(ServiceDefinition d) { D = d; }
 
@@ -391,7 +392,8 @@ namespace AIMeter
 
         /// <summary>
         /// Read the service's public model list ("freeModels": a request, default every 6 hours), only while the
-        /// service is on and its usage request succeeds. A failed request keeps the previous list.
+        /// service is on and its usage request succeeds. A failed request keeps the previous list and is retried
+        /// after FreeModelsRetryMinutes instead of the full interval.
         /// </summary>
         private void FetchFreeModels(Probe p)
         {
@@ -399,15 +401,13 @@ namespace AIMeter
             if (req == null) return;
             if (live == null) { freeModels = null; return; }
             double interval = Json.Num(req, "interval") ?? 360;
-            if (!p.AllowNetwork || (DateTime.Now - freeFetchedAt).TotalMinutes < interval) return;
-            freeFetchedAt = DateTime.Now;
-            try
-            {
-                var list = FreeModels.Parse(Json.ParseAny(Send(req, "")));
-                if (list != null) freeModels = list;
-            }
+            if (!p.AllowNetwork || DateTime.Now < freeNextFetch) return;
+            List<FreeModel> list = null;
+            try { list = FreeModels.Parse(Json.ParseAny(Send(req, ""))); }
             catch (WebException) { }
             catch (IOException) { }
+            if (list != null) freeModels = list;
+            freeNextFetch = DateTime.Now.AddMinutes(list != null ? interval : Math.Min(interval, FreeModelsRetryMinutes));
         }
 
         /// <summary>Send the configured request and return its response body.</summary>
