@@ -278,7 +278,43 @@ namespace AIMeter
                 try { snap.Providers.Add(p.Collect(probe)); }
                 catch (Exception ex) { Trace.WriteLine(p.Id + ": " + ex); }   // A faulty service does not stop the others.
             }
+            PlaceAgentSessions(snap);
             return snap;
+        }
+
+        // Agent provider ids for the services implemented in code; defined services use their key ids ("auth.ids").
+        private static readonly Dictionary<string, string[]> BuiltInProviderIds = new Dictionary<string, string[]>
+        {
+            { "claude", new[] { "anthropic" } },
+            { "openai", new[] { "openai-codex" } },
+            { "copilot", new[] { "github-copilot" } },
+            { "antigravity", new[] { "google-antigravity" } },
+        };
+
+        /// <summary>
+        /// Move coding-agent sessions from the local card to the card of the service they use, when that card is shown:
+        /// a Pi session on OpenRouter belongs with OpenRouter's limits. Sessions of other providers stay with the agents.
+        /// </summary>
+        internal static void PlaceAgentSessions(Snapshot snap)
+        {
+            var local = snap.Providers.FirstOrDefault(x => x.Id == "local");
+            if (local == null) return;
+            foreach (var s in local.Sessions.Where(x => !string.IsNullOrEmpty(x.Provider)).ToList())
+            {
+                var target = snap.Providers.FirstOrDefault(x => x.Id != "local" && ProviderIds(x.Id).Contains(s.Provider, StringComparer.OrdinalIgnoreCase));
+                if (target == null) continue;
+                local.Sessions.Remove(s);
+                target.Sessions.Add(s);
+                target.Running = true;
+            }
+        }
+
+        private static IEnumerable<string> ProviderIds(string serviceId)
+        {
+            string[] ids;
+            if (BuiltInProviderIds.TryGetValue(serviceId, out ids)) return ids;
+            var d = Definitions.Get(serviceId);
+            return d == null ? new string[0] : ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id);
         }
     }
 }

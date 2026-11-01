@@ -53,6 +53,8 @@ namespace AIMeter
             Test("A secondary limit is not the default pill limit", SecondaryDefault);
             Test("A UTC period gives a counter its reset", UtcPeriod);
             Test("Free models skip routers, paid, unpriced, expired and media models", FreeModelList);
+            Test("Running Pi processes name their session folders, also inside a sandbox", RunningPiFolders);
+            Test("Pi sessions record their provider and move to that service's card", PiSessionsByService);
             StartupRegressionTests.Register(Test);
             HistoryRegressionTests.Register(Test);
             ConsumptionTests.Register(Test);
@@ -522,7 +524,7 @@ namespace AIMeter
                 Assert(L.T("Spending unavailable") != "Spending unavailable", "Missing unavailable translation for " + lang);
                 Assert(L.T("{0} estimated since {1}") != "{0} estimated since {1}", "Missing estimate translation for " + lang);
                 Assert(L.T("Last updated {0}") != "Last updated {0}", "Missing cached-data translation for " + lang);
-                foreach (var key in new[] { "Welcome to AI Meter", "Show in the taskbar", "Preview with sample data", "Sample data", "Leave sample data", "Showing sample data", "Free models", "free until {0}", "{0} free models" })
+                foreach (var key in new[] { "Welcome to AI Meter", "Show in the taskbar", "Preview with sample data", "Sample data", "Leave sample data", "Showing sample data", "Free models", "free until {0}", "{0} free models", "Click a model to copy its ID for Pi, OpenCode or your scripts.", "Click to copy {0}", "Copied" })
                     Assert(L.T(key) != key, "Missing welcome translation for " + lang + ": " + key);
             }
             L.Init("en");
@@ -587,6 +589,46 @@ namespace AIMeter
             var midnight = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(1), DateTimeKind.Utc).ToLocalTime();
             Assert(w != null && w.Used == 10, "Wrong percentage for a request counter.");
             Assert(w.ResetsAt == midnight && w.StartedAt < DateTime.Now && w.Length.HasValue, "A UTC day counter did not reset at UTC midnight.");
+        }
+
+        private static void RunningPiFolders()
+        {
+            // A sandboxed run as seen in /proc: bwrap's own options, then Pi with its session folder.
+            var sandboxed = new[] { "bwrap", "--ro-bind", "/", "/", "--tmpfs", "/home/u/.pi", "--setenv", "PI_CODING_AGENT_DIR", "/work/job/agent",
+                                    "/home/u/.npm-global/bin/pi", "--provider", "openrouter", "--session-dir", "/work/job/sessions", "-p", "Continue" };
+            var folders = RunningAgents.PiFolders(sandboxed, null).ToList();
+            Assert(folders.Contains("/work/job/sessions") && folders.Contains("/work/job/agent/sessions") && folders.Count == 2, "Sandboxed Pi folders were not read.");
+            // Pi rewrites its process title to "pi"; its environment still names the folder.
+            var env = new Dictionary<string, string> { { "PI_CODING_AGENT_SESSION_DIR", "/data/pi" } };
+            Assert(RunningAgents.PiFolders(new[] { "pi" }, env).Single() == "/data/pi", "The session folder in the environment was not read.");
+            Assert(RunningAgents.PiFolders(new[] { "node", @"C:\npm\node_modules\@earendil-works\pi-coding-agent\dist\cli.js", "--session-dir=D:\\runs" }, null).Single() == @"D:\runs", "A Windows Pi command line was not read.");
+            Assert(!RunningAgents.PiFolders(new[] { "python3", "worker.py", "--session-dir", "/tmp/x" }, env).Any(), "A process that is not Pi named a folder.");
+            Assert(RunningAgents.FromWsl(@"\\wsl.localhost\Ubuntu", "/home/u/x") == @"\\wsl.localhost\Ubuntu\home\u\x", "Wrong WSL path.");
+            Assert(RunningAgents.FromWsl(@"\\wsl.localhost\Ubuntu", "/mnt/d/runs/a") == @"D:\runs\a", "Wrong path on a Windows drive.");
+        }
+
+        private static void PiSessionsByService()
+        {
+            string file = Path.Combine(Settings.TestFolder, "pi.jsonl");
+            File.WriteAllText(file, "{\"type\":\"session\",\"version\":3,\"cwd\":\"/w\"}\n"
+                + "{\"type\":\"model_change\",\"provider\":\"openrouter\",\"modelId\":\"openai/gpt-6-luna:free\"}\n"
+                + "{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"Hello\"}}\n");
+            var found = typeof(CodingAgents).GetMethod("PiFile", Private).Invoke(null, new object[] { new FileInfo(file) });
+            Assert((string)found.GetType().GetField("Provider").GetValue(found) == "openrouter", "The Pi provider was not read.");
+
+            var local = new ProviderState { Id = "local", Models = new List<LocalModel>() };
+            local.Sessions.Add(new Session { Kind = "Pi · WSL", Provider = "openrouter", Status = "busy" });
+            local.Sessions.Add(new Session { Kind = "Pi · WSL", Provider = "nvidia-nim", Status = "idle" });
+            local.Sessions.Add(new Session { Kind = "Pi", Provider = "anthropic", Status = "idle" });
+            local.Sessions[2].Status = "busy";
+            var claude = new ProviderState { Id = "claude" };
+            var snap = new Snapshot();
+            snap.Providers.Add(claude);
+            snap.Providers.Add(local);
+            Collector.PlaceAgentSessions(snap);
+            Assert(claude.Sessions.Count == 1 && claude.Running && claude.Busy == 1, "The Anthropic session did not move to the Claude card.");
+            // Providers whose service has no card shown keep their sessions with the agents.
+            Assert(local.Sessions.Count == 2 && local.Sessions.All(x => x.Provider != "anthropic"), "Sessions without a card were moved.");
         }
 
         private static void FreeModelList()

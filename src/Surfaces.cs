@@ -92,8 +92,7 @@ namespace AIMeter
             {
                 if (p.IsIdleLocal) continue;   // Local models: show the card only when there is something to display.
                 string id = p.Id;
-                string list = id + ".sessions";
-                var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.Login, C.IsExpanded(list), () => C.ToggleExpanded(list));
+                var card = Ui.ProviderCard(p, C.IsExpanded(id), () => C.ToggleExpanded(id), C.Login, part => C.IsExpanded(id + "." + part), part => C.ToggleExpanded(id + "." + part));
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
                 body.Children.Add(card);
             }
@@ -278,7 +277,9 @@ namespace AIMeter
             foreach (var p in s.Providers)
             {
                 if (p.IsIdleLocal) continue;   // Local models: show the card only when there is something to display.
-                var card = Ui.ProviderCard(p, true, null, C.Login);
+                // Long lists fold here as on the desktop widget, sharing the same remembered choice.
+                string id = p.Id;
+                var card = Ui.ProviderCard(p, true, null, C.Login, part => C.IsExpanded(id + "." + part), part => C.ToggleExpanded(id + "." + part));
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
                 body.Children.Add(card);
             }

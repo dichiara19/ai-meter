@@ -11,7 +11,8 @@ namespace AIMeter
     /// <summary>
     /// Sessions of coding CLIs (OpenCode, Pi, Gemini CLI, Qwen Code, Goose, Crush, Cline, Kilo): title,
     /// folder, model in use and context occupied, from their local files on Windows and in WSL (if already running).
-    /// Sessions active in the last 30 minutes are shown. Read-only.
+    /// Pi sessions are also read from the folders that running Pi processes name (RunningAgents). Sessions active in
+    /// the last 30 minutes are shown. Read-only.
     /// </summary>
     internal sealed class CodingAgents
     {
@@ -24,6 +25,8 @@ namespace AIMeter
         private sealed class Found
         {
             public string Agent, Title, Model, Cwd;
+            public string Provider;   // The agent's provider id, such as "openrouter", when the session records it.
+            public string File;       // Source file, so a folder reached in two ways is read once.
             public DateTime Updated;
             public int Context;
             /// <summary>The content says the reply is in progress; valid only if the file was written less than Fresh minutes ago.</summary>
@@ -57,20 +60,28 @@ namespace AIMeter
                 Action<IEnumerable<Found>> add = items => { foreach (var f in items) all.Add(Tuple.Create(f, pl.Where)); };
                 try { add(OpenCodeLike(p, pl, "OpenCode", @".local\share\opencode", "opencode.db")); } catch (Exception) { }
                 try { add(OpenCodeLike(p, pl, "Kilo", @".local\share\kilo", "kilo.db")); } catch (Exception) { }
-                try { add(Pi(p, pl)); } catch (Exception) { }
+                try { add(Pi(p, PiRoot(pl))); } catch (Exception) { }
                 try { add(Gemini(p, pl)); } catch (Exception) { }
                 try { add(Qwen(p, pl)); } catch (Exception) { }
                 try { add(Goose(p, pl)); } catch (Exception) { }
                 try { add(Crush(p, pl)); } catch (Exception) { }
                 try { add(Cline(p, pl)); } catch (Exception) { }
             }
-            return all.Where(t => (DateTime.Now - t.Item1.Updated).TotalMinutes <= RecentMinutes)
+            try
+            {
+                foreach (var folder in RunningAgents.PiSessionFolders(p))
+                    foreach (var f in Pi(p, folder.Path)) all.Add(Tuple.Create(f, folder.Where));
+            }
+            catch (Exception) { }
+            return all.GroupBy(t => t.Item1.File ?? Guid.NewGuid().ToString(), StringComparer.OrdinalIgnoreCase).Select(g => g.First())
+                .Where(t => (DateTime.Now - t.Item1.Updated).TotalMinutes <= RecentMinutes)
                 .OrderByDescending(t => t.Item1.Updated).Take(12)
                 .Select(t => new Session
                 {
                     Kind = t.Item2 == "WSL" ? t.Item1.Agent + " · WSL" : t.Item1.Agent,
                     Title = string.IsNullOrEmpty(t.Item1.Title) ? L.T("Untitled session") : Shorten(t.Item1.Title),
                     Model = t.Item1.Model,
+                    Provider = t.Item1.Provider,
                     Status = t.Item1.Working ? "busy" : "idle",
                     Updated = t.Item1.Updated,
                     Note = t.Item1.Context > 0 ? L.F("{0} tokens in context", Ui.Tokens(t.Item1.Context)) : null,
@@ -165,14 +176,28 @@ namespace AIMeter
         }
 
         // ================================================================ Pi
-        private static IEnumerable<Found> Pi(Probe p, Place pl)
+        private static string PiRoot(Place pl)
         {
-            string root = pl.Where == "Windows"
+            return pl.Where == "Windows"
                 ? (Environment.GetEnvironmentVariable("PI_CODING_AGENT_SESSION_DIR")
                    ?? Path.Combine(Environment.GetEnvironmentVariable("PI_CODING_AGENT_DIR") ?? Path.Combine(pl.Home, @".pi\agent"), "sessions"))
                 : Path.Combine(pl.Home, @".pi\agent\sessions");
+        }
+
+        /// <summary>
+        /// The folders of a Pi session root: the default root keeps one folder per working directory, while
+        /// --session-dir puts the files directly in the folder given.
+        /// </summary>
+        internal static IEnumerable<string> PiSessionDirs(string root)
+        {
+            yield return root;
+            foreach (var dir in Probe.SafeDirs(root)) yield return dir;
+        }
+
+        private static IEnumerable<Found> Pi(Probe p, string root)
+        {
             var list = new List<Found>();
-            foreach (var dir in Probe.SafeDirs(root))
+            foreach (var dir in PiSessionDirs(root))
                 foreach (var fi in Probe.SafeFiles(dir, "*.jsonl").Where(Recent))
                 {
                     var f = (Found)p.Cached("agent:pi:" + fi.FullName, fi, () => PiFile(fi));
@@ -183,7 +208,7 @@ namespace AIMeter
 
         private static Found PiFile(FileInfo fi)
         {
-            var f = new Found { Agent = "Pi", Updated = fi.LastWriteTime };
+            var f = new Found { Agent = "Pi", Updated = fi.LastWriteTime, File = fi.FullName };
             var header = Json.ParseAny(Probe.ReadFirstLine(fi.FullName, 65536) ?? "");
             f.Cwd = JPath.Str(JPath.Get(header, "cwd"));
             string lastRole = null, lastStop = null;
@@ -192,13 +217,18 @@ namespace AIMeter
                 var e = Json.ParseAny(line);
                 string type = JPath.Str(JPath.Get(e, "type"));
                 if (type == "session_info" && JPath.Str(JPath.Get(e, "name")) != null) f.Title = JPath.Str(JPath.Get(e, "name"));
-                else if (type == "model_change") f.Model = JPath.Str(JPath.Get(e, "modelId")) ?? f.Model;
+                else if (type == "model_change")
+                {
+                    f.Model = JPath.Str(JPath.Get(e, "modelId")) ?? f.Model;
+                    f.Provider = JPath.Str(JPath.Get(e, "provider")) ?? f.Provider;
+                }
                 else if (type == "message")
                 {
                     lastRole = JPath.Str(JPath.Get(e, "message.role"));
                     if (lastRole != "assistant") continue;
                     lastStop = JPath.Str(JPath.Get(e, "message.stopReason"));
                     f.Model = JPath.Str(JPath.Get(e, "message.model")) ?? f.Model;
+                    f.Provider = JPath.Str(JPath.Get(e, "message.provider")) ?? f.Provider;
                     var u = JPath.Get(e, "message.usage");
                     // Same formula as Pi; interrupted or failed replies do not count.
                     if (u != null && lastStop != "aborted" && lastStop != "error")

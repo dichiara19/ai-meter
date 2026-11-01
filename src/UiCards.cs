@@ -135,10 +135,15 @@ namespace AIMeter
             return g;
         }
 
-        /// <summary>Build a service card with its header, limits, notice and optional expanded session list.</summary>
-        public static Border ProviderCard(ProviderState p, bool expanded, Action toggle, Action<string> login, bool sessionsOpen = true, Action toggleSessions = null)
+        /// <summary>
+        /// Build a service card with its header, limits, notice and optional expanded session list. Sections that fold
+        /// ("sessions", "free") ask isOpen and toggleOpen by name; without them every section is shown open and cannot fold.
+        /// </summary>
+        public static Border ProviderCard(ProviderState p, bool expanded, Action toggle, Action<string> login, Func<string, bool> isOpen = null, Action<string> toggleOpen = null)
         {
-            if (p.Models != null) return LocalCard(p, expanded, toggle);
+            if (p.Models != null) return LocalCard(p, expanded, toggle, isOpen, toggleOpen);
+            bool sessionsOpen = isOpen == null || isOpen("sessions");
+            Action toggleSessions = toggleOpen == null ? null : (Action)(() => toggleOpen("sessions"));
             string brand = BrandBrush(p.Id);
             var stack = new StackPanel();
             stack.Children.Add(ProviderHeader(p, brand, expanded, toggle));
@@ -152,6 +157,7 @@ namespace AIMeter
             stack.Children.Add(limits);
 
             AddUsageNotes(stack, p);
+            AddFreeModels(stack, p, isOpen == null || isOpen("free"), toggleOpen == null ? null : (Action)(() => toggleOpen("free")));
             AddTipAndNotice(stack, p, brand, login);
             if (expanded && p.Sessions.Count > 0) AddSessions(stack, p, brand, sessionsOpen, toggleSessions);
             return Card(stack, new Thickness(14, 12, 14, 12));
@@ -259,29 +265,63 @@ namespace AIMeter
                               + string.Join("\n", ms.Select(m => L.F("{0}: {1}, {2} tokens, {3} replies", m.Model, money.Format(m.Cost), Tokens((int)Math.Min(int.MaxValue, m.Tokens)), m.Replies)));
                 stack.Children.Add(box);
             }
-            if (p.Usage != null && p.Usage.FreeModels != null && !RowHidden(p.Id, "*free"))
+        }
+
+        /// <summary>
+        /// The free models box. Folded, it counts the models and names those whose free period ends soonest; open, it lists
+        /// every model, and a click copies the model id to pass to Pi, OpenCode or a script.
+        /// </summary>
+        private static void AddFreeModels(StackPanel stack, ProviderState p, bool open, Action toggle)
+        {
+            if (p.Usage == null || p.Usage.FreeModels == null || RowHidden(p.Id, "*free")) return;
+            var fm = p.Usage.FreeModels;
+            double indent = toggle != null ? 18 : 0;
+            var box = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+            string count = L.N(fm.Count, "{0} free model", "{0} free models");
+            if (toggle != null) box.Children.Add(FoldRow(count, open, toggle, new Thickness(0)));
+            else box.Children.Add(Text(count, 11.5, "Text3"));
+            var shown = open ? fm.Take(FreeModelsShown).ToList() : fm.Where(m => m.Expires.HasValue).Take(3).ToList();
+            if (open)
             {
-                // Count the free models and list the ones whose free period ends soonest; the tooltip lists them all.
-                var fm = p.Usage.FreeModels;
-                var ending = fm.Where(m => m.Expires.HasValue).ToList();
-                var box = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
-                box.Children.Add(Text(L.N(fm.Count, "{0} free model", "{0} free models"), 11.5, "Text3"));
-                foreach (var m in ending.Take(3))
-                {
-                    var row = new DockPanel { Margin = new Thickness(0, 1, 0, 0) };
-                    var until = Text(L.F("free until {0}", FreeModels.When(m.Expires.Value)), 11.5, m.Expires.Value <= DateTime.Today.AddDays(1) ? "Caution" : "Text2");
-                    until.Margin = new Thickness(8, 0, 0, 0);
-                    DockPanel.SetDock(until, Dock.Right);
-                    row.Children.Add(until);
-                    var modelName = Text(m.Name, 11.5, "Text2");
-                    modelName.TextTrimming = TextTrimming.CharacterEllipsis;
-                    row.Children.Add(modelName);
-                    box.Children.Add(row);
-                }
-                box.ToolTip = L.T("Free models, soonest to stop being free first:") + "\n" + string.Join("\n", fm.Take(25).Select(m => FreeModels.Line(m)))
-                              + (fm.Count > 25 ? "\n" + L.F("+{0} more", fm.Count - 25) : "");
-                stack.Children.Add(box);
+                var hint = Text(L.T("Click a model to copy its ID for Pi, OpenCode or your scripts."), 11, "Text3");
+                hint.TextWrapping = TextWrapping.Wrap;
+                hint.TextTrimming = TextTrimming.None;
+                hint.Margin = new Thickness(indent, 0, 0, 2);
+                box.Children.Add(hint);
             }
+            foreach (var m in shown) box.Children.Add(FreeModelRow(m, indent));
+            if (open && fm.Count > FreeModelsShown)
+            {
+                var more = Text(L.F("+{0} more", fm.Count - FreeModelsShown), 11.5, "Text3");
+                more.Margin = new Thickness(indent, 1, 0, 0);
+                box.Children.Add(more);
+            }
+            stack.Children.Add(box);
+        }
+
+        private const int FreeModelsShown = 40;
+
+        /// <summary>A free model with its expiry, or its context window, on the right; a click copies its id.</summary>
+        private static FrameworkElement FreeModelRow(FreeModel m, double indent)
+        {
+            var row = new DockPanel { Margin = new Thickness(indent, 1, 0, 0), Background = Brushes.Transparent, Cursor = Cursors.Hand };
+            string context = FreeModels.Context(m.Context);
+            string right = m.Expires.HasValue ? L.F("free until {0}", FreeModels.When(m.Expires.Value)) : context == null ? null : L.F("{0} context", context);
+            var side = Text(right ?? "", 11.5, m.Expires.HasValue && m.Expires.Value <= DateTime.Today.AddDays(1) ? "Caution" : "Text3");
+            side.Margin = new Thickness(8, 0, 0, 0);
+            DockPanel.SetDock(side, Dock.Right);
+            row.Children.Add(side);
+            var modelName = Text(m.Name, 11.5, "Text2");
+            modelName.TextTrimming = TextTrimming.CharacterEllipsis;
+            row.Children.Add(modelName);
+            row.ToolTip = FreeModels.Line(m) + "\n" + L.F("Click to copy {0}", m.Id);
+            row.MouseLeftButtonUp += (o, e) =>
+            {
+                try { Clipboard.SetText(m.Id); side.Text = L.T("Copied"); }
+                catch (System.Runtime.InteropServices.COMException) { }
+                e.Handled = true;
+            };
+            return row;
         }
 
         /// <summary>The active unused-quota or wait-instead-of-paying tip, then the service notice with an optional sign-in link.</summary>
@@ -368,16 +408,21 @@ namespace AIMeter
         /// <summary>A clickable row that counts agent sessions and shows or hides their list.</summary>
         private static FrameworkElement SessionSummary(List<Session> sessions, bool open, Action toggle)
         {
-            var row = new DockPanel { Background = Brushes.Transparent, Cursor = Cursors.Hand, Margin = new Thickness(0, 2, 0, 2) };
+            int busy = sessions.Count(s => s.Status == "busy");
+            string text = L.N(sessions.Count, "{0} session", "{0} sessions");
+            if (busy > 0) text += " · " + busy.ToString(It) + " " + L.T("working");
+            return FoldRow(text, open, toggle, new Thickness(0, 2, 0, 2));
+        }
+
+        /// <summary>A clickable summary line with a chevron that shows or hides the rows below it.</summary>
+        private static FrameworkElement FoldRow(string text, bool open, Action toggle, Thickness margin)
+        {
+            var row = new DockPanel { Background = Brushes.Transparent, Cursor = Cursors.Hand, Margin = margin };
             var chev = Glyph(open ? "" : "", 9, "Text3");
             chev.Width = 18;
             chev.HorizontalAlignment = HorizontalAlignment.Left;
             DockPanel.SetDock(chev, Dock.Left);
             row.Children.Add(chev);
-
-            int busy = sessions.Count(s => s.Status == "busy");
-            string text = L.N(sessions.Count, "{0} session", "{0} sessions");
-            if (busy > 0) text += " · " + busy.ToString(It) + " " + L.T("working");
             row.Children.Add(Text(text, 11.5, "Text2"));
             row.MouseLeftButtonUp += (o, e) => { toggle(); e.Handled = true; };
             return row;
@@ -387,7 +432,7 @@ namespace AIMeter
         /// Build the local-model card with GPU capacity and each model's server, memory and context.
         /// List attached CLI sessions under each model and unmatched sessions at the bottom.
         /// </summary>
-        public static Border LocalCard(ProviderState p, bool expanded, Action toggle)
+        public static Border LocalCard(ProviderState p, bool expanded, Action toggle, Func<string, bool> isOpen = null, Action<string> toggleOpen = null)
         {
             var stack = new StackPanel();
             var icon = Glyph(LocalGlyph, 18, "Text");
@@ -424,7 +469,19 @@ namespace AIMeter
                 var sub = Text(L.T("Coding agents"), 11.5, "Text3", FontWeights.SemiBold);
                 sub.Margin = new Thickness(0, 0, 0, 2);
                 stack.Children.Add(sub);
-                foreach (var s in p.Sessions.OrderByDescending(x => x.Status == "busy").ThenByDescending(x => x.Updated).Take(6)) stack.Children.Add(SessionRow(s, "Info"));
+                var ordered = p.Sessions.OrderByDescending(x => x.Status == "busy").ThenByDescending(x => x.Updated).ToList();
+                bool open = isOpen == null || isOpen("sessions");
+                if (toggleOpen != null) stack.Children.Add(SessionSummary(ordered, open, () => toggleOpen("sessions")));
+                if (open)
+                {
+                    foreach (var s in ordered.Take(6)) stack.Children.Add(SessionRow(s, "Info"));
+                    if (ordered.Count > 6)
+                    {
+                        var more = Text(L.F("+{0} more sessions", ordered.Count - 6), 11.5, "Text3");
+                        more.Margin = new Thickness(18, 2, 0, 0);
+                        stack.Children.Add(more);
+                    }
+                }
             }
             if (!p.Running && p.Sessions.Count == 0)
             {

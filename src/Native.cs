@@ -108,6 +108,57 @@ namespace AIMeter
             finally { CloseHandle(h); }
         }
 
+        [DllImport("ntdll.dll")] private static extern int NtQueryInformationProcess(IntPtr h, int cls, IntPtr info, int size, out int returned);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr CommandLineToArgvW(string line, out int count);
+        [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr h);
+
+        /// <summary>A process's arguments, split as the C runtime does, or null if it cannot be read (other users, protected processes).</summary>
+        public static string[] ProcessArguments(uint pid)
+        {
+            IntPtr h = OpenProcess(0x1000, false, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+            if (h == IntPtr.Zero) return null;
+            IntPtr buf = IntPtr.Zero;
+            try
+            {
+                // ProcessCommandLineInformation (60, Windows 8.1 and later) returns a UNICODE_STRING followed by its text.
+                int size = 4096, returned;
+                for (int attempt = 0; attempt < 2; attempt++)
+                {
+                    buf = Marshal.AllocHGlobal(size);
+                    int status = NtQueryInformationProcess(h, 60, buf, size, out returned);
+                    if (status == 0) break;
+                    Marshal.FreeHGlobal(buf);
+                    buf = IntPtr.Zero;
+                    if (returned <= size || returned > 1 << 20) return null;
+                    size = returned;
+                }
+                if (buf == IntPtr.Zero) return null;
+                int length = Marshal.ReadInt16(buf) & 0xFFFF;
+                IntPtr text = Marshal.ReadIntPtr(buf, IntPtr.Size);
+                if (length == 0 || text == IntPtr.Zero) return null;
+                return SplitArguments(Marshal.PtrToStringUni(text, length / 2));
+            }
+            finally
+            {
+                if (buf != IntPtr.Zero) Marshal.FreeHGlobal(buf);
+                CloseHandle(h);
+            }
+        }
+
+        private static string[] SplitArguments(string line)
+        {
+            int count;
+            IntPtr argv = CommandLineToArgvW(line, out count);
+            if (argv == IntPtr.Zero) return null;
+            try
+            {
+                var args = new string[count];
+                for (int i = 0; i < count; i++) args[i] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv, i * IntPtr.Size));
+                return args;
+            }
+            finally { LocalFree(argv); }
+        }
+
         // --- power saving ------------------------------------------------
         [StructLayout(LayoutKind.Sequential)]
         private struct POWER_THROTTLING_STATE { public uint Version, ControlMask, StateMask; }
