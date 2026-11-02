@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace AIMeter
 {
@@ -15,6 +16,12 @@ namespace AIMeter
         {
             test("MCP answers the handshake, lists read-only tools and ignores notifications", Protocol);
             test("MCP tools report limits, sessions without titles, free models and room", Tools);
+            test("An MCP refresh asks only for old readings and reports each service's freshness", RefreshTargets);
+            test("Concurrent MCP refreshes share one collection", RefreshShared);
+            test("A call after a refresh sees the new reading before the surfaces apply it", RefreshThenRead);
+            test("An MCP refresh respects Retry-After, the minimum interval, pauses and its timeout", RefreshLimits);
+            test("suggest_service reports unknown room as unknown and ranks it after known room", SuggestUnknown);
+            test("Retry-After is read as seconds or an HTTP date and capped", RetryAfter);
             test("MCP relay and pipe carry requests from a separate process", Relay);
             test("A client that disconnects abruptly leaves the MCP pipe serving", AbruptDisconnect);
             test("Connecting an app adds only AI Meter's JSON entry and keeps the rest", JsonEdits);
@@ -112,6 +119,155 @@ namespace AIMeter
             var order = ((IList)CallTool(server, "suggest_service", "{}")["services"]).OfType<Dictionary<string, object>>().Select(s => Json.Str(s, "service")).ToList();
             Assert(order.SequenceEqual(new[] { "openrouter", "claude" }), "Services are not ordered by room.");
             Assert(CallTool(server, "nothing", "{}").ContainsKey("error"), "An unknown tool did not report an error.");
+        }
+
+        /// <summary>Stands in for the collection worker: after each wake it waits briefly, then publishes collect().</summary>
+        private sealed class FakeWorker
+        {
+            public readonly List<string> Invalidated = new List<string>();
+            public int Collections;
+            public readonly RefreshGate Gate;
+            private readonly AutoResetEvent wake = new AutoResetEvent(false);
+
+            public FakeWorker(Func<Snapshot> collect, bool paused = false, bool publishes = true)
+            {
+                Gate = new RefreshGate((id, catalogue) => { lock (Invalidated) Invalidated.Add(catalogue ? id + "#catalogue" : id); }, () => wake.Set(), () => paused);
+                new Thread(() =>
+                {
+                    while (true)
+                    {
+                        wake.WaitOne();
+                        Thread.Sleep(200);
+                        if (!publishes) continue;
+                        var s = collect();
+                        Interlocked.Increment(ref Collections);
+                        Gate.Publish(s);
+                    }
+                }) { IsBackground = true }.Start();
+            }
+        }
+
+        /// <summary>The fixture with Claude's reading taken ten minutes ago.</summary>
+        private static Snapshot OldClaude()
+        {
+            var snap = Fixture();
+            snap.Providers[0].Usage.At = DateTime.Now.AddMinutes(-10);
+            return snap;
+        }
+
+        private static Dictionary<string, object> Fresh(Dictionary<string, object> content, string service)
+        {
+            return Json.Obj(Json.Obj(content, "freshness"), service);
+        }
+
+        private static void RefreshTargets()
+        {
+            NetworkBackoff.Clear();
+            var worker = new FakeWorker(() =>
+            {
+                var s = Fixture();
+                s.Providers[1].Usage.FreeModelsAt = DateTime.Now;
+                return s;
+            });
+            var snap = OldClaude();
+            var server = new McpServer(() => snap, () => false, worker.Gate, TimeSpan.FromSeconds(5));
+
+            var plain = CallTool(server, "get_limits", "{}");
+            Assert(worker.Invalidated.Count == 0 && Json.Str(Fresh(plain, "claude"), "refresh") == "not_requested", "A plain read asked for a refresh.");
+            Assert(Json.Str(Fresh(plain, "claude"), "read_at") != null && Json.Str(Fresh(plain, "claude"), "state") == "fresh", "Freshness lacks the reading time.");
+
+            var limits = CallTool(server, "get_limits", "{\"max_age_seconds\":300}");
+            Assert(worker.Invalidated.SequenceEqual(new[] { "claude" }), "Only Claude's old reading should be asked for: " + string.Join(",", worker.Invalidated));
+            Assert(Json.Str(Fresh(limits, "claude"), "refresh") == "refreshed", "The refreshed service is not marked so.");
+            Assert(Json.Str(Fresh(limits, "openrouter"), "refresh") == "cached", "A recent reading was not kept.");
+
+            var models = CallTool(server, "list_free_models", "{\"refresh\":true}");
+            Assert(worker.Invalidated.Last() == "openrouter#catalogue" && worker.Invalidated.Count == 2, "The free-model list was not asked for on its own.");
+            Assert(Json.Str(Fresh(models, "openrouter"), "refresh") == "refreshed" && Fresh(models, "claude") == null, "Model-list freshness is wrong.");
+
+            var sessions = CallTool(server, "list_sessions", "{\"refresh\":true}");
+            Assert(Json.Str(sessions, "refresh") == "refreshed" && worker.Invalidated.Count == 2, "A local refresh contacted a service or did not wait.");
+            Assert(CallTool(server, "get_limits", "{\"max_age_seconds\":-1}").ContainsKey("error"), "A negative age was accepted.");
+        }
+
+        private static void RefreshShared()
+        {
+            NetworkBackoff.Clear();
+            var worker = new FakeWorker(Fixture);
+            var snap = OldClaude();
+            var server = new McpServer(() => snap, () => false, worker.Gate, TimeSpan.FromSeconds(5));
+            var results = new Dictionary<string, object>[2];
+            var threads = Enumerable.Range(0, 2).Select(i => new Thread(() => results[i] = CallTool(server, "get_limits", "{\"refresh\":true}"))).ToList();
+            threads[0].Start();
+            Thread.Sleep(50);
+            threads[1].Start();
+            foreach (var t in threads) t.Join(10000);
+            Assert(results.All(r => r != null && Json.Str(Fresh(r, "claude"), "refresh") == "refreshed"), "A waiting caller did not receive the shared reading.");
+            Assert(worker.Collections == 1 && worker.Invalidated.Count == 1, "Concurrent callers started " + worker.Collections + " collections.");
+        }
+
+        private static void RefreshThenRead()
+        {
+            NetworkBackoff.Clear();
+            var worker = new FakeWorker(Fixture);
+            var shown = OldClaude();   // What the surfaces still show: the controller applies snapshots after history.
+            var server = new McpServer(() => worker.Gate.Newest(shown), () => false, worker.Gate, TimeSpan.FromSeconds(5));
+            Assert(Json.Str(Fresh(CallTool(server, "get_limits", "{\"refresh\":true}"), "claude"), "refresh") == "refreshed", "The first refresh failed.");
+            var next = Fresh(CallTool(server, "get_limits", "{\"refresh\":true}"), "claude");
+            Assert(Json.Str(next, "refresh") == "cached", "The next call used the older snapshot: " + Json.Str(next, "refresh"));
+        }
+
+        private static void RefreshLimits()
+        {
+            NetworkBackoff.Clear();
+            // A service that keeps failing: the new reading is as old as before.
+            var worker = new FakeWorker(OldClaude);
+            var snap = OldClaude();
+            var server = new McpServer(() => snap, () => false, worker.Gate, TimeSpan.FromSeconds(5));
+
+            NetworkBackoff.Set("claude", DateTime.Now.AddMinutes(10));
+            var blocked = Fresh(CallTool(server, "get_limits", "{\"service\":\"claude\",\"refresh\":true}"), "claude");
+            Assert(Json.Str(blocked, "refresh") == "backoff" && Json.Str(blocked, "retry_after") != null && worker.Invalidated.Count == 0, "Retry-After was not respected.");
+            NetworkBackoff.Clear();
+
+            var failed = Fresh(CallTool(server, "get_limits", "{\"service\":\"claude\",\"refresh\":true}"), "claude");
+            Assert(Json.Str(failed, "refresh") == "unchanged", "A failed read was reported as refreshed.");
+            var again = Fresh(CallTool(server, "get_limits", "{\"service\":\"claude\",\"refresh\":true}"), "claude");
+            Assert(Json.Str(again, "refresh") == "too_soon" && Json.Str(again, "retry_after") != null && worker.Invalidated.Count == 1, "A second refresh within a minute reached the service.");
+
+            var paused = new McpServer(() => snap, () => false, new FakeWorker(Fixture, true).Gate, TimeSpan.FromSeconds(5));
+            Assert(Json.Str(Fresh(CallTool(paused, "get_limits", "{\"refresh\":true}"), "claude"), "refresh") == "paused", "A paused collection was awaited.");
+
+            var silent = new McpServer(() => snap, () => false, new FakeWorker(Fixture, false, false).Gate, TimeSpan.FromMilliseconds(400));
+            var late = CallTool(silent, "get_limits", "{\"refresh\":true}");
+            Assert(Json.Str(Fresh(late, "claude"), "refresh") == "timed_out" && ((IList)late["services"]).Count == 2, "A timeout did not return the previous reading.");
+        }
+
+        private static void SuggestUnknown()
+        {
+            var snap = Fixture();
+            var stale = new ProviderState { Id = "aaa", Name = "Stale", Usage = new Usage { Source = "cache", At = DateTime.Now.AddHours(-1) } };
+            stale.Usage.Windows.Add(new UsageWindow { Label = "Day", Short = UsageWindow.ShortDay, Used = 10 });
+            var unknown = new ProviderState { Id = "nvidia", Name = "NVIDIA", Usage = new Usage { Source = "live", At = DateTime.Now } };
+            unknown.Usage.FreeModels = new List<FreeModel> { new FreeModel { Id = "n/free", Name = "Free" } };
+            snap.Providers.Add(unknown);
+            snap.Providers.Add(stale);
+            var rows = ((IList)CallTool(new McpServer(() => snap, () => false), "suggest_service", "{}")["services"]).OfType<Dictionary<string, object>>().ToList();
+            Assert(rows.Select(r => Json.Str(r, "service")).SequenceEqual(new[] { "openrouter", "aaa", "claude", "nvidia" }),
+                "Wrong order: " + string.Join(",", rows.Select(r => Json.Str(r, "service"))));
+            var last = rows.Last();
+            Assert(last.ContainsKey("remaining_percent") && last["remaining_percent"] == null && Json.Str(last, "quota") == "unknown", "Unknown room was not reported as unknown.");
+            Assert(Json.Bool(rows[1], "stale"), "A stale reading is not marked.");
+        }
+
+        private static void RetryAfter()
+        {
+            var now = new DateTime(2026, 11, 2, 12, 0, 0, DateTimeKind.Utc);
+            Assert(NetworkBackoff.Parse("120", now) == TimeSpan.FromSeconds(120), "Seconds were misread.");
+            Assert(NetworkBackoff.Parse("Mon, 02 Nov 2026 12:01:30 GMT", now) == TimeSpan.FromSeconds(90), "An HTTP date was misread.");
+            Assert(NetworkBackoff.Parse("Mon, 02 Nov 2026 11:00:00 GMT", now) == TimeSpan.Zero, "A past date gave a negative delay.");
+            Assert(NetworkBackoff.Parse("9999999", now) == TimeSpan.FromHours(24), "A huge delay was not capped.");
+            Assert(NetworkBackoff.Parse("soon", now) == null && NetworkBackoff.Parse("-5", now) == null, "An invalid value was accepted.");
         }
 
         private static void Relay()

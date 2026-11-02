@@ -246,6 +246,8 @@ namespace AIMeter
         public abstract ProviderState Collect(Probe p);
         /// <summary>Forces the next read over the network (Refresh button, fresh sign-in, resume).</summary>
         public virtual void InvalidateNetwork() { }
+        /// <summary>Forces the next read of the free-model list, which has its own, longer interval.</summary>
+        public virtual void InvalidateCatalogue() { }
     }
 
     /// <summary>Orchestrator: collects the state of each enabled service, sharing processes, WSL and cache.</summary>
@@ -265,6 +267,16 @@ namespace AIMeter
         public bool WslUp { get { return probe.WslUp; } }
 
         public void InvalidateNetwork() { foreach (var p in providers) p.InvalidateNetwork(); }
+
+        /// <summary>Force one provider's next network read: its usage, or its free-model list.</summary>
+        public void Invalidate(string id, bool catalogue)
+        {
+            foreach (var p in providers.Where(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (catalogue) p.InvalidateCatalogue();
+                else p.InvalidateNetwork();
+            }
+        }
 
         public void Trim() { probe.Trim(); }
 

@@ -61,7 +61,7 @@ namespace AIMeter
             }
 
             double interval = p.SavingPower ? 15 : 5;
-            if (p.AllowNetwork && (DateTime.Now - fetchedAt).TotalMinutes >= interval)
+            if (p.AllowNetwork && (DateTime.Now - fetchedAt).TotalMinutes >= interval && NetworkBackoff.Ready("copilot"))
             {
                 fetchedAt = DateTime.Now;
                 string pl;
@@ -102,6 +102,7 @@ namespace AIMeter
             }
             catch (WebException e)
             {
+                NetworkBackoff.Note("copilot", e);
                 var hr = e.Response as HttpWebResponse;
                 if (hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden)) needsLogin = true;
                 return null;

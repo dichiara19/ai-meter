@@ -10,8 +10,8 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 
 | Milestone | State | Branch / PR | Base / head SHA | Tests and evidence | Blockers / next action |
 | --- | --- | --- | --- | --- | --- |
-| M0 Baseline, ADR, contracts | in_review | `docs/agent-orchestration-plan`, [PR #16](https://github.com/dichiara19/ai-meter/pull/16), epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `9a49ffb` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on `ca722b1` (run 41433116825) and `9a49ffb` (run 41434473586) | Maintainer review and approval of PR #16, which accepts [ADR 0001](../adr/0001-optional-agent-orchestration.md). Settle the open decisions below |
-| M1 MCP freshness | planned | `feat/mcp-freshness`, from `main` | — | — | Starts once ADR 0001 is accepted. PR #15 is already merged, so there is no parent branch to follow |
+| M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
+| M1 MCP freshness | in_review | [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / `f3f3aeb` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. Trial merge of #18, #19 and #20 on `main`: no conflicts, 97 tests passed | Store relay path deferred to M6 (maintainer decision, 2026-11-02). Next: merge #18, then #19 and #20 |
 | M2 Provider discovery | planned | `feat/provider-discovery` | — | — | Needs the M1 freshness contract |
 | M3 Execution candidates | planned | `feat/execution-candidates` | — | — | Needs M1 and M2 |
 | M4 Pi spike and runner MVP | planned | `feat/agent-jobs` | — | — | Spike first. Real routing needs M3 |
@@ -58,12 +58,81 @@ Three things the PR marked as unverified are still unverified after the release,
 
 ## Open decisions for the maintainer
 
-1. **Accept [ADR 0001](../adr/0001-optional-agent-orchestration.md).** Merging this PR accepts it.
-2. **Default refresh behaviour of read tools** ([contracts §1.1](orchestration-contracts.md#11-arguments)). The recommendation is no network unless the caller asks for it, which keeps the 0.8.6 promise. The original plan proposed refreshing by default.
+1. **Accept [ADR 0001](../adr/0001-optional-agent-orchestration.md).** Resolved: accepted when PR #16 was merged.
+2. **Default refresh behaviour of read tools.** Resolved 2026-11-02: only on request ([contracts §1](orchestration-contracts.md#1-freshness-of-read-tools-m1)).
 3. **Credentials for the runner in the MVP.** The recommendation is that the runtime uses only its own sign-in, and AI Meter never passes a key to it (ADR 0001, decision 3).
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M1 ready for review.**
+  - The maintainer deferred the Store package relay check to M6, with packaging, and asked to continue towards the complete system.
+  - A trial merge of #18, #19 (Antigravity CLI in AI apps) and #20 (copy confirmation) on `main` had no conflicts. On the combined tree, `tests/run.ps1` passed 97 tests and the build compiled.
+  - Recommended merge order: #18, #19, #20, each squash-merged.
+  - M2 starts on a branch stacked on `feat/mcp-freshness`. It is rebased onto `main` once #18 is merged.
+
+- **2026-11-02, M1 live check with Antigravity CLI.** The maintainer pointed out that Gemini CLI no longer exists: Antigravity CLI (`agy`) replaces it.
+  - **Version.** `agy` 1.4.12 is installed in WSL only.
+  - **Where it stores MCP servers.** With the maintainer's approval, `ai-meter` was added temporarily with `agy mcp add`. The command wrote `~/.gemini/config/mcp_config.json`, using the standard `mcpServers` format plus `"disabled": false`.
+  - **Permissions.** Headless runs need an allow rule for MCP tools. It was given for the session only, with `--settings '{"permissions":{"allow":["mcp(...)"]}}'`.
+  - **Result against the M1 build.** `get_limits` with `max_age_seconds: 30` gave `refreshed` for Claude, ChatGPT and Antigravity. The run used 24,040 tokens.
+  - **Clean-up.** `ai-meter` was removed again and `mcp_config.json` restored byte for byte. The schema cache that `agy` wrote to `~/.gemini/antigravity-cli/mcp/ai-meter` was deleted. The installed 0.8.6 was restarted.
+  - **Consequences for AI apps, to fix in a separate PR:**
+    - AI apps still offers "Gemini CLI". It detects it from `~/.gemini`, which exists because of `agy`, so the detection is false.
+    - It would write `~/.gemini/settings.json`, which `agy` does not read.
+    - It copies a `gemini mcp add` command that no longer works.
+    - Sessions are still looked for in `~/.gemini/tmp`, while `agy` keeps them in `~/.gemini/antigravity-cli/conversations`.
+
+- **2026-11-02, M1 live check.**
+  - **Setup.** Build from `feat/mcp-freshness` on Windows 11.
+    - Run through `AIMeter.ps1`, because Smart App Control blocks the unsigned `bin\AIMeter.exe`.
+    - The installed 0.8.6 copy was stopped for the test, then restarted.
+  - **Relay from a Windows process** (JSON-RPC over `mcp.ps1`):
+    - `tools/list` shows the new arguments.
+    - Readings younger than a minute come back `cached`.
+    - After 75 s, `max_age_seconds: 60` gives `refreshed` in 3–4 s.
+    - Two concurrent clients received the same snapshot.
+    - A negative age is refused.
+    - `list_sessions` with `refresh` gives `refreshed`.
+  - **Bug found and fixed.** The first live run showed that a call right after a refresh still read `Controller.Last`, which the UI updates only after history is recorded. It answered `too_soon` with the old reading.
+    - Fix: the MCP now reads the newest of `Last` and the snapshot the worker published (`RefreshGate.Newest`).
+    - Added a regression test. 95 tests pass.
+    - The live re-run shows `cached` with the new reading.
+  - **Claude Code 2.1.316 in WSL** (`--mcp-config`, `--strict-mcp-config`, user configuration unchanged): `get_limits` called through the Windows relay over WSL interop. It returned `freshness` with `too_soon` and `retry_after`, which is correct because the last request was under a minute earlier.
+  - **Codex 0.163.0 in WSL** (`-c mcp_servers.ai-meter...`, user configuration unchanged): `get_limits` with `max_age_seconds: 30` gave `refreshed` for Claude, ChatGPT and Antigravity.
+  - **Settings → AI apps** in this build lists 9 apps:
+    - on Windows: Claude Desktop, VS Code, Claude Code, Codex;
+    - in WSL: Claude Code, Codex, Gemini CLI, OpenCode, Pi, with the adapter note.
+
+    No switch was turned on, to leave user files unchanged.
+  - **NOT RUN:**
+    - Gemini CLI (not installed on Windows or in WSL);
+    - Windows-native CLIs (none on PATH);
+    - Claude Desktop (needs its UI);
+    - the Store package relay path (needs the MSIX installed).
+  - **Separate finding, not caused by M1.** Before the test, `%APPDATA%\AIMeter\mcp.ps1` (written 10:56) named `$launch = 'C:\Windows\system32'`, which is what an empty launch command produces, and had LF line endings. A relay like that cannot start AI Meter when it is not running. Both this build and the installed 0.8.6, started through `conhost`, rewrote it correctly. The origin is not identified; a copy was kept for investigation.
+
+- **2026-11-02, M1 in progress.**
+  - Implemented `refresh` and `max_age_seconds` on the MCP read tools, plus the per-service `freshness` map.
+  - Added `RefreshGate` (single flight through the existing collection worker, 60 s minimum interval, 20 s timeout) and `NetworkBackoff` (`429` / `Retry-After`) for Claude, Copilot, Antigravity and defined services.
+  - Separated catalogue and usage invalidation.
+  - `suggest_service` now reports unknown room as `null`.
+  - Tests on the working tree based on `f051b41`: `tests/run.ps1` passed 94, including 5 new tests for:
+    - targets and freshness;
+    - shared collection;
+    - Retry-After, minimum interval, pause and timeout;
+    - unknown room;
+    - Retry-After parsing.
+  - `build.ps1 -NoInstall` compiled.
+  - Not covered by automated tests:
+    - the real controller worker loop. The gate is tested with a fake worker;
+    - `NetworkBackoff.Note` on a real HTTP `429`. Only the parsing is tested.
+  - **NOT RUN** (M1 exit gates still open):
+    - real clients (Claude Code, Codex, Gemini CLI) on Windows and in WSL, against this build;
+    - the Settings → AI apps page;
+    - the relay path in the Store package.
+
+    These need the installed AI Meter replaced by this build, and the maintainer's go-ahead.
 
 - **2026-11-02, M0 ready for review.**
   - Opened PR #16 and epic #17.

@@ -120,11 +120,13 @@ namespace AIMeter
         public List<ModelCost> TodayModels;
         /// <summary>Models the service offers at no cost, soonest to expire first.</summary>
         public List<FreeModel> FreeModels;
+        /// <summary>When the free-model list was read; it has its own interval, longer than the usage request's.</summary>
+        public DateTime? FreeModelsAt;
 
         /// <summary>Copy usage with additional windows, preserving the original provider response.</summary>
         public Usage With(IEnumerable<UsageWindow> extra)
         {
-            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels };
+            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels, FreeModelsAt = FreeModelsAt };
             u.Windows.AddRange(Windows);
             u.Windows.AddRange(extra);
             return u;
@@ -151,7 +153,7 @@ namespace AIMeter
         /// <summary>Return the same data marked as cached.</summary>
         public Usage AsCache()
         {
-            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels };
+            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels, FreeModelsAt = FreeModelsAt };
         }
     }
 

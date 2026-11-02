@@ -38,6 +38,7 @@ namespace AIMeter
         private HistoryStore historyStore;
         private HistoryCollector historyCollector;
         private McpPipeHost mcpHost;
+        private RefreshGate refreshGate;
         internal ConsumptionMonitor Consumption { get; private set; }
         private List<ConsumptionNotice> pendingConsumption = new List<ConsumptionNotice>();   // Guarded by itself.
         private string pendingFeedback;
@@ -106,9 +107,11 @@ namespace AIMeter
             ThreadPool.RegisterWaitForSingleObject(showSignal, (s, t) => ui.BeginInvoke(new Action(ToggleFlyout)), null, -1, false);
             ThreadPool.RegisterWaitForSingleObject(settingsSignal, (s, t) => ui.BeginInvoke(new Action(OpenSettings)), null, -1, false);
 
-            // AI apps connected through MCP read the latest snapshot. The relay is written at every start, so it names
-            // this copy and exists before anyone adds AI Meter with an agent's own "mcp add" command.
-            mcpHost = new McpPipeHost(new McpServer(() => Last, () => Settings.McpTitles));
+            // AI apps connected through MCP read the latest snapshot, and can ask the collection worker for a fresh one.
+            // The relay is written at every start, so it names this copy and exists before anyone adds AI Meter with an
+            // agent's own "mcp add" command.
+            refreshGate = new RefreshGate((id, catalogue) => collector.Invalidate(id, catalogue), () => wake.Set(), () => paused);
+            mcpHost = new McpPipeHost(new McpServer(() => refreshGate.Newest(Last), () => Settings.McpTitles, refreshGate));
             mcpHost.Start();
             try { McpRelay.Write(); } catch (Exception ex) { Program.LogError("mcp-relay", ex); }
 
@@ -126,14 +129,16 @@ namespace AIMeter
             {
                 if (paused) { wake.WaitOne(); continue; }
                 bool saving = Native.SavingPower();
+                bool requested = refreshGate.TakeNetworkRequest();
                 Snapshot snap = null;
                 try
                 {
-                    if (Program.Demo) snap = DemoData.Build(DateTime.Now);
+                    if (Program.Demo) { snap = DemoData.Build(DateTime.Now); refreshGate.Publish(snap); }
                     else
                     {
-                        snap = collector.Collect(anyVisible || Settings.HistoryEnabled || ticks == 0, saving);
+                        snap = collector.Collect(requested || anyVisible || Settings.HistoryEnabled || ticks == 0, saving);
                         forecaster.Apply(snap);
+                        refreshGate.Publish(snap);   // MCP callers waiting for this reading need not wait for history.
                         if (Settings.HistoryEnabled)
                         {
                             try
