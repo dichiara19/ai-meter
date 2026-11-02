@@ -75,7 +75,7 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
   - If AI Meter is not running, the relay starts it.
   - Then it forwards one JSON-RPC message per line.
 - **Apps in WSL.** They start the same Windows relay through WSL interop: `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`.
-- **Where the answers come from.** The server answers from AI Meter's latest reading. Tools add no network requests and never start WSL.
+- **Where the answers come from.** The server answers from AI Meter's latest reading. A tool adds network requests only when the app asks for newer data (see [Fresh data](#fresh-data)). No tool ever starts WSL.
 
 ## Tools
 
@@ -88,11 +88,55 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
 
-All tools except `list_local_models` accept an optional `service` (`claude`, `openai`, `copilot`, `openrouter`…).
+All tools except `list_local_models` and `suggest_service` accept an optional `service` (`claude`, `openai`, `copilot`, `openrouter`…).
+
+`suggest_service` lists services with known room first. A service that offers free models but has no readable limit comes after them, with `remaining_percent: null` and `quota: "unknown"`. Its room is unknown, not 100%. A service whose reading is out of date is marked `stale` and ranked after fresh ones with the same room.
 
 Each result is returned twice: as `structuredContent`, and as the same JSON in a text block for clients that read only text. Times are local ISO 8601 and percentages range from 0 to 100.
 
+## Fresh data
+
+By default, tools answer from AI Meter's latest reading and make no network requests. AI Meter's own reading happens:
+- every 10 to 30 seconds while a surface is open, and every two minutes otherwise;
+- for a service's limits, at that service's own interval, usually every 5 minutes.
+
+An app that needs newer data asks for it:
+
+| Argument | Tools | Effect |
+|---|---|---|
+| `max_age_seconds` | `get_limits`, `get_spend`, `suggest_service`, `list_free_models` | Reads again only the services whose data is older than this. Preferred |
+| `refresh` | the same tools | Reads every service again, except those read in the last minute |
+| `refresh` | `list_sessions`, `list_local_models` | Reads local sessions and servers again. No network requests |
+
+`list_free_models` reads the free-model lists. The other tools read the usage limits.
+
+A refresh:
+- goes only to the endpoints AI Meter already uses for each service you turned on;
+- uses AI Meter's usual collection, so apps asking at the same time share one reading;
+- asks each service at most once a minute;
+- never asks a service before the time it gave when it answered "too many requests" (`429`, with or without `Retry-After`);
+- waits up to 20 seconds. After that, the tool answers with the previous reading, and the new one arrives in a later call.
+
+Every result of the four network tools includes `freshness`, one entry per service:
+
+```json
+"freshness": {
+  "claude": { "state": "fresh", "read_at": "2026-11-02T12:00:05+01:00", "refresh": "refreshed" },
+  "openrouter": { "state": "stale", "reason": "cached_reading", "read_at": "…", "refresh": "backoff", "retry_after": "…" }
+}
+```
+
+| Field | Values |
+|---|---|
+| `state` | `fresh`; `stale` (an older reading kept after the service could not be read); `unavailable` (no reading at all) |
+| `reason` | Why the data is not fresh: `cached_reading`, `sign_in_needed`, `no_reading`, `no_model_list` |
+| `read_at` | When the data was read from the service |
+| `refresh` | `not_requested`; `cached` (recent enough); `refreshed`; `unchanged` (asked, but the service gave nothing newer); `too_soon` (asked less than a minute ago); `backoff` (rate-limited by the service); `paused` (the PC is locked or asleep); `timed_out`; `unavailable` |
+| `retry_after` | The earliest time another request can reach the service |
+
+`list_sessions` and `list_local_models` report `refresh` once, at the top level, when it was asked for.
+
 ## Limits
 
-- The data is as fresh as AI Meter's last update: every 10 to 30 seconds while a surface is open, every two minutes otherwise.
+- Without `refresh` or `max_age_seconds`, the data is as fresh as AI Meter's last reading (see [Fresh data](#fresh-data)).
 - In the Microsoft Store package the relay is written to `~/.aimeter`, because a packaged app's AppData is private to the package.

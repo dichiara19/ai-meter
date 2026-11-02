@@ -161,7 +161,7 @@ namespace AIMeter
             string creds = CredentialsPath(p);
             double interval = p.SavingPower ? 15 : 5;
 
-            if (S.ClaudeLiveUsage && p.AllowNetwork && creds != null && (DateTime.Now - fetchedAt).TotalMinutes >= interval)
+            if (S.ClaudeLiveUsage && p.AllowNetwork && creds != null && (DateTime.Now - fetchedAt).TotalMinutes >= interval && NetworkBackoff.Ready("claude"))
             {
                 fetchedAt = DateTime.Now;
                 var fresh = Fetch(creds);
@@ -246,6 +246,7 @@ namespace AIMeter
             }
             catch (WebException e)
             {
+                NetworkBackoff.Note("claude", e);
                 var hr = e.Response as HttpWebResponse;
                 if (hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden))
                     needsLogin = true;

@@ -25,6 +25,7 @@ namespace AIMeter
         private string problem;   // Authentication notice shown when access is missing or expired.
         private string credentialScope, spendScope;
         private List<FreeModel> freeModels;
+        private DateTime? freeModelsAt;
         private DateTime freeNextFetch = DateTime.MinValue;
         private const double FreeModelsRetryMinutes = 15;
 
@@ -33,6 +34,7 @@ namespace AIMeter
         public override string Id { get { return D.Id; } }
         public override bool Enabled(Settings s) { return s.ServiceOn(D); }
         public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; }
+        public override void InvalidateCatalogue() { freeNextFetch = DateTime.MinValue; }
 
         public override ProviderState Collect(Probe p)
         {
@@ -45,7 +47,7 @@ namespace AIMeter
             var req = Json.Obj(D.Raw, "request");
             double interval = Json.Num(req, "interval") ?? 5;
             if (p.SavingPower) interval *= 3;
-            if (req != null && p.AllowNetwork && (DateTime.Now - fetchedAt).TotalMinutes >= interval)
+            if (req != null && p.AllowNetwork && (DateTime.Now - fetchedAt).TotalMinutes >= interval && NetworkBackoff.Ready(D.Id))
             {
                 fetchedAt = DateTime.Now;
                 Fetch(req);
@@ -149,6 +151,7 @@ namespace AIMeter
             result.SpendNote = note;
             result.TodayModels = models.Count > 0 ? models : null;
             result.FreeModels = freeModels != null && freeModels.Count > 0 ? freeModels : null;
+            result.FreeModelsAt = freeModelsAt;
             return result;
         }
 
@@ -308,6 +311,7 @@ namespace AIMeter
             }
             catch (WebException e)
             {
+                NetworkBackoff.Note(D.Id, e);
                 if (Refused(e))
                 {
                     problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "The API key was not accepted: check it in Settings" : "Sign-in expired: sign in again");
@@ -365,6 +369,7 @@ namespace AIMeter
                 }
                 catch (WebException e)
                 {
+                    NetworkBackoff.Note(D.Id, e);
                     if (Refused(e))
                     {
                         moreBlocked[i] = DateTime.Now.AddHours(own == null ? 6 : 1);
@@ -400,14 +405,14 @@ namespace AIMeter
         {
             var req = Json.Obj(D.Raw, "freeModels");
             if (req == null) return;
-            if (live == null) { freeModels = null; return; }
+            if (live == null) { freeModels = null; freeModelsAt = null; return; }
             double interval = Json.Num(req, "interval") ?? 360;
-            if (!p.AllowNetwork || DateTime.Now < freeNextFetch) return;
+            if (!p.AllowNetwork || DateTime.Now < freeNextFetch || !NetworkBackoff.Ready(D.Id)) return;
             List<FreeModel> list = null;
             try { list = FreeModels.Parse(Json.ParseAny(Send(req, Token() ?? ""))); }
-            catch (WebException) { }
+            catch (WebException e) { NetworkBackoff.Note(D.Id, e); }
             catch (IOException) { }
-            if (list != null) freeModels = list;
+            if (list != null) { freeModels = list; freeModelsAt = DateTime.Now; }
             freeNextFetch = DateTime.Now.AddMinutes(list != null ? interval : Math.Min(interval, FreeModelsRetryMinutes));
         }
 

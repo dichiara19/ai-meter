@@ -10,8 +10,8 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 
 | Milestone | State | Branch / PR | Base / head SHA | Tests and evidence | Blockers / next action |
 | --- | --- | --- | --- | --- | --- |
-| M0 Baseline, ADR, contracts | in_review | `docs/agent-orchestration-plan`, [PR #16](https://github.com/dichiara19/ai-meter/pull/16), epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `9a49ffb` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on `ca722b1` (run 41433116825) and `9a49ffb` (run 41434473586) | Maintainer review and approval of PR #16, which accepts [ADR 0001](../adr/0001-optional-agent-orchestration.md). Settle the open decisions below |
-| M1 MCP freshness | planned | `feat/mcp-freshness`, from `main` | — | — | Starts once ADR 0001 is accepted. PR #15 is already merged, so there is no parent branch to follow |
+| M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
+| M1 MCP freshness | in_progress | `feat/mcp-freshness`, from `main` | `f051b41` / not yet pushed | `tests/run.ps1`: 94 passed (5 new). `build.ps1 -NoInstall` compiled | Real clients on Windows and WSL, Settings → AI apps and the Store relay path: **NOT RUN** (see the log) |
 | M2 Provider discovery | planned | `feat/provider-discovery` | — | — | Needs the M1 freshness contract |
 | M3 Execution candidates | planned | `feat/execution-candidates` | — | — | Needs M1 and M2 |
 | M4 Pi spike and runner MVP | planned | `feat/agent-jobs` | — | — | Spike first. Real routing needs M3 |
@@ -58,12 +58,34 @@ Three things the PR marked as unverified are still unverified after the release,
 
 ## Open decisions for the maintainer
 
-1. **Accept [ADR 0001](../adr/0001-optional-agent-orchestration.md).** Merging this PR accepts it.
-2. **Default refresh behaviour of read tools** ([contracts §1.1](orchestration-contracts.md#11-arguments)). The recommendation is no network unless the caller asks for it, which keeps the 0.8.6 promise. The original plan proposed refreshing by default.
+1. **Accept [ADR 0001](../adr/0001-optional-agent-orchestration.md).** Resolved: accepted when PR #16 was merged.
+2. **Default refresh behaviour of read tools.** Resolved 2026-11-02: only on request ([contracts §1](orchestration-contracts.md#1-freshness-of-read-tools-m1)).
 3. **Credentials for the runner in the MVP.** The recommendation is that the runtime uses only its own sign-in, and AI Meter never passes a key to it (ADR 0001, decision 3).
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M1 in progress.**
+  - Implemented `refresh` and `max_age_seconds` on the MCP read tools, plus the per-service `freshness` map.
+  - Added `RefreshGate` (single flight through the existing collection worker, 60 s minimum interval, 20 s timeout) and `NetworkBackoff` (`429` / `Retry-After`) for Claude, Copilot, Antigravity and defined services.
+  - Separated catalogue and usage invalidation.
+  - `suggest_service` now reports unknown room as `null`.
+  - Tests on the working tree based on `f051b41`: `tests/run.ps1` passed 94, including 5 new tests for:
+    - targets and freshness;
+    - shared collection;
+    - Retry-After, minimum interval, pause and timeout;
+    - unknown room;
+    - Retry-After parsing.
+  - `build.ps1 -NoInstall` compiled.
+  - Not covered by automated tests:
+    - the real controller worker loop. The gate is tested with a fake worker;
+    - `NetworkBackoff.Note` on a real HTTP `429`. Only the parsing is tested.
+  - **NOT RUN** (M1 exit gates still open):
+    - real clients (Claude Code, Codex, Gemini CLI) on Windows and in WSL, against this build;
+    - the Settings → AI apps page;
+    - the relay path in the Store package.
+
+    These need the installed AI Meter replaced by this build, and the maintainer's go-ahead.
 
 - **2026-11-02, M0 ready for review.**
   - Opened PR #16 and epic #17.

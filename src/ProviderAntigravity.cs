@@ -40,7 +40,7 @@ namespace AIMeter
         {
             var st = new ProviderState { Id = "antigravity", Name = "Antigravity", CanSignIn = true, Plan = plan };
             double interval = p.SavingPower ? 15 : 5;
-            if (p.AllowNetwork && (DateTime.Now - fetchedAt).TotalMinutes >= interval)
+            if (p.AllowNetwork && (DateTime.Now - fetchedAt).TotalMinutes >= interval && NetworkBackoff.Ready("antigravity"))
             {
                 fetchedAt = DateTime.Now;
                 string file;
@@ -177,6 +177,7 @@ namespace AIMeter
             }
             catch (WebException e)
             {
+                NetworkBackoff.Note("antigravity", e);
                 var hr = e.Response as HttpWebResponse;
                 if (hr == null || hr.StatusCode == HttpStatusCode.Unauthorized) throw;
                 try

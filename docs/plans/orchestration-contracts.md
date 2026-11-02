@@ -12,63 +12,29 @@ New fields are additive. Any change in meaning is listed in the release notes.
 
 ## 1. Freshness of read tools (M1)
 
-### 1.1 Arguments
+M1 implements this section. The reference is [docs/MCP.md, *Fresh data*](../MCP.md#fresh-data). This section keeps only the decisions and how the implementation differs from the first draft.
 
-`get_limits`, `get_spend`, `list_free_models` and `suggest_service` accept two new arguments:
+**Decisions:**
+- **No refresh by default** (maintainer decision, 2026-11-02). Tools answer from the latest reading unless the caller passes `refresh` or `max_age_seconds`. This keeps the 0.8.6 promise.
+- **No second collector.** Requests go through `RefreshGate` (`src/Freshness.cs`) to the existing collection worker. As a result:
+  - concurrent callers share one collection, and a caller that joins a read already in progress starts no new one;
+  - a caller that gives up cancels nothing;
+  - periodic and requested collection never run side by side.
+- **Separate timers.** Usage and free-model lists are invalidated separately: `InvalidateNetwork` for usage, `InvalidateCatalogue` for the list.
+- **Upstream backoff** (`NetworkBackoff`). After a `429`, or a `503` with `Retry-After`, a service is not contacted before the time it asked for. Without `Retry-After`, the wait is 5 minutes. This applies to periodic reads too.
+- **Minimum interval.** A service is asked on request at most once every 60 seconds.
+- **Timeout.** The caller waits up to 20 seconds for the whole collection, which is published only at its end. When it times out, the caller gets the previous snapshot, marked `timed_out` per service, rather than per-provider partial results.
+- **Unknown stays unknown.** In `suggest_service`, an unknown room is `null` with `quota: "unknown"`, ranked after known room. Stale readings are marked and ranked after fresh ones with the same room.
 
-| Argument | Type | Meaning |
-| --- | --- | --- |
-| `refresh` | boolean | Ask the provider now, ignoring AI Meter's own interval. Backoff and `Retry-After` still apply |
-| `max_age_seconds` | integer ≥ 0 | Refresh only data older than this |
+**Differences from the first draft:**
+- `freshness` is one map per result, keyed by service id, instead of a block inside each service entry. The same shape works for model lists, which are not grouped by service.
+- `collected_at` is the existing top-level `updated_at`.
+- `provider_read_at` is named `read_at`.
+- The service-level `source` was dropped: estimated windows already say `estimated: true`. `configured` and per-metric sources arrive with free-model limits (§2.3).
+- `unsupported` is not reported yet. M1 cannot tell "no endpoint" from "no reading". M2, which separates catalogues from usage, adds it.
+- The refresh outcome values are the ones listed in docs/MCP.md. `shared` is internal, and `failed` became `unchanged`.
 
-`list_sessions` and `list_local_models` accept `refresh` to re-read local state. That reads local files and `127.0.0.1` only.
-
-**Default (open decision).**
-- **Recommended:** no refresh unless the caller asks. This keeps the 0.8.6 promise that tools add no network requests, and lets agents opt in with `max_age_seconds`.
-- **Alternative:** `get_limits` and `suggest_service` refresh quotas by default, as the original plan proposed.
-
-`start_job` (§3) always makes sure the quotas it relies on are fresh, unless a shared collection finished less than 30 seconds earlier.
-
-### 1.2 Per-service freshness block
-
-Every service in a result carries a `freshness` object:
-
-```json
-"freshness": {
-  "collected_at": "2026-11-02T12:00:05+01:00",
-  "provider_read_at": "2026-11-02T11:58:00+01:00",
-  "state": "fresh",
-  "refresh": "refreshed",
-  "source": "provider_reported",
-  "reason": null
-}
-```
-
-| Field | Values |
-| --- | --- |
-| `collected_at` | When AI Meter last tried to read the provider for this service |
-| `provider_read_at` | When the data shown was actually read. It is not overwritten by later failed attempts |
-| `state` | `fresh`, `stale`, `unavailable` (tried and failed), or `unsupported` (no endpoint for this metric) |
-| `refresh` | `not_requested`, `refreshed`, `cached` (fresh enough), `shared` (joined a collection already running), `backoff`, `timed_out` or `failed` |
-| `source` | `provider_reported`, `local_estimate` or `configured` |
-| `reason` | A short machine-readable reason when the state is not `fresh` (`rate_limited`, `auth_expired`, `network`, `no_endpoint`…) |
-
-### 1.3 Collection rules
-
-- **Single flight.** Concurrent requests for one provider share one collection.
-  - Cancelling one caller does not cancel a collection that others are waiting on.
-  - Periodic collection and forced refresh never mutate the same provider state at the same time.
-- **Separate timers.** Quota and catalogue refreshes are invalidated separately: `fetchedAt` for quotas, and `freeNextFetch` or its successor for catalogues.
-- **Timeout.** A refresh has a bounded timeout (proposed: 10 s per provider). It returns partial results, with each service marked as above.
-- **Unknown stays unknown.** An unknown remainder is `null`, never 100.
-
-### 1.4 `suggest_service`
-
-- `remaining_percent` is `null` when no limit is known. It is no longer 100.
-- Sorting:
-  1. services with a known remaining room, by that room;
-  2. services whose free models are confirmed free but whose quota is unknown, flagged with `"quota": "unknown"`;
-  3. stale data, which is ranked below fresh data with the same room.
+`start_job` (§3) still always makes sure the quotas it relies on are fresh, unless a shared collection finished less than 30 seconds earlier.
 
 ## 2. Providers and execution candidates (M2, M3)
 
