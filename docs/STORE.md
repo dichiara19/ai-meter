@@ -19,9 +19,38 @@ The Store signs the MSIX package with a Microsoft certificate, so the installed 
 
 ## Each release
 
-1. Bump the version in `src/AssemblyInfo.cs` (the package version is the same plus `.0`).
-2. Run the workflow (tag `v*` or *Run workflow*) and download the **AIMeter-msix** artifact.
-3. In Partner Center, create a submission and upload `AIMeter.msix` under **Packages**.
+Only **stable** tags (`vX.Y.Z`) go to the Store; betas and release candidates stay on GitHub ([RELEASING.md](RELEASING.md)). The package version is the stable version plus `.0`, so it never changes between a beta and its stable release: never submit an MSIX built from a pre-release tag.
+
+- **With automatic submission configured** (below): push the stable tag. After the GitHub release is published, the `store` job uploads `AIMeter.msix` to a new submission and commits it for certification. Check its status in Partner Center.
+- **Without it**: after the stable tag's run, download its **AIMeter-msix** artifact, create a submission in Partner Center and upload `AIMeter.msix` under **Packages**.
+
+The first submission is always made by hand: Microsoft's tools can only update an app that is already published.
+
+## Automatic submission
+
+The workflow uses Microsoft's [Store Developer CLI](https://learn.microsoft.com/windows/apps/publish/msstore-dev-cli/overview) through the official [`microsoft/microsoft-store-apppublisher`](https://learn.microsoft.com/windows/apps/publish/msstore-dev-cli/github-actions) action: `msstore reconfigure` with Partner Center API credentials, then `msstore publish AIMeter.msix -id <product id>`. The job stays off until all of this is set:
+
+1. Publish the first version by hand and wait until it is live in the Store.
+2. In Partner Center, associate a Microsoft Entra ID tenant with the account (*Account settings → Tenants*), [register an application](https://learn.microsoft.com/entra/identity-platform/quickstart-register-app) in that tenant, then add it under *Account settings → User management → Microsoft Entra applications* with the **Manager** role. Create a client secret for it.
+3. Repository **secrets** (*Settings → Secrets and variables → Actions → Secrets*), with the names Microsoft's guide uses:
+
+   | Secret | Value |
+   |---|---|
+   | `AZURE_AD_TENANT_ID` | Entra tenant ID |
+   | `AZURE_AD_APPLICATION_CLIENT_ID` | Application (client) ID of the registered app |
+   | `AZURE_AD_APPLICATION_SECRET` | its client secret (they expire: renew it before the date Entra shows) |
+   | `SELLER_ID` | Seller ID (also shown as Publisher ID) from Partner Center *Account settings → Developer settings / Identifiers* |
+
+4. Repository **variable** `STORE_PRODUCT_ID`: the Store ID of the app (12 characters, such as `9NXXXXXXXXXX`, under *Product management → Product identity*). The job runs only when this variable and `STORE_IDENTITY_NAME` are set.
+5. Optional: add required reviewers to the `microsoft-store` environment (*Settings → Environments*) to approve each submission by hand before it starts.
+
+The CLI recreates the submission from the last published one, so the listing, screenshots and *What's new* text stay as they were; edit them in Partner Center when they need to change. Microsoft supports this flow for free apps only, which AI Meter is.
+
+## Updates in the Store build
+
+The Store installs updates by itself, and Store policy does not allow an app to update itself any other way. The packaged app therefore never contacts GitHub for updates and never downloads anything (`UpdateCheck.Find` returns before any request when `Native.IsPackaged`, and a regression test holds it to that).
+
+Instead, with **Settings → About → Check for updates** on, once a day it asks the Store, through Windows' `StoreContext.GetAppAndOptionalStorePackageUpdatesAsync`, whether an update is waiting, and if so shows *An update is waiting in the Microsoft Store* with a button that opens the Store's downloads page. This uses the Windows metadata already referenced by the MSIX build (`Windows.Services.winmd`), with no new dependency. It only answers for a copy installed from the Store; a sideloaded package reports nothing. It has not been verified on a Store install yet: check it on the first private-audience submission.
 
 ## Submission answers
 
@@ -101,3 +130,4 @@ Without the `STORE_*` values the registered package has the placeholder identity
 - `%APPDATA%\AIMeter`, `%APPDATA%\Claude` and `%APPDATA%\Code` are excluded from AppData write virtualisation (Windows 11 flexible virtualisation, `unvirtualizedResources`). Settings and diagnostic files live in the same `%APPDATA%\AIMeter` as in the other builds and are **kept** when the app is uninstalled, and the MCP configurations written for Claude Desktop and VS Code are visible to those apps. Other AppData writes, if any, stay in the package's private folder.
 - AI apps start AI Meter through the execution alias `%LOCALAPPDATA%\Microsoft\WindowsApps\AIMeter.exe` (`Program.LaunchCommand`), which survives Store updates. The relay script is `%USERPROFILE%\.aimeter\mcp.ps1`, since other apps cannot read a package's private folders. Disconnect AI apps in Settings → AI apps before uninstalling, or their `ai-meter` entries point at a missing alias.
 - The package declares only English as its language ([Store listing](#store-listing)); the interface languages are unchanged.
+- No GitHub update check: the Store updates the package, and Settings → About only shows whether the Store has an update waiting.

@@ -127,10 +127,10 @@ if ($Package) {
     foreach ($d in $layout, $work) { if (Test-Path $d) { Remove-Item $d -Recurse -Force }; New-Item -ItemType Directory $d | Out-Null }
     New-Item -ItemType Directory (Join-Path $layout 'Assets'), (Join-Path $layout 'assets') -Force | Out-Null
 
-    # Same sources with the package's start-up task (Windows StartupTask API).
+    # Same sources with the package's start-up task (Windows StartupTask API) and the Store update query (StoreContext).
     $wm = Join-Path $env:WINDIR 'System32\WinMetadata'
     Invoke-Csc (Join-Path $layout 'AIMeter.exe') @('/define:MSIX', "/r:$fw\System.Runtime.dll",
-        "/r:$wm\Windows.ApplicationModel.winmd", "/r:$wm\Windows.Foundation.winmd")
+        "/r:$wm\Windows.ApplicationModel.winmd", "/r:$wm\Windows.Foundation.winmd", "/r:$wm\Windows.Services.winmd")
     Copy-Item (Join-Path $bin 'AIMeter.exe.config'), (Join-Path $root 'LICENSE'), (Join-Path $root 'NOTICE') $layout
     Copy-Item (Join-Path $root 'assets\app.ico') (Join-Path $layout 'assets')
 
