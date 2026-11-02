@@ -1,0 +1,6 @@
+{
+  "id": "antigravity",
+  "name": "Antigravity CLI",
+  "programs": { "windows": ["agy"], "wsl": ["agy"] },
+  "folders": [".gemini/antigravity-cli"]
+}

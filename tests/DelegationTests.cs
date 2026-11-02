@@ -32,7 +32,7 @@ namespace AIMeter
         {
             var a = Candidates.Access("openrouter", runtime, where, "key-0123456789abcdef");
             a.Provider = provider;
-            a.Program = where == "wsl" ? "/home/me/.npm-global/bin/" + runtime : null;
+            a.Program = where == "wsl" ? "/home/me/.npm-global/bin/" + runtime : @"C:\npm\node_modules\opencode-ai\node_modules\opencode-windows-x64\bin\" + runtime + ".exe";
             return a;
         }
 

@@ -12,7 +12,18 @@ $parameters.CompilerOptions = '/langversion:5 /define:AIMETER_TEST'
 ) | ForEach-Object { [void]$parameters.ReferencedAssemblies.Add($_) }
 $source = @(Get-ChildItem (Join-Path $root 'src\*.cs') | ForEach-Object { $_.FullName })
 $source += @(Get-ChildItem (Join-Path $PSScriptRoot '*.cs') | ForEach-Object { $_.FullName })
-Add-Type -Path $source -CompilerParameters $parameters
+# Agent definitions embedded under the names build.ps1 gives them.
+$resources = Join-Path ([IO.Path]::GetTempPath()) ('AIMeter-resources-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory $resources | Out-Null
+try {
+    Get-ChildItem (Join-Path $root 'agents/*.json') | ForEach-Object {
+        $copy = Join-Path $resources "agents.$($_.Name)"
+        Copy-Item -LiteralPath $_.FullName $copy
+        [void]$parameters.EmbeddedResources.Add($copy)
+    }
+    Add-Type -Path $source -CompilerParameters $parameters
+}
+finally { Remove-Item -LiteralPath $resources -Recurse -Force }
 $testData = Join-Path ([IO.Path]::GetTempPath()) ('AIMeter-tests-' + [Guid]::NewGuid().ToString('N'))
 try {
     [AIMeter.RegressionTests]::Run($testData)

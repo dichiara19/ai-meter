@@ -1,0 +1,31 @@
+{
+  "id": "pi",
+  "name": "Pi",
+  "order": 20,
+  "programs": { "windows": ["pi"], "wsl": ["pi"] },
+  "folders": [".pi/agent"],
+  "keys": [
+    { "file": ".pi/agent/auth.json", "path": "{id}.key" },
+    { "file": ".pi/agent/models.json", "path": "providers.{id}.apiKey" }
+  ],
+  "package": "@earendil-works/pi-coding-agent",
+  "dispatch": {
+    "places": {
+      "wsl": { "versions": ["1.x"] }
+    },
+    "arguments": {
+      "read_only": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--tools", "read,grep,find,ls", "--provider", "{provider}", "--model", "{model}"],
+      "modify": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--provider", "{provider}", "--model", "{model}"]
+    },
+    "output": {
+      "format": "jsonl",
+      "end": "the agent_settled event",
+      "outcome": "stopReason of the last assistant message (stop, length, error, aborted); the exit code stays 0 on errors",
+      "requests": "the number of turn_end events",
+      "tokens": "the sum of usage.totalTokens of assistant messages; unknown when stopped",
+      "rate_limited": "an errorMessage that contains 429",
+      "cost": "usage.cost.total of each assistant message, priced by Pi from its own model list: above 0, the request was priced as paid; 0 does not prove a free request"
+    },
+    "notes": ["Pi sends about 4,600 tokens of system prompt with every request."]
+  }
+}

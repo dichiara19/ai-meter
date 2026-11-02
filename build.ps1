@@ -106,6 +106,8 @@ function Invoke-Csc([string]$out, [string[]]$extra = @()) {
     $res = @('app.ico', 'antigravity.png' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
     # Service definitions and their logos embedded in the executable (when running from source they are read from the providers folder).
     $res += @(Get-ChildItem (Join-Path $root 'providers\*') -Include *.json, *.png | ForEach-Object { "/resource:$($_.FullName),providers.$($_.Name)" })
+    # Coding agent definitions, likewise (read from the agents folder when running from source).
+    $res += @(Get-ChildItem (Join-Path $root 'agents\*.json') | ForEach-Object { "/resource:$($_.FullName),agents.$($_.Name)" })
     $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
     & "$fw\csc.exe" /nologo /target:winexe /optimize+ /platform:anycpu /langversion:5 `
         "/out:$out" "/win32icon:$(Join-Path $root 'assets\app.ico')" "/win32manifest:$(Join-Path $bin 'app.manifest')" `
@@ -229,9 +231,10 @@ if ($Mode -eq 'exe') {
     $target = Join-Path $dest 'AIMeter.exe'; $arguments = ''
 }
 else {
-    New-Item -ItemType Directory -Force (Join-Path $dest 'src'), (Join-Path $dest 'assets'), (Join-Path $dest 'providers') | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $dest 'src'), (Join-Path $dest 'assets'), (Join-Path $dest 'providers'), (Join-Path $dest 'agents') | Out-Null
     Copy-Item (Join-Path $root 'src\*.cs') (Join-Path $dest 'src') -Force
     Copy-Item (Join-Path $root 'providers\*') (Join-Path $dest 'providers') -Include *.json, *.png -Force
+    Copy-Item (Join-Path $root 'agents\*.json') (Join-Path $dest 'agents') -Force
     Copy-Item (Join-Path $root 'assets\app.ico'), (Join-Path $root 'assets\antigravity.png') (Join-Path $dest 'assets') -Force
     Copy-Item (Join-Path $root 'AIMeter.ps1') $dest -Force
     $target = Join-Path $env:WINDIR 'System32\conhost.exe'

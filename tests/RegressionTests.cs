@@ -63,6 +63,7 @@ namespace AIMeter
             CandidateTests.Register(Test);
             DelegationTests.Register(Test);
             WindowsInstallTests.Register(Test);
+            AgentTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 

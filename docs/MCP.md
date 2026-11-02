@@ -88,7 +88,7 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `list_free_models` | Free models with id, context window, output limit, tool and reasoning support, last free day, how the price is known (`free`) and their limits (`limits`, see below); filters `tools`, `min_context`, `min_output_tokens` and `include_unconfirmed` |
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
-| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi, OpenCode or Crush) can call with its own key, and whose limits have room, in a fixed order; each pool's room; and why every other model is left out. See below |
+| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, in a fixed order; each pool's room; why every other model is left out; and which agents were found but cannot be used. See below |
 | `describe_dispatch` | How to start a candidate: program, argument list and environment for a verified agent and place. The task goes on stdin, never in the arguments. See below |
 | `claim_capacity`, `renew_capacity`, `release_capacity` | Cooperative capacity leases on a candidate's pool. These are the only tools that change anything: AI Meter's own lease book. See below |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
@@ -149,7 +149,17 @@ Each model from `list_free_models` says how its price is known and what limits a
 - `refresh` and `max_age_seconds`, as in the other tools.
 
 **A candidate is a model, a runtime and a credential.**
-- No particular agent is required. Delegation uses whichever supported agents are set up: Pi (`~/.pi/agent`), OpenCode (`~/.local/share/opencode` or `~/.config/opencode`) and Crush (`~/.config/crush` or `~/.local/share/crush`). An agent counts when its folder exists and its program is installed (a folder can outlive its agent). AI Meter checks the usual install folders on Windows, and in WSL while it is running, through the distribution's file share, without starting anything inside WSL. `runtimes.found` lists the agents found.
+- Delegation runs only the agents whose start has been verified for their place, listed in [agent definitions](#agent-definitions): today Pi in WSL, and OpenCode in WSL and on Windows. It uses whichever of these are set up; none is required. An agent counts when its folder exists and its program is installed (a folder can outlive its agent). AI Meter checks the usual install folders, those of Node version managers (nvm, fnm, asdf, Volta) included, on Windows and in every running WSL distribution, through the distribution's file share, without starting anything inside WSL. `runtimes.found` lists the agents found, with `distro` in WSL.
+- **`runtimes.unsupported`** lists the other agents found (by their folder or their program), so that a plugin can say "Codex is installed, but delegation does not support it yet". Each entry has `name`, `display_name`, `where`, `distro` in WSL, `reason` and `detail`, a sentence to show:
+
+  | `reason` | Meaning |
+  |---|---|
+  | `no_dispatch` | Delegation does not support this agent (Codex, Claude Code, Gemini CLI, Antigravity CLI, Cursor Agent, Crush) |
+  | `place_not_verified` | It supports the agent, but not in this place (Pi on Windows) |
+  | `program_not_found` | Its settings folder is here, but its program is not in the usual folders |
+  | `not_set_up` | Its program is here, but it has no settings folder yet |
+
+  An agent in `unsupported` is never a candidate.
 - A model is a candidate for an agent only when that agent already has its own key for the service: in its own files, or in the environment it starts with. That means this process's variables on Windows, or shell-profile exports in WSL. Each agent with a key is a separate candidate, and they all share the same pool.
 - Keys saved in AI Meter do not count: AI Meter never hands a key to a runtime.
 - With *Use API keys already on the PC* turned off, AI Meter cannot check the agents' keys, and says so.
@@ -169,13 +179,19 @@ Each model from `list_free_models` says how its price is known and what limits a
 | `price_not_confirmed` | The service does not state a zero price, and the policy is `free_only` |
 | `no_tools`, `tools_unknown` | The task needs tool calls; the model has none, or its list does not say |
 | `context_too_small`, `context_unknown`, `output_too_small`, `output_unknown` | The task needs more than the model takes, or the limit is not stated |
-| `no_runtime` | No supported agent is set up on Windows, nor in a running WSL |
+| `no_runtime` | No supported agent is set up on Windows, nor in a running WSL distribution (see `runtimes.unsupported`) |
 | `runtime_has_no_key` | No agent that is set up has a key of its own for this service |
 | `key_discovery_off` | Key discovery is turned off, so the agents' keys cannot be checked |
 | `rate_limited` | The service answered "too many requests"; `until` is when AI Meter may ask again |
 | `exhausted` | A counter the service reports is used up; `until` is its reset |
 
 AI Meter sees only the rate limits of its own reads and the counters services report. Rate limits an agent hits during a task are counted once AI Meter runs the task itself.
+
+**`warnings`** appears on a candidate (and in `describe_dispatch`) when the plugin must watch for something AI Meter cannot see:
+
+| Warning | Meaning |
+|---|---|
+| `openrouter_byok_fallback` | OpenRouter can retry a `:free` request that hit the free route's limit on a provider key the user linked to OpenRouter (BYOK), billed to that provider account. The catalogue's zero price cannot show this. Watch `output.cost` and stop the agent at the first request priced above zero, or ask the user to unlink BYOK keys before delegating |
 
 ### Running a task: `describe_dispatch` and capacity leases
 
@@ -187,13 +203,15 @@ AI Meter starts nothing. A coordinator plugin runs the agent ([ADR 0002](adr/000
 5. Read the output as `output` describes. `renew_capacity` during long tasks.
 6. `release_capacity` with the outcome.
 
-**`describe_dispatch`** takes the candidate, `mode` (`read_only` by default, or `modify`), `workspace`, and `from`, which is where the plugin runs (`windows` by default, or `wsl`).
-- It describes only agents and places verified live: Pi in WSL, and OpenCode in WSL and on Windows. Anything else answers `supported: false` with the reason.
+**`describe_dispatch`** takes the candidate (`service`, `model`, `runtime`, and `where` and `distro` to pick its place), `mode` (`read_only` by default, or `modify`), `workspace`, and `from`, which is where the plugin runs (`windows` by default, or `wsl`).
+- It describes only agents and places with a verified dispatch: Pi in WSL, and OpenCode in WSL and on Windows. Anything else answers `supported: false` with the reason.
+- Before that, an `error` says which of these went wrong: an unknown `runtime` (with the ids AI Meter knows); AI Meter still reading its first data; a model not in the service's current list; an agent delegation does not support; no usable agent set up here; key discovery turned off; or an agent without a key of its own for the service.
 - `version_verified` and `notes` flag an agent version outside the verified range.
-- **On Windows**, OpenCode's native program is started directly, never its `.cmd` or `.ps1`.
-- **In WSL, from Windows**, it is `wsl.exe -e env PATH=… <agent>`. `wsl.exe --` is never used, because it would hand the arguments to a Linux shell.
+- **On Windows**, the agent's native program is started directly: the `.exe` found on the PATH, or the one inside its npm package (OpenCode). Never a `.cmd` or `.ps1`, which need a shell: without a native program the answer is `supported: false`.
+- **In WSL, from Windows**, it is `wsl.exe -d <distro> -e env PATH=… <agent>`, in the candidate's own distribution. `wsl.exe --` is never used, because it would hand the arguments to a Linux shell. The PATH holds the agent's folder, then the folder of the `node` it needs when that is elsewhere (an nvm install, say), then the system folders. An agent npm installed whose `node` cannot be found answers `supported: false`.
 - **OpenCode is isolated** from the user's skills and project configuration, and its title model is set to the same free model. Otherwise it would call a paid one.
-- **`output`** says how to tell the end, the outcome (Pi's exit code stays 0 on errors), the requests, the tokens and the rate limits.
+- **`output`** says how to tell the end, the outcome (Pi's exit code stays 0 on errors), the requests, the tokens, the rate limits and `cost`: where the agent reports each request's price (Pi: `usage.cost.total` of assistant messages; OpenCode: `step_finish.part.cost`). Both agents price requests from their own model list, so a value above zero means a paid request and the plugin should stop; zero does not prove the request was free, as an agent cannot see a BYOK fallback billed by the provider.
+- **`warnings`** repeats the candidate's warnings, such as `openrouter_byok_fallback`.
 - **`stop`** says how to stop the agent: `taskkill /T /F` on Windows, which also ends an agent started in WSL.
 
 **Leases.**
@@ -202,6 +220,54 @@ AI Meter starts nothing. A coordinator plugin runs the agent ([ADR 0002](adr/000
 - `release_capacity` takes `outcome`, `requests`, `rate_limited`, `retry_after_seconds` and the tokens. A rate limit closes the pool until `retry_after_seconds`, or for a minute.
 - Active leases count in every `headroom` (`leased`). Released outcomes fill `observed` in `list_free_models`, with `coverage: "ai_meter_leases_only"`: tasks run without leases are not counted.
 - AI Meter keeps the leases in `%APPDATA%\AIMeter\leases.json`. It stores only pool, service, model, agent, client label, times and outcome counters, for 30 days. Never task text, code, logs or keys.
+
+### Agent definitions
+
+The coding agents AI Meter knows are data, like services: `agents/*.json`, built into AI Meter, plus your own files in `%APPDATA%\AIMeter\agents`. A file there with the id of a built-in agent replaces it; a new id adds an agent. AI Meter reads them at start. A definition:
+
+```json
+{
+  "id": "opencode",
+  "name": "OpenCode",
+  "order": 10,
+  "programs": { "windows": ["opencode"], "wsl": ["opencode"] },
+  "folders": [".local/share/opencode", ".config/opencode"],
+  "keys": [
+    { "file": ".local/share/opencode/auth.json", "path": "{id}.key" },
+    { "file": ".config/opencode/opencode.json", "path": "provider.{id}.options.apiKey" }
+  ],
+  "package": "opencode-ai",
+  "dispatch": {
+    "places": {
+      "wsl": { "versions": ["1.x"] },
+      "windows": { "versions": ["1.x"], "executables": ["node_modules/opencode-windows-x64/bin/opencode.exe"] }
+    },
+    "arguments": {
+      "read_only": ["run", "--pure", "--format", "json", "--agent", "plan", "--dir", "{workspace}", "-m", "{provider}/{model}"],
+      "modify": ["run", "--pure", "--format", "json", "--agent", "build", "--dir", "{workspace}", "-m", "{provider}/{model}"]
+    },
+    "environment": { "OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_CONFIG_CONTENT": { "small_model": "{provider}/{model}" } },
+    "output": { "format": "jsonl", "end": "the process exits", "cost": "step_finish.part.cost of each step" },
+    "notes": ["Close stdin after writing the task: with stdin open OpenCode waits for more."]
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `id`, `name` | The runtime id tools use (`a-z`, `0-9`, `-`) and the name shown |
+| `order` | Position in key discovery and lists, lower first (default 1000) |
+| `programs` | Program names per place (`windows`, `wsl`), without an extension. On Windows `.exe`, `.cmd`, `.bat` and `.ps1` are tried, in that order |
+| `folders` | Settings folders relative to the home: any one shows the agent is set up |
+| `keys` | Where the agent keeps API keys: a home-relative `file` and a JSON `path`, with `{id}` for the service's aliases (`auth.ids` in its service definition) |
+| `package` | npm package, to read the version without running the agent; an agent npm installed in WSL also needs `node` |
+| `dispatch` | How a plugin starts it. Without it, the agent is reported in `runtimes.unsupported` |
+| `dispatch.places` | The verified places, each with `versions` (`"1.x"` matches every 1.* version, `"1.4.0"` only that one), optional `executables` (native Windows programs inside the npm package) and optional own `arguments` and `environment` |
+| `dispatch.arguments` | The argument list per mode, `read_only` and `modify` |
+| `dispatch.environment` | Variables to set. A value written as a JSON object is serialised after its placeholders are filled, so a model id cannot change its structure |
+| `dispatch.output`, `dispatch.notes` | Returned as they are in `describe_dispatch` |
+
+Placeholders, filled in one pass: `{provider}` (the alias the agent keeps the key under), `{model}` and `{workspace}` (`.` inside WSL when started from Windows, where `wsl.exe --cd` already sets the folder). Agents without a verified dispatch are still useful: their folders and programs show them in `runtimes.unsupported`, and their `keys` let AI Meter find keys for the services it meters.
 
 ## Fresh data
 

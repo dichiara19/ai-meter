@@ -60,38 +60,57 @@ namespace AIMeter
         /// <summary>The WSL home if the distribution is running, otherwise null: for readers outside a collection.</summary>
         public static volatile string WslHomeUp;
 
+        /// <summary>
+        /// Every running distribution with a home where a coding agent is set up (the configured one first, with its
+        /// configured home), as of the last check: for delegation, which can use agents in any of them. Empty when none.
+        /// </summary>
+        public static volatile IList<WslPlace> WslPlacesUp = new WslPlace[0];
+
+        private List<WslPlace> otherPlaces = new List<WslPlace>();
+
         private void RefreshWslState()
         {
             RefreshWslStateCore();
             WslHomeUp = wslUp ? WslHome : null;
+            var places = new List<WslPlace>();
+            if (wslUp) places.Add(new WslPlace { Distro = S.WslDistro, Home = WslHome });
+            places.AddRange(otherPlaces);
+            WslPlacesUp = places;
         }
 
         private void RefreshWslStateCore()
         {
             bool vm = Procs.ContainsValue("vmmemwsl") || Procs.ContainsValue("vmmem");
-            if (!vm || string.IsNullOrEmpty(S.WslDistro)) { wslUp = false; vmSeen = false; return; }
-            // A VM that has just appeared is checked immediately, then every minute if the distribution is active and every 5 if not.
+            if (!vm) { wslUp = false; vmSeen = false; otherPlaces = new List<WslPlace>(); return; }
+            // A VM that has just appeared is checked immediately, then every minute if a distribution is active and every 5 if not.
             // No longer than that: opening \\wsl.localhost of a distribution that has just stopped would restart it.
             // wsl.exe -l queries only the Windows service; it starts no processes in Linux.
-            if (vmSeen && (DateTime.Now - wslCheckedAt).TotalSeconds < (wslUp ? 60 : 300)) return;
+            if (vmSeen && (DateTime.Now - wslCheckedAt).TotalSeconds < (wslUp || otherPlaces.Count > 0 ? 60 : 300)) return;
             vmSeen = true;
             wslCheckedAt = DateTime.Now;
             // The VM may be running for another distribution: ask which ones are active, without starting any.
             string output = Run("wsl.exe", "-l --running -q", 8000, Encoding.Unicode);
-            wslUp = output != null && output.Split('\n').Any(l => l.Trim().Trim('\0').Equals(S.WslDistro, StringComparison.OrdinalIgnoreCase));
+            var running = (output ?? "").Split('\n').Select(l => l.Trim().Trim('\0')).Where(l => l.Length > 0).ToList();
+            wslUp = !string.IsNullOrEmpty(S.WslDistro) && running.Any(d => d.Equals(S.WslDistro, StringComparison.OrdinalIgnoreCase));
             if (wslUp && !Directory.Exists(WslHome)) DetectWslUser();
+            otherPlaces = running.Where(d => !d.Equals(S.WslDistro ?? "", StringComparison.OrdinalIgnoreCase))
+                .Select(d => new WslPlace { Distro = d, Home = AgentHome(@"\\wsl.localhost\" + d) }).Where(p => p.Home != null).ToList();
         }
 
-        /// <summary>The Linux user may be named differently from the Windows one: picks the home holding a service's data.</summary>
+        /// <summary>The Linux user may be named differently from the Windows one: picks the home holding an agent's data.</summary>
         private void DetectWslUser()
         {
-            foreach (var home in SafeDirs(WslRoot + @"\home"))
-            {
-                if (!Directory.Exists(home + @"\.claude") && !Directory.Exists(home + @"\.codex")) continue;
-                S.WslUser = Path.GetFileName(home);
-                S.Save();
-                return;
-            }
+            string home = AgentHome(WslRoot);
+            if (home == null) return;
+            S.WslUser = Path.GetFileName(home);
+            S.Save();
+        }
+
+        /// <summary>The first home under a distribution's root where a coding agent of agents/*.json is set up, or null.</summary>
+        internal static string AgentHome(string root)
+        {
+            var markers = Agents.All.SelectMany(a => a.Folders).Distinct().ToList();
+            return SafeDirs(root + @"\home").FirstOrDefault(home => markers.Any(m => Directory.Exists(Path.Combine(home, m))));
         }
 
         // ================================================================ cache
@@ -359,5 +378,11 @@ namespace AIMeter
             var d = Definitions.Get(serviceId);
             return d == null ? new string[0] : ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id);
         }
+    }
+
+    /// <summary>A running WSL distribution and the home, as Windows sees it (\\wsl.localhost\Distro\home\user), to read.</summary>
+    internal sealed class WslPlace
+    {
+        public string Distro, Home;
     }
 }
