@@ -183,6 +183,8 @@ namespace AIMeter
         public List<LocalModel> Models;   // Loaded models, for local providers only.
         public long GpuUsed, GpuTotal;    // GPU memory in bytes, for local providers only.
         public Tip Tip;           // Active tip, evaluated for each snapshot.
+        /// <summary>Lists models only, with no readable usage or limits (ServiceDefinition.CatalogueOnly): for AI apps, not for surfaces.</summary>
+        public bool CatalogueOnly;
 
         public int Active { get { int n = 0; foreach (var s in Sessions) if (s.Status != "app") n++; return n; } }
         public int Busy { get { int n = 0; foreach (var s in Sessions) if (s.Status == "busy") n++; return n; } }
@@ -210,7 +212,11 @@ namespace AIMeter
     internal sealed class Snapshot
     {
         public DateTime Taken = DateTime.Now;
+        /// <summary>Every service read, including catalogue-only ones; MCP tools use them all.</summary>
         public List<ProviderState> Providers = new List<ProviderState>();
+
+        /// <summary>The services the taskbar, panel, widget and tooltips show: all but catalogue-only ones.</summary>
+        public List<ProviderState> Shown { get { return Providers.Where(p => !p.CatalogueOnly).ToList(); } }
 
         /// <summary>Compact render signature, including the current minute for time-sensitive text.</summary>
         public string Signature()

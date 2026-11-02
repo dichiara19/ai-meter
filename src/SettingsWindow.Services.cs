@@ -38,14 +38,24 @@ namespace AIMeter
             yield return new Service { Id = "local", Name = L.T("Local models"), Logo = Ui.Glyph(Ui.LocalGlyph, 22, "Text"), On = S.LocalEnabled, Set = v => S.LocalEnabled = v };
         }
 
+        /// <summary>Services that only list models (ServiceDefinition.CatalogueOnly), shown in their own section.</summary>
+        private static bool CatalogueOnly(Service s)
+        {
+            var def = Definitions.Get(s.Id);
+            return def != null && def.CatalogueOnly;
+        }
+
         private void BuildServices()
         {
             Header(L.T("Services"));
             Hint(L.T("Turn on only the services you use. On first run AI Meter turns on the ones it finds on this PC."));
-            foreach (var s in Services())
+            foreach (var s in Services().Where(x => !CatalogueOnly(x))) ServiceLink(s);
+            var catalogues = Services().Where(CatalogueOnly).ToList();
+            if (catalogues.Count > 0)
             {
-                var sv = s;
-                Group(Link(sv.Logo, sv.Name, StatusOf(sv), Toggle(sv.On, v => { sv.Set(v); Changed(); Rebuild(); }), () => Open("service:" + sv.Id)));
+                Section(L.T("Model catalogues for AI apps"));
+                Hint(L.T("These services list their models but do not let a key read your limits, so they are not on the taskbar or in the panel. The apps you connect under AI apps use them to find free models and to delegate tasks."));
+                foreach (var s in catalogues) ServiceLink(s);
             }
             Hint(L.T("API keys can come from the programs that already use them, so you don't have to paste them again:"));
             Group(Row(Ui.Glyph("", 20, "Text"), L.T("Use API keys already on this PC"),
@@ -58,7 +68,13 @@ namespace AIMeter
                      Button(L.T("Open folder"), () => Program.OpenFolder(Definitions.UserFolder), false))));
         }
 
-        /// <summary>Compact list status: off, authentication needed, or the pill's selected limit.</summary>
+        private void ServiceLink(Service s)
+        {
+            var sv = s;
+            Group(Link(sv.Logo, sv.Name, StatusOf(sv), Toggle(sv.On, v => { sv.Set(v); Changed(); Rebuild(); }), () => Open("service:" + sv.Id)));
+        }
+
+        /// <summary>Compact list status: off, authentication needed, the pill's selected limit, or a catalogue's model count.</summary>
         private string StatusOf(Service s)
         {
             // The toggle already indicates off; use the subtitle to report local detection.
@@ -76,6 +92,13 @@ namespace AIMeter
             if (p.Models != null)
                 return p.Models.Count > 0 ? L.N(p.Models.Count, "{0} local model loaded", "{0} local models loaded") : L.T("Local models: none loaded");
             if (p.NeedsLogin && !string.IsNullOrEmpty(p.Notice)) return p.Notice;
+            if (p.CatalogueOnly && p.Catalogue != null)
+            {
+                int n = p.Catalogue.Models.Count;
+                return p.Catalogue.Models.All(m => m.Free != null && !m.Free.Confirmed)
+                    ? L.N(n, "{0} model, price not stated", "{0} models, price not stated")
+                    : L.N(n, "{0} free model", "{0} free models");
+            }
             var w = Ui.Primary(p);
             string plan = p.Plan != null ? L.F("{0} plan", p.Plan.ToUpperInvariant()) + " · " : "";
             if (w != null) return plan + L.F("{0}% left · {1}", Math.Round(p.Usage.Room(w)), Ui.LabelOf(w));

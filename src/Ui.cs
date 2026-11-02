@@ -233,7 +233,7 @@ namespace AIMeter
         /// <summary>Summarise five-hour limits for tooltips.</summary>
         public static string Summary(Snapshot s)
         {
-            return string.Join("\n", s.Providers.Select(p =>
+            return string.Join("\n", s.Shown.Select(p =>
             {
                 if (p.Models != null) return LocalSummary(p);
                 var w = Primary(p);

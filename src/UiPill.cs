@@ -65,7 +65,7 @@ namespace AIMeter
         public static StackPanel PillRow(Snapshot s, string metric, bool? dark)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            foreach (var p in s.Providers.Where(x => x.Models == null))
+            foreach (var p in s.Shown.Where(x => x.Models == null))
             {
                 if (row.Children.Count > 0)
                 {
