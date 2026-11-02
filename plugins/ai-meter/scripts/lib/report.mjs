@@ -22,6 +22,7 @@ export function full(job, jobsFolder) {
     if (answer_truncated) report.answer_truncated = true;
     report.counters = counters;
   }
+  if (job.warnings?.length) report.warnings = job.warnings;
   if (job.worktree) report.worktree = job.worktree;
   if (job.skipped?.length) report.skipped = job.skipped;
   if (job.excluded) report.excluded = job.excluded;
@@ -33,10 +34,21 @@ export function full(job, jobsFolder) {
   return report;
 }
 
-/** list_candidates, without the per-model limit details the coordinator does not need to choose. */
+/**
+ * list_candidates, without the per-model limit details the coordinator does not need to choose. runtimes keeps
+ * runtimes.unsupported (from AI Meter's agent table), with a sentence to show for each agent that cannot be used.
+ */
 export function candidates(found) {
   return {
-    candidates: found.candidates.map((c) => ({ service: c.service, model: c.model, runtime: c.runtime.name, where: c.runtime.where, pool: c.pool })),
+    candidates: found.candidates.map((c) => ({
+      service: c.service,
+      model: c.model,
+      runtime: c.runtime.name,
+      where: c.runtime.where,
+      ...(c.runtime.distro ? { distro: c.runtime.distro } : {}),
+      pool: c.pool,
+      ...(c.warnings?.length ? { warnings: c.warnings } : {}),
+    })),
     pools: found.pools,
     excluded: found.excluded,
     runtimes: found.runtimes,

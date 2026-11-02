@@ -44,6 +44,7 @@ const TOOLS = [
         model: text("Only this model id."),
         runtime: text("Only this agent, such as pi or opencode."),
         where: choice("Only agents in this place.", "windows", "wsl"),
+        distro: text("Only agents in this WSL distribution."),
         timeout_seconds: integer(`Stop the agent after this long: default ${jobs.DEFAULT_TIMEOUT_SECONDS}, at most ${jobs.MAXIMUM_TIMEOUT_SECONDS}.`),
         wait_seconds: waitSeconds,
       },

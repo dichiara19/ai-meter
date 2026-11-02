@@ -19,7 +19,7 @@ Keep it yourself when the task needs this conversation's context, a design decis
 
 ## How
 
-1. **Optionally look first.** `delegate_candidates` lists where a task can run now: candidates in AI Meter's order, each pool's room, why other models are left out, and the agents found. AI Meter orders by room, not by quality: when several models share a pool, prefer a known coding model with a large context and pass it as `model`.
+1. **Optionally look first.** `delegate_candidates` lists where a task can run now: candidates in AI Meter's order, each pool's room, why other models are left out, and the agents found. AI Meter orders by room, not by quality, and breaks ties alphabetically: when several models share a pool, prefer a known coding model with a large context and pass it as `model`. Pass `runtime` (and `where`) when the user prefers an agent.
 2. **Start it.** Call `delegate` with:
    - `task`: complete instructions. Name the files, say what to look for and the shape of the answer. The agent sees nothing else;
    - `workspace`: the absolute path of the repository root (the server may not run in it);
@@ -33,11 +33,14 @@ Keep it yourself when the task needs this conversation's context, a design decis
 
 ## When it does not start
 
-- `error` with `excluded` and `runtimes`: no free model fits, or no agent has a key of its own. Explain the reasons. Never install an agent or handle a key: the user sets agents up.
-- `skipped`: candidates that were tried and why, such as an agent and place AI Meter has not verified, or a pool with no room.
+- `error` with `excluded` and `runtimes`: no free model fits, or no agent has a key of its own. Explain the reasons. `runtimes.unsupported` lists agents that are installed but cannot be used (such as Codex or Claude Code), each with a `detail` sentence you can show. Never install an agent or handle a key: the user sets agents up.
+- `skipped`: candidates that were tried and why, such as AI Meter's own error for that agent, an agent and place it has not verified, or a pool with no room.
 - AI Meter must be installed on Windows; its relay starts it when needed.
 
-## Good to know
+## Money
 
-- OpenRouter can route a `:free` model to a provider key the user linked to their account (BYOK), billed to that account. Mention it when the job's `notes` say so.
+- `counters.paid_request: true`: a request was priced above zero, so the plugin stopped the agent. Tell the user; do not retry on the same model.
+- `warnings` containing `openrouter_byok_fallback`: OpenRouter can retry a `:free` request on a provider key the user linked to OpenRouter (BYOK), billed to that account, while the agent still shows a price of zero. Mention it once. `counters.byok_fallback: true` means OpenRouter's error named such a key: tell the user that their linked key was used, and suggest unlinking it before delegating again.
+
+## Good to know
 - The task text and the agent's output stay on this PC, in `~/.aimeter/jobs`, for a week. Never put secrets in a task.

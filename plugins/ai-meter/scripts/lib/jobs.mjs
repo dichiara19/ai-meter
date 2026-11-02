@@ -15,8 +15,8 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, re
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readerFor, summarise } from "./agents.mjs";
-import { place, withMeter } from "./meter.mjs";
+import { canRead, readerFor, summarise } from "./agents.mjs";
+import { place, ToolError, withMeter } from "./meter.mjs";
 import { createWorktree, describeChanges, repositoryOf } from "./workspace.mjs";
 
 const ENDED = new Set(["completed", "failed", "cancelled", "timed_out"]);
@@ -87,7 +87,7 @@ export function start(options) {
     workspace: options.workspace,
     mode,
     timeout_seconds: timeout,
-    wanted: pick(options, ["service", "model", "runtime", "where", "min_context", "cost_policy"]),
+    wanted: pick(options, ["service", "model", "runtime", "where", "distro", "min_context", "cost_policy"]),
     skipped: [],
   };
   save(job);
@@ -157,8 +157,10 @@ export async function runJob(id) {
 }
 
 /**
- * Pick the first candidate in AI Meter's order that matches what the job asked for, that AI Meter can describe for
- * this place and whose pool grants a lease. Returns { candidate, plan, lease } or null after failing the job.
+ * Pick the first candidate in AI Meter's order that matches what the job asked for, whose events the plugin can read,
+ * that AI Meter can describe for this place and whose pool grants a lease. A candidate AI Meter refuses to describe
+ * (an error such as "no key of its own", or supported: false) is skipped with the reason, not fatal to the job.
+ * Returns { candidate, plan, lease } or null after failing the job.
  */
 async function choose(job) {
   const wanted = job.wanted;
@@ -174,14 +176,26 @@ async function choose(job) {
       ...pick(wanted, ["service", "min_context", "cost_policy"]),
     });
     const candidates = found.candidates.filter(
-      (c) => (!wanted.model || c.model === wanted.model) && (!wanted.runtime || c.runtime.name === wanted.runtime) && (!wanted.where || c.runtime.where === wanted.where),
+      (c) => (!wanted.model || c.model === wanted.model) && (!wanted.runtime || c.runtime.name === wanted.runtime) && (!wanted.where || c.runtime.where === wanted.where) &&
+        (!wanted.distro || c.runtime.distro === wanted.distro),
     );
     const refusedPools = new Set();
 
     for (const c of candidates) {
-      const which = { service: c.service, model: c.model, runtime: c.runtime.name, where: c.runtime.where };
+      const which = { service: c.service, model: c.model, runtime: c.runtime.name, where: c.runtime.where, ...pick(c.runtime, ["distro"]) };
       if (refusedPools.has(c.pool)) continue;
-      const plan = await meter.call("describe_dispatch", { ...which, mode: job.mode, workspace: folder, from: job.from });
+      if (!canRead(which.runtime)) {
+        job.skipped.push({ ...which, reason: "this plugin cannot read " + which.runtime + "'s output yet" });
+        continue;
+      }
+      let plan;
+      try {
+        plan = await meter.call("describe_dispatch", { ...which, mode: job.mode, workspace: folder, from: job.from });
+      } catch (error) {
+        if (!(error instanceof ToolError)) throw error;
+        job.skipped.push({ ...which, reason: error.message });
+        continue;
+      }
       if (!plan.supported) {
         job.skipped.push({ ...which, reason: plan.reason });
         continue;
@@ -194,6 +208,8 @@ async function choose(job) {
       }
       job.candidate = { ...which, pool: c.pool };
       job.lease_id = lease.lease_id;
+      const warnings = [...new Set([...(c.warnings || []), ...(plan.warnings || [])])];
+      if (warnings.length) job.warnings = warnings;
       save(job);
       return { candidate: c, plan, lease };
     }
@@ -231,6 +247,7 @@ async function runAgent(job, chosen, task) {
   job.agent_pid = child.pid;
   job.version = plan.version;
   job.notes = plan.notes;
+  job.output = plan.output;
   job.status = "running";
   job.started_at = new Date().toISOString();
   save(job);
@@ -238,6 +255,12 @@ async function runAgent(job, chosen, task) {
   const events = createWriteStream(join(folder, "events.jsonl"));
   const errors = createWriteStream(join(folder, "stderr.txt"));
   let pending = "";
+  let stopped = null;
+  const stop = (why) => {
+    if (stopped) return;
+    stopped = why;
+    stopProcess(child.pid, child);
+  };
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
     events.write(chunk);
@@ -252,20 +275,18 @@ async function runAgent(job, chosen, task) {
       } catch {
         // Not an event: kept in events.jsonl only.
       }
+      if (reader.paid) stop("paid");   // The first request priced above zero ends the task.
     }
   });
   child.stderr.pipe(errors);
   child.stdin.on("error", () => {});   // An agent that exits early closes its stdin; the exit says why.
   child.stdin.end(task);
 
-  let stopped = null;
   const exitCode = await new Promise((resolve) => {
     const deadline = Date.now() + job.timeout_seconds * 1000;
     const timer = setInterval(() => {
-      if (stopped) return;
-      if (existsSync(join(folder, "cancel"))) stopped = "cancelled";
-      else if (Date.now() > deadline) stopped = "timed_out";
-      if (stopped) stopProcess(child.pid, child);
+      if (existsSync(join(folder, "cancel"))) stop("cancelled");
+      else if (Date.now() > deadline) stop("timed_out");
     }, 500);
     child.on("error", (error) => {
       clearInterval(timer);
@@ -299,6 +320,7 @@ async function runAgent(job, chosen, task) {
     job.release_error = error.message;
   }
   job.status = summary.outcome;
+  if (summary.outcome !== "completed") job.error = summary.error;
   job.ended_at = new Date().toISOString();
   save(job);
 }

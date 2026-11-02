@@ -6,9 +6,9 @@ The same folder is both plugins. Claude Code reads `.claude-plugin/` and `.mcp.j
 
 ## What you need
 
-- **AI Meter on Windows**, with the delegation tools (`list_candidates`, `describe_dispatch` and the capacity leases). They are not in a release yet: until M6, build AI Meter from `main` (`./build.ps1`). The plugin reaches AI Meter through the relay AI Meter writes (`%APPDATA%\AIMeter\mcp.ps1`), which starts AI Meter when it is not running.
+- **AI Meter on Windows**, with the delegation tools (`list_candidates`, `describe_dispatch` and the capacity leases). They are not in a release yet: until M6, build AI Meter from `main` (`./build.ps1`). The plugin also works with the first version of these tools, but the agent definitions ([PR #30](https://github.com/dichiara19/ai-meter/pull/30)) add the WSL distribution, `runtimes.unsupported`, `warnings` and the request prices it uses. The plugin reaches AI Meter through the relay AI Meter writes (`%APPDATA%\AIMeter\mcp.ps1`), which starts AI Meter when it is not running.
 - **Node.js 18 or later** where the coordinator runs: on Windows, or in WSL.
-- **At least one coding agent set up with its own key** for a service with free models: Pi in WSL, or OpenCode on Windows or in WSL. The plugin never installs an agent and never handles a key. Set it up yourself, for example with `opencode auth login`.
+- **At least one coding agent set up with its own key** for a service with free models, among those AI Meter can start (its [agent definitions](../../docs/MCP.md#agent-definitions); today Pi in WSL, and OpenCode on Windows or in WSL). The plugin never installs an agent and never handles a key. Set it up yourself, for example with `opencode auth login`.
 - Git, for tasks that change files.
 
 ## Install
@@ -43,24 +43,33 @@ The coordinator calls these tools of the `ai-meter-delegate` server:
 
 | Tool | What it does |
 |---|---|
-| `delegate` | Starts a background job and returns its id. Takes `task`, `workspace` (absolute path), `mode`, and optionally `service`, `model`, `runtime`, `where`, `min_context`, `cost_policy`, `timeout_seconds` (default 1200, at most 7000) and `wait_seconds` (at most 50) |
-| `delegate_result` | The job's report: status, the agent's answer, requests and tokens, the changed files of a `modify` task, and the candidates that were skipped and why |
+| `delegate` | Starts a background job and returns its id. Takes `task`, `workspace` (absolute path), `mode`, and optionally `service`, `model`, `runtime`, `where`, `distro`, `min_context`, `cost_policy`, `timeout_seconds` (default 1200, at most 7000) and `wait_seconds` (at most 50) |
+| `delegate_result` | The job's report: status, the agent's answer, requests, tokens and price, the changed files of a `modify` task, AI Meter's `warnings`, and the candidates that were skipped and why |
 | `delegate_status` | The latest jobs |
 | `delegate_cancel` | Stops the agent and releases the lease |
-| `delegate_candidates` | Where a task could run now, from AI Meter's `list_candidates`. Starts nothing |
+| `delegate_candidates` | Where a task could run now, from AI Meter's `list_candidates`, with `runtimes.unsupported`: the agents found that cannot be used, each with a sentence saying why. Starts nothing |
 
 **How a job runs.**
 1. `list_candidates` with `tools: true`, narrowed by the pins you gave.
-2. For each candidate in AI Meter's order: `describe_dispatch` for this place (`from` is `windows` or `wsl`), then `claim_capacity`. A candidate AI Meter cannot describe here, or a pool with no room, is skipped with the reason. The plugin describes before claiming, so it holds a lease only for an agent it can start.
+2. For each candidate in AI Meter's order: `describe_dispatch` for this place (`from` is `windows` or `wsl`, with the candidate's WSL `distro`), then `claim_capacity`.
+   - A candidate is skipped, with the reason, when AI Meter cannot describe it here (`supported: false`, or an error such as "no key of its own"), when its pool has no room, or when the plugin cannot read that agent's events.
+   - The plugin reads the events of Pi and OpenCode. An agent added to AI Meter's definitions later needs a reader here too.
+   - The plugin describes before claiming, so it holds a lease only for an agent it can start. "Still reading the first data" is waited for, up to a minute.
 3. The agent starts exactly as described: the program and its argument list, without a shell. The task is written to stdin, then stdin is closed.
-4. The agent's JSONL events give the outcome, the requests, the tokens and any `429`. Pi's exit code stays 0 on errors, so its outcome comes from `stopReason`.
-5. `release_capacity` with the outcome and the counters. A cancelled or timed-out task reports no tokens, because the agents do not report them when stopped.
+4. The agent's JSONL events give the outcome, the requests, the tokens, the price of each request and any `429`. Pi's exit code stays 0 on errors, so its outcome comes from `stopReason`.
+5. **The first request priced above zero stops the agent**, and the task fails with `paid_request: true`. A price of zero does not prove a request was free (see *Free is not always free*).
+6. `release_capacity` with the outcome and the counters. A stopped task (cancelled, timed out or paid) reports no tokens, because the agents do not report them when stopped.
 
 A job runs in its own worker process, so it outlives the call that started it. Cancelling stops the agent with `taskkill /T /F` on Windows, which also ends an agent started in WSL, and with `SIGINT` elsewhere.
 
 **Read-only by default.** Pi gets only its reading tools, and OpenCode its `plan` agent. **`modify`** runs the agent in a new Git worktree on branch `ai-meter/<job id>`, made from the last commit. Uncommitted changes in your checkout are not in it, and the report says so. The plugin never commits, merges or removes the worktree: the report gives the commands to review and to discard it.
 
-**Choosing a model.** AI Meter orders candidates by the room left in their pool, not by quality, and models in one pool tie. When it matters, look at `delegate_candidates` and pin a coding model with a large context.
+**Choosing a model and an agent.** AI Meter orders candidates by the room left in their pool, not by quality. Within one pool the order is by service, model, agent id and place, alphabetically. So when Pi and OpenCode both have a key, OpenCode comes first, and on Windows before WSL. When it matters, look at `delegate_candidates` and pin `model`, `runtime` or `where`. Pi sends about 4,600 tokens of system prompt per request, and OpenCode, isolated, about 9,600.
+
+**Free is not always free.** OpenRouter can retry a `:free` request that hit the free route's limit on a provider key you linked to OpenRouter (BYOK), billed to that provider account. AI Meter flags OpenRouter candidates with `warnings: ["openrouter_byok_fallback"]`, and the report repeats it.
+- The agents price requests from their own model lists, so a BYOK fallback shows a price of zero.
+- When OpenRouter's error names the linked key (`"is_byok":true`), the report sets `byok_fallback: true`. This was seen live on 2026-11-02: a `:free` request fell back to a provider key linked to OpenRouter, whose provider refused it with 402.
+- A fallback that succeeds is not visible to the plugin. To rule it out, unlink BYOK keys in OpenRouter before delegating.
 
 ## What the coordinators show
 
@@ -91,7 +100,7 @@ Measured on 2026-11-02 with Claude Code 2.1.316 on Sonnet 5.5 as coordinator, in
 
 ## Limits
 
-- AI Meter describes only verified agents and places: Pi in WSL, and OpenCode in WSL and on Windows. A plugin in WSL cannot start a Windows agent yet.
+- AI Meter describes only the agents and places its definitions mark as verified, today Pi in WSL, and OpenCode in WSL and on Windows. A plugin in WSL cannot start a Windows agent yet. Other agents found, such as Codex or Claude Code, are listed in `runtimes.unsupported` with the reason.
 - Long tasks hold one lease for their whole timeout plus two minutes, rather than renewing it.
 - A coordinator inside a packaged app, such as the Claude desktop app, may not see agents installed elsewhere. The plugin uses the paths AI Meter describes and installs nothing.
 - **Not verified yet:** a task started by Codex's own model (its usage limit was reached during the check); Claude Code and Codex running natively on Windows (neither CLI is installed on the test PC; the MCP server itself was checked natively on Windows); the interactive screens.

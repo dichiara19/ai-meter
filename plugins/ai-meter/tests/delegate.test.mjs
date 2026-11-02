@@ -58,6 +58,16 @@ test("an OpenCode rate limit fails the task and is reported to AI Meter", async 
   assert.equal(released(calls).rate_limited, 1);
 });
 
+test("an OpenRouter error that names a BYOK provider is reported as byok_fallback, with its 429", async () => {
+  const { folder } = setUp({ candidates: [pi], behaviour: { pi: "byok" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: folder }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.equal(job.summary.byok_fallback, true);
+  assert.equal(job.summary.rate_limited, 1);
+  assert.match(job.error, /is_byok/, "the agent's error is on the job itself");
+});
+
 test("OpenCode's answer is the text of its last step, and tokens add up across steps", async () => {
   const { folder, calls } = setUp({ candidates: [openCode] });
   const job = await jobs.wait(jobs.start({ task: "hello", workspace: folder }).id, 20);
@@ -87,15 +97,71 @@ test("candidates AI Meter cannot describe, and pools that refuse a lease, are sk
 
 test("pins narrow the candidates, and no match fails the job with AI Meter's exclusions", async () => {
   const excluded = [{ service: "openrouter", reason: "runtime_has_no_key", count: 3 }];
-  const { folder, calls } = setUp({ candidates: [pi, openCode], excluded });
+  const unsupported = [{ name: "codex", display_name: "Codex", where: "wsl", distro: "Ubuntu", reason: "no_dispatch", detail: "Codex is installed in WSL (Ubuntu), but delegation does not support it yet." }];
+  const { folder, calls } = setUp({ candidates: [pi, openCode], excluded, unsupported_runtimes: unsupported });
   const pinned = await jobs.wait(jobs.start({ task: "x", workspace: folder, runtime: "opencode" }).id, 20);
   assert.equal(pinned.candidate.runtime, "opencode");
 
   const none = await jobs.wait(jobs.start({ task: "x", workspace: folder, model: "missing" }).id, 20);
   assert.equal(none.status, "failed");
   assert.deepEqual(none.excluded, excluded);
+  assert.deepEqual(none.runtimes.unsupported, unsupported, "the coordinator can say why an installed agent is not used");
   assert.equal(calls().filter((c) => c.tool === "claim_capacity").length, 1);
 });
+
+test("a WSL candidate's distribution goes back to describe_dispatch, and its warnings reach the report", async () => {
+  const inUbuntu = { ...pi, runtime: { name: "pi", where: "wsl", distro: "Ubuntu-24.04" }, warnings: ["openrouter_byok_fallback"] };
+  const { folder, calls } = setUp({ candidates: [inUbuntu], warnings: ["openrouter_byok_fallback"] });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: folder, distro: "Ubuntu-24.04" }).id, 20);
+
+  assert.equal(job.status, "completed");
+  assert.equal(calls().find((c) => c.tool === "describe_dispatch").arguments.distro, "Ubuntu-24.04");
+  assert.equal(job.candidate.distro, "Ubuntu-24.04");
+  assert.deepEqual(job.warnings, ["openrouter_byok_fallback"]);
+  assert.equal(job.summary.paid_request, false, "a zero price does not stop the agent");
+});
+
+test("a describe_dispatch error skips that candidate with AI Meter's message and tries the next", async () => {
+  const { folder, calls } = setUp({ candidates: [openCode, pi], errors: { "opencode@windows": "OpenCode has no key of its own for openrouter here; call list_candidates first." } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: folder }).id, 20);
+
+  assert.equal(job.status, "completed");
+  assert.equal(job.candidate.runtime, "pi");
+  assert.match(job.skipped[0].reason, /has no key of its own/);
+  assert.equal(calls().filter((c) => c.tool === "claim_capacity").length, 1);
+});
+
+test("AI Meter still reading its first data is waited for, not taken as a reason to skip the candidate", async () => {
+  const { folder } = setUp({ candidates: [pi], still_reading: 1 });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: folder }).id, 20);
+
+  assert.equal(job.status, "completed");
+  assert.deepEqual(job.skipped, []);
+});
+
+test("a runtime whose events the plugin cannot read is skipped before AI Meter is asked", async () => {
+  const crush = { ...openCode, runtime: { name: "crush", where: "windows" } };
+  const { folder, calls } = setUp({ candidates: [crush, pi] });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: folder }).id, 20);
+
+  assert.equal(job.candidate.runtime, "pi");
+  assert.match(job.skipped[0].reason, /cannot read crush/);
+  assert.deepEqual(calls().filter((c) => c.tool === "describe_dispatch").map((c) => c.arguments.runtime), ["pi"]);
+});
+
+for (const [runtime, candidate] of [["pi", pi], ["opencode", openCode]]) {
+  test(`${runtime}: the first request priced above zero stops the agent and fails the task`, async () => {
+    const { folder, calls } = setUp({ candidates: [candidate], behaviour: { [runtime]: "paid" } });
+    const job = await jobs.wait(jobs.start({ task: "x", workspace: folder }).id, 20);
+
+    assert.equal(job.status, "failed");
+    assert.equal(job.summary.paid_request, true);
+    assert.equal(job.summary.cost, 0.0021);
+    assert.match(job.summary.error, /priced as paid/);
+    assert.deepEqual(released(calls), { lease_id: "lease-1", outcome: "failed", requests: 1, rate_limited: 0 });
+    assert.throws(() => process.kill(job.agent_pid, 0), "the agent is gone");
+  });
+}
 
 test("cancelling stops the agent and releases the lease without tokens", async () => {
   const { folder, calls } = setUp({ candidates: [pi], behaviour: { pi: "hang" } });

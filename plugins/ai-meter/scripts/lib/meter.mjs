@@ -33,6 +33,11 @@ function relayCommand() {
   return [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", RELAY_SCRIPT];
 }
 
+/** An error a tool answered, such as describe_dispatch's "no key of its own"; the session itself still works. */
+export class ToolError extends Error {}
+
+const STILL_READING = /still reading the first data/i;
+
 /**
  * A session with AI Meter. call(tool, args) returns the tool's structured result, or throws with the tool's error.
  * Requests are answered in order, one line each, so a simple queue matches answers to requests.
@@ -93,15 +98,21 @@ export class Meter {
     this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method }) + "\n");
   }
 
-  /** A just-started AI Meter answers only { status } until its first reading; wait for it, up to a minute. */
+  /**
+   * A just-started AI Meter answers only { status }, or a "still reading" error, until its first reading; wait for it,
+   * up to a minute. Any other tool error throws a ToolError.
+   */
   async call(name, args = {}) {
     for (let attempt = 0; ; attempt++) {
       const result = await this.request("tools/call", { name, arguments: args });
       const content = result.structuredContent || {};
-      if (result.isError || content.error) throw new Error(content.error || "AI Meter refused " + name + ".");
-      const starting = Object.keys(content).length === 1 && typeof content.status === "string";
-      if (!starting) return content;
-      if (attempt === 20) throw new Error(content.status);
+      const error = result.isError || content.error ? content.error || "AI Meter refused " + name + "." : null;
+      const starting = error ? STILL_READING.test(error) : Object.keys(content).length === 1 && typeof content.status === "string";
+      if (!starting) {
+        if (error) throw new ToolError(error);
+        return content;
+      }
+      if (attempt === 20) throw new Error(error || content.status);
       await new Promise((resolve) => setTimeout(resolve, 3000));
     }
   }
