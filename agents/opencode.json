@@ -1,0 +1,47 @@
+{
+  "id": "opencode",
+  "name": "OpenCode",
+  "order": 10,
+  "programs": { "windows": ["opencode"], "wsl": ["opencode"] },
+  "folders": [".local/share/opencode", ".config/opencode"],
+  "keys": [
+    { "file": ".local/share/opencode/auth.json", "path": "{id}.key" },
+    { "file": ".config/opencode/opencode.json", "path": "provider.{id}.options.apiKey" }
+  ],
+  "package": "opencode-ai",
+  "models": { "format": "models.dev", "file": "{home}/.cache/opencode/models.json" },
+  "dispatch": {
+    "places": {
+      "wsl": { "versions": ["1.x"] },
+      "windows": {
+        "versions": ["1.x"],
+        "executables": [
+          "node_modules/opencode-windows-x64/bin/opencode.exe",
+          "node_modules/opencode-windows-arm64/bin/opencode.exe",
+          "node_modules/opencode-windows-x64-baseline/bin/opencode.exe"
+        ]
+      }
+    },
+    "arguments": {
+      "read_only": ["run", "--pure", "--format", "json", "--agent", "plan", "--dir", "{workspace}", "-m", "{provider}/{model}"],
+      "modify": ["run", "--pure", "--format", "json", "--agent", "build", "--dir", "{workspace}", "-m", "{provider}/{model}"]
+    },
+    "environment": {
+      "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+      "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
+      "OPENCODE_DISABLE_PROJECT_CONFIG": "1",
+      "OPENCODE_DISABLE_AUTOUPDATE": "1",
+      "OPENCODE_CONFIG_CONTENT": { "small_model": "{provider}/{model}" }
+    },
+    "output": {
+      "format": "jsonl",
+      "end": "the process exits",
+      "outcome": "the exit code (1 with an error event on failure) and the last step_finish.reason",
+      "requests": "the number of step_finish events",
+      "tokens": "the sum of step_finish.tokens.total; unknown when stopped",
+      "rate_limited": "an error event whose message contains 429",
+      "cost": "step_finish.part.cost of each step, priced by OpenCode from its own model list: above 0, the request was priced as paid; 0 does not prove a free request"
+    },
+    "notes": ["Close stdin after writing the task: with stdin open OpenCode waits for more."]
+  }
+}

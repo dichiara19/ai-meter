@@ -54,12 +54,13 @@ namespace AIMeter
             catch (Exception) { return null; }
         }
 
-        private static R Wait<R>(IAsyncOperation<R> op)
+        /// <summary>Block until a WinRT operation completes; GetResults throws if it has not finished within the timeout.</summary>
+        internal static R Wait<R>(IAsyncOperation<R> op, int timeoutMs = 5000)
         {
             using (var done = new ManualResetEvent(false))
             {
                 op.Completed = (o, s) => done.Set();
-                done.WaitOne(5000);
+                done.WaitOne(timeoutMs);
                 return op.GetResults();
             }
         }

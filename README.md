@@ -65,6 +65,8 @@ Screenshots use sample data. Your archive starts from collection time; it cannot
 
 Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now, see [Code signing policy](#code-signing-policy)). A Microsoft Store version is on the way.
 
+**Updates.** Once a day AI Meter asks GitHub whether a newer stable version exists and, if so, shows a notice with a link to its release page. It never downloads or installs anything: to update, exit AI Meter, replace the files in its folder with those of the new zip and start it again (settings and history stay). Turn the check off, or opt in to betas and release candidates, in Settings → About.
+
 <a id="languages"></a>Available in English, Italian, Spanish, French, German and Portuguese. It follows the Windows display language, or you can pick one in Settings. Translations live in `src/StringsTable.cs` and `src/StringsHistory.cs`: new languages are welcome.
 
 ## What you get
@@ -76,7 +78,7 @@ Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now,
 | **Desktop widget** | Off by default. Always stays *below* your windows, like part of the wallpaper. Compact cards; click a card header to show its sessions. Drag it by its header. |
 | **Compact overlay** | A tiny always-on-top pill (off by default) with two micro buttons: collapse to a live ring icon, or close. Never steals focus, hides itself during full-screen games, videos and presentations, shows details on hover. |
 | **Settings** | Built like Windows 11 Settings: connected services, what to show, where, start with Windows, theme, refresh rate, live resource usage. |
-| **AI apps (MCP)** | Claude Desktop, Claude Code, Codex, Antigravity CLI, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's read-only MCP server. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
+| **AI apps (MCP)** | Claude Desktop, Claude Code, Codex, Antigravity CLI, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's MCP server, which changes nothing except its own `leases.json` when coding agents lease capacity. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
 | **Delegation (preview)** | A plugin for Claude Code and Codex hands self-contained tasks to a coding agent you already have (Pi or OpenCode) on a free model that AI Meter finds has room. Read-only by default; changes go to a new Git worktree. [Details](plugins/ai-meter/README.md). |
 | **Usage history** | Local quota cycles, spending, session tokens, models and tools, daily totals and consumption signals. Optional feedback records whether the result was worth the consumption. Open from the notification-area menu or Settings → Usage history. |
 
@@ -139,7 +141,9 @@ From the [latest release](https://github.com/dichiara19/ai-meter/releases/latest
 - **AIMeter.zip**: unzip and run `AIMeter.exe`.
 - **AIMeter-script.zip**: if Smart App Control blocks the unsigned executable, unzip and run `Start AI Meter.cmd`, which starts the same app from source with Windows PowerShell.
 
-A Microsoft Store version, signed by Microsoft and updated automatically, is in preparation: see [docs/STORE.md](docs/STORE.md).
+Pre-releases (`vX.Y.Z-beta.N`, `vX.Y.Z-rc.N`) are on the [releases page](https://github.com/dichiara19/ai-meter/releases) for anyone who wants to test them; the latest release and the update notice only ever point to stable versions. How versions are cut: [docs/RELEASING.md](docs/RELEASING.md).
+
+A Microsoft Store version, signed by Microsoft and updated automatically by the Store with stable versions only, is in preparation: see [docs/STORE.md](docs/STORE.md).
 
 ## Build and install
 
@@ -147,7 +151,7 @@ A Microsoft Store version, signed by Microsoft and updated automatically, is in 
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Compiles with the `csc.exe` that ships with .NET Framework (no SDK needed), installs to `%LOCALAPPDATA%\Programs\AI Meter`, adds a Start menu shortcut and updates any existing startup registration to the installed copy. On first use it enables startup if no registration exists (you can turn this off in Settings). Launching another copy preserves existing startup entries, including those disabled in Windows. `-NoInstall` only builds into `bin\`.
+Compiles with the `csc.exe` that ships with .NET Framework (no SDK needed), installs to `%LOCALAPPDATA%\Programs\AI Meter`, adds a Start menu shortcut and updates any existing startup registration to the installed copy. On first use the welcome window asks whether to start with Windows (on by default); startup is registered only after that window closes, if no registration exists (you can turn this off later in Settings). Launching another copy preserves existing startup entries, including those disabled in Windows. `-NoInstall` only builds into `bin\`.
 
 Two install modes:
 
@@ -181,7 +185,7 @@ src/Sqlite.cs          read-only SQLite reader for local agent databases
 src/ProviderLocal.cs   local model servers: discovery on Windows and WSL, loaded models, memory, context
 src/CodingAgents.cs    sessions of terminal coding agents (OpenCode, Pi, Gemini CLI, Qwen Code, …)
 src/RunningAgents.cs   session folders named by running Pi processes (Windows and WSL /proc)
-src/McpServer.cs       read-only MCP server on a per-user named pipe, with its tools
+src/McpServer.cs       MCP server on a per-user named pipe, with its tools (only leases write)
 src/McpClients.cs      AI apps that can use it, their config edits, and the mcp.ps1 relay they start
 src/GpuMemory.cs       video memory per process from the Windows GPU counters
 src/Forecast.cs        when each limit runs out at the current pace; low-limit and reset notifications, tips
@@ -196,9 +200,13 @@ src/HistoryVisuals.cs  settings-style cards, charts and explicit data states
 src/StringsHistory.cs  history translations
 providers/*.json       built-in service definitions
 plugins/ai-meter/      delegation plugin for Claude Code and Codex (Node, separate from the app)
+agents/*.json          built-in coding agent definitions: folders, keys and how delegation starts them
+src/AgentDefinitions.cs loads agents/*.json and %APPDATA%\AIMeter\agents
 tools/render-media.ps1 regenerates the README images (docs/media) from the real UI with demo data
 src/Settings.cs        preferences and start with Windows
 src/PackageStartup.cs  start with Windows in the Microsoft Store package (StartupTask)
+src/UpdateCheck.cs     daily check for a newer GitHub release (zip and script builds) and SemVer comparison
+src/StoreUpdates.cs    in the Store package, whether the Store has an update waiting
 src/Theme.cs           Fluent light/dark tokens, Windows accent color, control styles
 src/Ui.cs              text, icons, formatting and limit selection shared by every surface
 src/UiLogos.cs         service logos from installed apps or bundled assets
@@ -232,7 +240,7 @@ assets/app.ico         app icon (generated by build.ps1)
 
 ## Privacy policy
 
-AI Meter does not collect, store or send any data to its authors, and contains no telemetry, analytics or update checks.
+AI Meter does not collect, store or send any data to its authors, and contains no telemetry or analytics. Its only request of its own is the update check described below, which you can turn off.
 
 It reads local files written by the AI apps and coding agents on your PC and keeps its own settings in `%APPDATA%\AIMeter`, on your PC only.
 
@@ -249,6 +257,7 @@ Network connections are limited to reading your own usage:
 - **OpenRouter, Vercel AI Gateway, Experiential Labs, DeepSeek, Kimi**: a request to `openrouter.ai`, `ai-gateway.vercel.sh`, `api.experientiallabs.ai`, `api.deepseek.com` or `api.moonshot.ai` with your API key, only if you turn the service on and a key is added or found on the PC. For OpenRouter and Experiential Labs, AI Meter also reads the model list every six hours to show the free models (OpenRouter's is public and gets no key; Experiential Labs' needs the key). Click the free models count to list them all; a click on a model copies its id. Keys saved by other programs are looked for only if you allow it on the first-launch screen or in Settings → Services; a key found there is read where it is, never copied, and sent only to its own service; values that are commands (`!…` in Pi) are never run.
 - **Definitions you add**: a request to the address named in the file.
 - **Local models**: requests to `127.0.0.1` only, which never leave the PC.
+- **Update check** (on by default, Settings → About → *Check for updates*): in the zip and script builds, at most once a day, one anonymous request to `api.github.com` for the latest release of AI Meter (`/repos/dichiara19/ai-meter/releases/latest`, or the list of recent releases if you include pre-releases). It sends no cookies, account, identifier or version, only the `User-Agent: ai-meter` header that GitHub requires, and like any request it reveals your IP address to GitHub ([GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)). If a newer version exists it shows a notice; it never downloads or installs anything, and offline or rate-limited checks fail silently. The Microsoft Store version never contacts GitHub: with the same switch on, it asks the Microsoft Store through Windows whether an update is waiting, and the Store installs updates itself.
 - **Delegation (MCP)**: coding-agent plugins can reserve room on a free model's pool through AI Meter. AI Meter keeps these leases in `%APPDATA%\AIMeter\leases.json`: pool, model, agent, times and the counts the plugin reports (requests, rate limits, tokens), for 30 days. It never stores task text, code or keys, and it starts no agent itself. The [delegation plugin](plugins/ai-meter/README.md#privacy) keeps each task's text and the agent's output in `~/.aimeter/jobs` on your PC for seven days.
 - **AI apps (MCP)**: apps you connect in Settings → AI apps read AI Meter's latest data through a named pipe that only your Windows user can open. An app can ask for newer data. AI Meter then reads your usage again from the same services listed above, at most once a minute per service. Nothing else leaves the PC because of it, but what an app reads can reach that app's model provider as part of your conversation. Keys, tokens and account identities are never shared; session titles only if you turn on *Share session titles*.
 

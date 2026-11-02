@@ -73,7 +73,6 @@ namespace AIMeter
             Settings = Settings.Load();
             Settings.Current = Settings;
             bool firstRun = !Settings.FirstRunDone;
-            try { Settings.InitialiseStartup(firstRun); } catch (Exception) { }
             L.Init(Settings.Language);
             collector = new Collector(Settings);
             historyStore = new HistoryStore(Path.Combine(Settings.Folder, "history.sqlite3"));
@@ -115,6 +114,7 @@ namespace AIMeter
                 new LeaseBook(Path.Combine(Settings.Folder, "leases.json"))));
             mcpHost.Start();
             try { McpRelay.Write(); } catch (Exception ex) { Program.LogError("mcp-relay", ex); }
+            StartUpdateChecks();
 
             var worker = new Thread(WorkerLoop) { IsBackground = true, Name = "AIMeter.Collector", Priority = ThreadPriority.BelowNormal };
             worker.Start();
@@ -126,6 +126,7 @@ namespace AIMeter
             Native.EnableEcoQoSForCurrentThread();
             if (startup) Thread.Sleep(15000);   // Allow the desktop to settle after sign-in.
             int ticks = 0;
+            bool failureLogged = false;   // One log entry per run of failed cycles.
             while (!stopping)
             {
                 if (paused) { wake.WaitOne(); continue; }
@@ -140,6 +141,7 @@ namespace AIMeter
                         snap = collector.Collect(requested || anyVisible || Settings.HistoryEnabled || ticks == 0, saving);
                         forecaster.Apply(snap);
                         refreshGate.Publish(snap);   // MCP callers waiting for this reading need not wait for history.
+                        failureLogged = false;
                         if (Settings.HistoryEnabled)
                         {
                             try
@@ -167,7 +169,11 @@ namespace AIMeter
                         }
                     }
                 }
-                catch (Exception ex) { Trace.WriteLine(ex); }
+                catch (Exception ex)
+                {
+                    if (!failureLogged) Program.LogError("collection", ex);
+                    failureLogged = true;
+                }
                 if (snap != null) ui.BeginInvoke(DispatcherPriority.Background, new Action(() => Apply(snap)));
                 if (Json.BytesRead > 8 << 20)
                 {

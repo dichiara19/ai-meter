@@ -55,7 +55,7 @@ namespace AIMeter
             Group(Row(Ui.Glyph("", 20, "Text"), L.T("Add a service"),
                 L.T("Put definition files in this folder and restart AI Meter. The format is described in the project documentation."),
                 Pair(Button(L.T("Format"), () => Process.Start("https://github.com/dichiara19/ai-meter/blob/main/docs/PROVIDERS.md"), false),
-                     Button(L.T("Open folder"), () => { System.IO.Directory.CreateDirectory(Definitions.UserFolder); Process.Start("explorer.exe", "\"" + Definitions.UserFolder + "\""); }, false))));
+                     Button(L.T("Open folder"), () => Program.OpenFolder(Definitions.UserFolder), false))));
         }
 
         /// <summary>Compact list status: off, authentication needed, or the pill's selected limit.</summary>

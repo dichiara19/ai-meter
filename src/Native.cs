@@ -465,11 +465,19 @@ namespace AIMeter
 
         private static int packaged = -1;
 
+#if AIMETER_TEST
+        /// <summary>Test seam: when set, replaces the package-identity check so tests can exercise the packaged branches.</summary>
+        internal static bool? PackagedOverride;
+#endif
+
         /// <summary>True if the app runs from the MSIX package (Microsoft Store), i.e. it has a package identity.</summary>
         public static bool IsPackaged
         {
             get
             {
+#if AIMETER_TEST
+                if (PackagedOverride.HasValue) return PackagedOverride.Value;
+#endif
                 if (packaged < 0)
                 {
                     int n = 0;

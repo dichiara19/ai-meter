@@ -19,6 +19,9 @@ namespace AIMeter
             test("The same request gives the same order whatever the order of services", Deterministic);
             test("Each agent counts only its own keys; credential ids match the same key and hide it", AgentKeys);
             test("list_candidates reports candidates, pools once, exclusions and runtimes", CandidatesTool);
+            test("Agents' own model lists are read in Pi's and models.dev's formats, only from their home or package", AgentModelLists);
+            test("Best-effort candidates come from an agent's own list, apart and only when asked for", BestEffortSelection);
+            test("list_candidates reports best-effort candidates with what rests on the agent's word", BestEffortTool);
         }
 
         private static void Assert(bool condition, string message)
@@ -164,7 +167,7 @@ namespace AIMeter
             var both = Home(@".local\share\opencode\auth.json", "{ \"openrouter\": { \"type\": \"api\", \"key\": \"sk-or-v1-opencode-0123456789\" } }",
                             @".pi\agent\auth.json", "{ \"openrouter\": { \"type\": \"api_key\", \"key\": \"sk-or-v1-pi-0123456789\" } }");
             var all = KeyFinder.SearchAll(d, both, true).ToList();
-            Assert(all.Count == 2 && all[0].App == "OpenCode" && all[1].App == "Pi" && all.All(f => f.Wsl), "Keys were not listed with their apps.");
+            Assert(all.Count == 2 && all[0].App == "OpenCode" && all[1].App == "Pi", "Keys were not listed with their apps.");
             Assert((string)piKeyIn(pi, both) == "sk-or-v1-pi-0123456789", "Pi was given another app's key.");
             Assert((string)piKeyIn(openCode, both) == "sk-or-v1-opencode-0123456789", "OpenCode was not given its own key.");
 
@@ -174,7 +177,9 @@ namespace AIMeter
             var profile = Home(".bashrc", "export OPENROUTER_API_KEY=sk-or-v1-profile-0123456789\n");
             Assert((string)piKeyIn(pi, profile) == "sk-or-v1-profile-0123456789" && (string)piKeyIn(openCode, profile) == "sk-or-v1-profile-0123456789",
                 "A WSL profile export every agent inherits was not counted.");
-            Assert(Candidates.Kinds.Select(k => k.Id).SequenceEqual(new[] { "pi", "opencode", "crush" }), "The supported agents changed without updating this test.");
+            Assert(Candidates.Kinds.Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi", "crush", "antigravity", "claude", "codex", "cursor", "gemini" }),
+                "The known agents changed without updating this test.");
+            Assert(Candidates.Kinds.Where(k => k.Dispatch != null).Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi" }), "The agents delegation runs changed without updating this test.");
 
             // A configuration folder can outlive its agent: the program must be installed too (checked without starting WSL).
             string root = Path.Combine(Settings.Folder, "distro-" + Guid.NewGuid().ToString("N"));
@@ -217,6 +222,116 @@ namespace AIMeter
 
             var bad = Json.Obj(Json.Obj(Json.Parse(server.Handle("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_candidates\",\"arguments\":{\"cost_policy\":\"anything\"}}}")), "result"), "structuredContent");
             Assert(bad.ContainsKey("error"), "An unknown cost policy was accepted.");
+        }
+
+        /// <summary>Pi's catalogue: NVIDIA's meta/llama-4 as a chat model at no price, and an image model.</summary>
+        private const string PiNvidia = "{ \"openai-completions\": { " +
+            "\"chat:meta/llama-4\": { \"type\": \"chat\", \"id\": \"meta/llama-4\", \"provider\": \"nvidia\", \"contextWindow\": 131072, \"maxTokens\": 16384, \"reasoning\": true, \"cost\": { \"input\": 0, \"output\": 0 } }, " +
+            "\"image:x/paint\": { \"type\": \"image\", \"id\": \"x/paint\", \"provider\": \"nvidia\", \"cost\": { \"input\": 0, \"output\": 0 } } } }";
+
+        /// <summary>Pi's catalogue for Google: Gemini Flash at its paid-tier price.</summary>
+        private const string PiGoogle = "{ \"google-generative-ai\": { \"chat:gemini-2.5-flash\": { \"type\": \"chat\", \"id\": \"gemini-2.5-flash\", \"provider\": \"google\", " +
+            "\"contextWindow\": 1048576, \"maxTokens\": 65536, \"cost\": { \"input\": 0.3, \"output\": 2.5 } } } }";
+
+        /// <summary>Fixture with Gemini's tool support unstated, as the Gemini API's list leaves it.</summary>
+        private static Snapshot Unstated()
+        {
+            var snap = Fixture(10);
+            var flash = snap.Providers.Single(p => p.Id == "gemini").Catalogue.Models.Single();
+            flash.FeaturesUnknown = true;
+            return snap;
+        }
+
+        /// <summary>Pi with keys for NVIDIA (alias nvidia) and Gemini (alias google), each with its own model list.</summary>
+        private static RuntimeScan PiWithLists()
+        {
+            var scan = Pi();
+            var home = Home(@"lists\nvidia.json", PiNvidia, @"lists\google.json", PiGoogle);
+            scan.Access.Add(Candidates.Access("gemini", "pi", "wsl", "key-gemini-0123456789"));
+            foreach (var a in scan.Access)
+            {
+                a.Provider = a.Service == "gemini" ? "google" : a.Service;
+                if (a.Service == "nvidia" || a.Service == "gemini") { a.ModelsFile = Path.Combine(home, @"lists\" + a.Provider + ".json"); a.ModelsFormat = "pi"; }
+            }
+            return scan;
+        }
+
+        private static void AgentModelLists()
+        {
+            var pi = AgentModels.Parse(Json.Parse(PiNvidia), "pi");
+            var llama = pi["nvidia"]["meta/llama-4"];
+            Assert(llama.Tools == true && llama.Context == 131072 && llama.MaxOutput == 16384 && llama.Reasoning == true && !llama.Priced, "Pi's chat entry was read wrongly.");
+            Assert(pi["nvidia"]["x/paint"].Tools == false, "A Pi model that is not a chat model counted as one with tools.");
+            Assert(AgentModels.Parse(Json.Parse(PiGoogle), "pi")["google"]["gemini-2.5-flash"].Priced, "A price in Pi's list was missed.");
+
+            var dev = AgentModels.Parse(Json.Parse("{ \"nvidia\": { \"id\": \"nvidia\", \"models\": { \"z/coder\": { \"id\": \"z/coder\", \"tool_call\": false, " +
+                "\"limit\": { \"context\": 32000, \"output\": 4000 }, \"cost\": { \"input\": 0, \"output\": 0 } } } } }"), "models.dev");
+            var coder = dev["nvidia"]["z/coder"];
+            Assert(coder.Tools == false && coder.Context == 32000 && coder.MaxOutput == 4000, "models.dev's entry was read wrongly.");
+            Assert(AgentModels.Parse(Json.Parse("{}"), "other") == null, "An unknown format was read.");
+
+            // The file is declared relative to the agent's package, for the versions whose layout was checked.
+            var kind = Candidates.Kinds.Single(k => k.Id == "pi");
+            string package = Home(@"node_modules\@earendil-works\pi-ai\dist\providers\data\nvidia.json", PiNvidia);
+            Assert(AgentModels.FileFor(kind, null, package, "nvidia", "1.4.0") != null, "Pi's model list was not found in its package.");
+            Assert(AgentModels.FileFor(kind, null, package, "nvidia", "2.0.0") == null, "A Pi version outside the checked range was read.");
+            Assert(AgentModels.FileFor(kind, null, package, "../nvidia", "1.4.0") == null, "A provider alias stepped out of the folder.");
+            Assert(AgentModels.FileFor(kind, null, package, "google", "1.4.0") == null, "A missing file was returned.");
+            foreach (var file in new[] { "/etc/models.json", "{home}/../models.json", "models.json" })
+            {
+                var odd = RuntimeKind.FromJson("{ \"id\": \"odd\", \"models\": { \"format\": \"pi\", \"file\": \"" + file + "\" } }", "test");
+                Assert(odd != null && odd.Models == null, "A model list outside the agent's home or package was accepted: " + file);
+            }
+        }
+
+        private static void BestEffortSelection()
+        {
+            NetworkBackoff.Clear();
+            var plain = Candidates.Select(Unstated(), PiWithLists(), new Requirements { Tools = true }, DateTime.Now);
+            Assert(plain.BestEffort.Count == 0 && plain.BestEffortAvailable == 1, "Best-effort candidates were listed without being asked for, or not counted.");
+            Assert(Excluded(plain, "nvidia").Reason == "price_not_confirmed", "Without consent a best-effort model must keep its exclusion.");
+            Assert(Order(plain).SequenceEqual(Order(Candidates.Select(Unstated(), Pi(), new Requirements { Tools = true }, DateTime.Now))), "Agents' lists changed the ordinary candidates.");
+
+            var asked = Candidates.Select(Unstated(), PiWithLists(), new Requirements { Tools = true, BestEffort = true }, DateTime.Now);
+            var llama = asked.BestEffort.Single();
+            Assert(llama.Model.Id == "meta/llama-4" && llama.Access.Runtime == "pi" && llama.Estimated.Context == 131072, "The best-effort candidate is wrong.");
+            Assert(llama.Unverified.SequenceEqual(new[] { "price", "tools" }), "What rests on the agent's word is wrong: " + string.Join(", ", llama.Unverified));
+            Assert(!asked.Chosen.Any(c => c.Provider.Id == "nvidia") && !asked.Excluded.Any(e => e.Service == "nvidia"), "A best-effort model is also a candidate or an exclusion.");
+            Assert(Excluded(asked, "gemini").Reason == "agent_lists_price", "A model the agent prices was not excluded for it.");
+
+            var big = Candidates.Select(Unstated(), PiWithLists(), new Requirements { Tools = true, BestEffort = true, MinContext = 200000 }, DateTime.Now);
+            Assert(big.BestEffort.Count == 0 && Excluded(big, "nvidia").Reason == "context_too_small", "The agent's context window was not checked against the task.");
+
+            var wide = Candidates.Select(Unstated(), PiWithLists(), new Requirements { Tools = true, BestEffort = true, MinContext = 100000 }, DateTime.Now);
+            Assert(wide.BestEffort.Single().Unverified.Contains("context"), "A context window taken from the agent was not marked unverified.");
+
+            // An agent without a list for the service leaves the model where it was.
+            var bare = Candidates.Select(Unstated(), Pi(), new Requirements { Tools = true, BestEffort = true }, DateTime.Now);
+            Assert(bare.BestEffort.Count == 0 && Excluded(bare, "nvidia").Reason == "price_not_confirmed", "A model no agent lists became best effort.");
+        }
+
+        private static void BestEffortTool()
+        {
+            NetworkBackoff.Clear();
+            var snap = Unstated();
+            var server = new McpServer(() => snap, () => false, null, null, PiWithLists);
+            Func<string, Dictionary<string, object>> call = args => Json.Obj(Json.Obj(Json.Parse(server.Handle(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"list_candidates\",\"arguments\":" + args + "}}")), "result"), "structuredContent");
+
+            var plain = call("{\"tools\":true}");
+            Assert(!plain.ContainsKey("best_effort") && Json.Num(plain, "best_effort_available") == 1, "Without consent, best effort must only be counted.");
+
+            var asked = call("{\"tools\":true,\"include_best_effort\":true}");
+            var entry = ((IList)asked["best_effort"]).OfType<Dictionary<string, object>>().Single();
+            var warnings = ((IList)entry["warnings"]).OfType<string>().ToList();
+            var estimated = Json.Obj(entry, "estimated");
+            var unverified = ((IList)estimated["unverified"]).OfType<string>().ToList();
+            Assert(Json.Str(entry, "model") == "meta/llama-4" && warnings.First() == "best_effort", "The best-effort entry or its warning is missing.");
+            Assert(Json.Str(estimated, "source") == "agent:pi" && Json.Num(estimated, "context_tokens") == 131072, "The estimate does not say where it comes from.");
+            Assert(unverified.SequenceEqual(new[] { "price", "tools", "limits" }), "Unverified facts are wrong: " + string.Join(", ", unverified));
+            var pools = ((IList)asked["pools"]).OfType<Dictionary<string, object>>().ToList();
+            Assert(pools.Any(p => Json.Str(p, "pool") == "nvidia:account"), "A best-effort candidate's pool is missing.");
+            Assert(!JsonText.Indented(asked).Contains("key-nvidia"), "A key reached the answer.");
         }
     }
 }

@@ -15,6 +15,8 @@ namespace AIMeter
             test("Unverified agents, places and versions are refused or flagged, never guessed", DispatchLimits);
             test("Leases count against a pool, expire, close it after a rate limit and keep only counters", LeaseBookRules);
             test("Leases survive a restart of AI Meter", LeasePersistence);
+            test("Lease counters and check dates keep their day west of UTC", LeasesWestOfUtc);
+            test("A daylight-saving change neither stretches nor cuts a lease", LeasesAcrossFallBack);
             test("Candidates and headroom count active leases", LeasedRoom);
             test("The delegation tools claim, describe and release through MCP", DelegationTools);
         }
@@ -30,7 +32,7 @@ namespace AIMeter
         {
             var a = Candidates.Access("openrouter", runtime, where, "key-0123456789abcdef");
             a.Provider = provider;
-            a.Program = where == "wsl" ? "/home/me/.npm-global/bin/" + runtime : null;
+            a.Program = where == "wsl" ? "/home/me/.npm-global/bin/" + runtime : @"C:\npm\node_modules\opencode-ai\node_modules\opencode-windows-x64\bin\" + runtime + ".exe";
             return a;
         }
 
@@ -97,9 +99,9 @@ namespace AIMeter
             var book = new LeaseBook(null);
             var now = DateTime.Now;
             var first = book.Claim("p", "openrouter", Model, "pi", "claude-code", 0, 1, now);
-            Assert(first != null && first.ExpiresAt == now.AddSeconds(LeaseBook.DefaultTtlSeconds), "The default lease length is wrong.");
+            Assert(first != null && first.ExpiresAtUtc == now.ToUniversalTime().AddSeconds(LeaseBook.DefaultTtlSeconds), "The default lease length is wrong.");
             Assert(book.Claim("p", "openrouter", Model, "pi", "codex", 0, 1, now) == null, "A full pool took a second lease.");
-            Assert(book.Claim("q", "openrouter", Model, "pi", "codex", 99999, 1, now).ExpiresAt == now.AddSeconds(LeaseBook.MaxTtlSeconds), "A lease outlived the maximum.");
+            Assert(book.Claim("q", "openrouter", Model, "pi", "codex", 99999, 1, now).ExpiresAtUtc == now.ToUniversalTime().AddSeconds(LeaseBook.MaxTtlSeconds), "A lease outlived the maximum.");
             Assert(book.Renew(first.Id, 60, now) == now.AddSeconds(60), "Renewal did not move the expiry.");
 
             var released = book.Release(first.Id, new LeaseBook.Outcome { Result = "completed", Requests = 3, RateLimited = 1, RetryAfter = TimeSpan.FromSeconds(30), InputTokens = 9000, OutputTokens = 40 }, now);
@@ -135,6 +137,69 @@ namespace AIMeter
             Assert(new LeaseBook(file).Active("p", now) == 0, "A file of an unknown version was trusted.");
         }
 
+        /// <summary>
+        /// Run with Windows' local time zone replaced, as on a PC set to that zone. The cache that DateTime.Now and
+        /// ToLocalTime read is private to .NET Framework, so it is set by reflection and cleared afterwards.
+        /// </summary>
+        private static void InZone(TimeZoneInfo zone, Action action)
+        {
+            const System.Reflection.BindingFlags hidden = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Instance;
+            TimeZoneInfo.ClearCachedData();
+            try
+            {
+                var cache = typeof(TimeZoneInfo).GetField("s_cachedData", hidden).GetValue(null);
+                cache.GetType().GetField("m_localTimeZone", hidden).SetValue(cache, zone);
+                Assert(TimeZoneInfo.Local.Id == zone.Id, "The test could not set the local time zone.");
+                action();
+            }
+            finally { TimeZoneInfo.ClearCachedData(); }
+        }
+
+        private static void LeasesWestOfUtc()
+        {
+            InZone(TimeZoneInfo.CreateCustomTimeZone("Test UTC-5", TimeSpan.FromHours(-5), "Test UTC-5", "Test UTC-5"), () =>
+            {
+                // Late evening west of UTC is already the next UTC day: the day saved must be the one read back. The year lies
+                // ahead so that the saved backoff has not ended yet.
+                string file = Path.Combine(Settings.Folder, "leases.json");
+                var now = new DateTime(2036, 11, 2, 22, 30, 0, DateTimeKind.Local);
+                var book = new LeaseBook(file);
+                var lease = book.Claim("p", "openrouter", Model, "pi", null, 600, 1, now);
+                book.Release(book.Claim("q", "openrouter", Model, "pi", null, 600, 1, now).Id, new LeaseBook.Outcome { Result = "completed", Requests = 2, RateLimited = 1 }, now);
+                string text = File.ReadAllText(file);
+                Assert(text.Contains("\"day\": \"2036-11-03\"") && text.Contains("\"expires_at\": \"2036-11-03T03:40:00.0000000Z\""), "Lease days or times were not saved in UTC.");
+
+                var reloaded = new LeaseBook(file);
+                var today = reloaded.Today("q", now);
+                Assert(today.Requests == 2 && today.RateLimited == 1 && today.Day == new DateTime(2036, 11, 3), "Today's counters were lost on restart west of UTC.");
+                Assert(today.LastRateLimited == now && reloaded.BackoffUntil("q") == now + LeaseBook.DefaultRateLimitBackoff, "Saved times did not come back in local time.");
+                Assert(reloaded.Active("p", now.AddMinutes(9)) == 1 && reloaded.Active("p", now.AddMinutes(11)) == 0, "A reloaded lease expired at the wrong time.");
+                Assert(lease.ExpiresAtUtc.Kind == DateTimeKind.Utc && reloaded.EarliestExpiry("p", now) == now.AddMinutes(10), "The lease expiry is not UTC inside and local outside.");
+
+                // Definitions date their checks as plain days ("checked"), which must not move to the previous day.
+                Assert(Json.Day("2026-10-31") == new DateTime(2026, 10, 31), "A plain date moved to another day west of UTC.");
+            });
+        }
+
+        private static void LeasesAcrossFallBack()
+        {
+            // New York's rules: on 1 November 2026 clocks go back from 02:00 EDT to 01:00 EST, at 06:00 UTC.
+            var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(DateTime.MinValue.Date, DateTime.MaxValue.Date, TimeSpan.FromHours(1),
+                TimeZoneInfo.TransitionTime.CreateFloatingDateRule(new DateTime(1, 1, 1, 2, 0, 0), 3, 2, DayOfWeek.Sunday),
+                TimeZoneInfo.TransitionTime.CreateFloatingDateRule(new DateTime(1, 1, 1, 2, 0, 0), 11, 1, DayOfWeek.Sunday));
+            var zone = TimeZoneInfo.CreateCustomTimeZone("Test Eastern", TimeSpan.FromHours(-5), "Test Eastern", "Test EST", "Test EDT", new[] { rule });
+            InZone(zone, () =>
+            {
+                var book = new LeaseBook(null);
+                var claimed = new DateTime(2026, 11, 1, 5, 45, 0, DateTimeKind.Utc).ToLocalTime();   // 01:45 EDT.
+                var lease = book.Claim("p", "openrouter", Model, "pi", null, 1800, 1, claimed);
+                var after = new DateTime(2026, 11, 1, 6, 20, 0, DateTimeKind.Utc).ToLocalTime();      // 01:20 EST, 35 minutes later.
+                Assert(after < claimed, "The test zone did not go back an hour.");
+                Assert(book.Active("p", after) == 0 && book.Today("p", after).Unknown == 1, "The clock going back kept an expired lease for another hour.");
+                Assert(lease.ExpiresAtUtc == new DateTime(2026, 11, 1, 6, 15, 0, DateTimeKind.Utc), "The lease did not last 30 minutes.");
+            });
+        }
+
         private static Snapshot Fixture()
         {
             var snap = new Snapshot();
@@ -161,7 +226,7 @@ namespace AIMeter
             var lease = book.Claim("openrouter:free", "openrouter", Model, "pi", null, 600, 1, now);
             var selection = Candidates.Select(Fixture(), Scan(), new Requirements(), now, book);
             var excluded = selection.Excluded.Single();
-            Assert(selection.Chosen.Count == 0 && excluded.Reason == "leased" && excluded.Until == lease.ExpiresAt, "A fully leased pool was offered.");
+            Assert(selection.Chosen.Count == 0 && excluded.Reason == "leased" && excluded.Until == lease.ExpiresAtUtc.ToLocalTime(), "A fully leased pool was offered.");
             book.Release(lease.Id, new LeaseBook.Outcome { Result = "completed", Requests = 1 }, now);
             Assert(Candidates.Select(Fixture(), Scan(), new Requirements(), now, book).Chosen.Count == 1, "A released pool stayed closed.");
         }

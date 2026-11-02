@@ -7,7 +7,7 @@ using System.Windows.Shell;
 namespace AIMeter
 {
     /// <summary>
-    /// First-launch window that asks for consent before AI Meter docks inside the Windows taskbar,
+    /// First-launch window that asks for consent before AI Meter docks inside the Windows taskbar, starts with Windows,
     /// contacts Anthropic with the Claude Code login or reads API keys saved by other programs.
     /// Nothing is applied until the window closes; closing it keeps the choices as shown.
     /// </summary>
@@ -15,6 +15,9 @@ namespace AIMeter
     {
         /// <summary>Whether the user asked to preview the app with invented data instead of real readings.</summary>
         public bool SampleDataRequested { get; private set; }
+
+        /// <summary>The "Start with Windows" choice; the caller registers start-up only after the window has closed.</summary>
+        public bool StartWithWindowsRequested { get; private set; }
 
         public WelcomeWindow(Settings settings)
         {
@@ -40,14 +43,17 @@ namespace AIMeter
             info.Margin = new Thickness(0, 8, 0, 16);
             root.Children.Add(info);
 
-            // The taskbar pill is the main surface, so it is offered switched on; API keys are opt-in.
+            // The taskbar pill is the main surface and start-up keeps it there, so both are offered switched on; API keys are opt-in.
             var taskbar = SettingsWindow.Toggle(true, v => { });
+            var startup = SettingsWindow.Toggle(true, v => { });
             var claude = SettingsWindow.Toggle(settings.ClaudeLiveUsage, v => { });
             var keys = SettingsWindow.Toggle(false, v => { });
             var rows = new System.Collections.Generic.List<FrameworkElement>
             {
                 SettingsWindow.Row(Ui.Glyph("", 20, "Text"), L.T("Show in the taskbar"),
                     L.T("Places a small indicator inside the Windows taskbar. If you turn this off, AI Meter shows a widget on the desktop instead."), taskbar),
+                SettingsWindow.Row(Ui.Glyph("", 20, "Text"), L.T("Start with Windows"),
+                    L.T("AI Meter starts at sign-in, silently, once the desktop is ready."), startup),
             };
             if (settings.ClaudeEnabled)
                 rows.Add(SettingsWindow.Row(Ui.Logo("claude", 20), L.T("Real-time limits"),
@@ -78,6 +84,7 @@ namespace AIMeter
                 if (!settings.TaskbarDock) settings.DesktopWidget = true;
                 settings.ClaudeLiveUsage = claude.IsChecked == true;
                 settings.FindKeys = keys.IsChecked == true;
+                StartWithWindowsRequested = startup.IsChecked == true;
             };
         }
 

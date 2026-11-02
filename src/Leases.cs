@@ -17,6 +17,9 @@ namespace AIMeter
     /// The book keeps only pools, models, agents, client labels, times and outcome counters: never task text, code,
     /// logs, paths or keys. It is saved as a small JSON file next to the settings; outcome counters are kept for 30 days.
     /// All members are thread-safe: MCP clients call them from their own threads.
+    ///
+    /// Times are kept and compared in UTC, so a daylight-saving change cannot stretch or cut a lease. Callers pass "now"
+    /// in any kind and get local times back, like the rest of the app; only a lease's own *Utc fields stay in UTC.
     /// </summary>
     internal sealed class LeaseBook
     {
@@ -29,7 +32,7 @@ namespace AIMeter
         private readonly object sync = new object();
         private readonly List<Lease> leases = new List<Lease>();
         private readonly List<Observation> observed = new List<Observation>();
-        private readonly Dictionary<string, DateTime> backoff = new Dictionary<string, DateTime>();
+        private readonly Dictionary<string, DateTime> backoff = new Dictionary<string, DateTime>();   // Pool to UTC time.
 
         public LeaseBook(string path)
         {
@@ -43,14 +46,15 @@ namespace AIMeter
         /// </summary>
         public Lease Claim(string pool, string service, string model, string runtime, string client, int ttlSeconds, int capacity, DateTime now)
         {
+            now = now.ToUniversalTime();
             lock (sync)
             {
                 Expire(now);
-                if (capacity - Active(pool, now) <= 0) return null;
+                if (capacity - CountActive(pool, now) <= 0) return null;
                 var lease = new Lease
                 {
                     Id = "lease_" + Guid.NewGuid().ToString("N").Substring(0, 16), Pool = pool, Service = service, Model = model,
-                    Runtime = runtime, Client = client, ClaimedAt = now, ExpiresAt = now.AddSeconds(Ttl(ttlSeconds)),
+                    Runtime = runtime, Client = client, ClaimedAtUtc = now, ExpiresAtUtc = now.AddSeconds(Ttl(ttlSeconds)),
                 };
                 leases.Add(lease);
                 Save();
@@ -58,17 +62,18 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Move an active lease's expiry; null when the lease is unknown, released or expired.</summary>
+        /// <summary>Move an active lease's expiry; the new expiry in local time, or null when the lease is unknown, released or expired.</summary>
         public DateTime? Renew(string id, int ttlSeconds, DateTime now)
         {
+            now = now.ToUniversalTime();
             lock (sync)
             {
                 Expire(now);
                 var lease = leases.FirstOrDefault(l => l.Id == id);
                 if (lease == null) return null;
-                lease.ExpiresAt = now.AddSeconds(Ttl(ttlSeconds));
+                lease.ExpiresAtUtc = now.AddSeconds(Ttl(ttlSeconds));
                 Save();
-                return lease.ExpiresAt;
+                return lease.ExpiresAtUtc.ToLocalTime();
             }
         }
 
@@ -78,6 +83,7 @@ namespace AIMeter
         /// </summary>
         public Lease Release(string id, Outcome outcome, DateTime now)
         {
+            now = now.ToUniversalTime();
             lock (sync)
             {
                 Expire(now);
@@ -98,36 +104,39 @@ namespace AIMeter
 
         public int Active(string pool, DateTime now)
         {
-            lock (sync) return leases.Count(l => l.Pool == pool && l.ExpiresAt > now);
+            lock (sync) return CountActive(pool, now.ToUniversalTime());
         }
 
-        /// <summary>When the first active lease of the pool expires; null without active leases.</summary>
+        /// <summary>When the first active lease of the pool expires, in local time; null without active leases.</summary>
         public DateTime? EarliestExpiry(string pool, DateTime now)
         {
+            now = now.ToUniversalTime();
             lock (sync)
             {
-                var active = leases.Where(l => l.Pool == pool && l.ExpiresAt > now).ToList();
-                return active.Count == 0 ? (DateTime?)null : active.Min(l => l.ExpiresAt);
+                var active = leases.Where(l => l.Pool == pool && l.ExpiresAtUtc > now).ToList();
+                return active.Count == 0 ? (DateTime?)null : active.Min(l => l.ExpiresAtUtc).ToLocalTime();
             }
         }
 
-        /// <summary>Until when an agent's rate limit keeps the pool closed; MinValue when it does not.</summary>
+        /// <summary>Until when (local time) an agent's rate limit keeps the pool closed; MinValue when it does not.</summary>
         public DateTime BackoffUntil(string pool)
         {
             DateTime t;
-            lock (sync) return backoff.TryGetValue(pool, out t) ? t : DateTime.MinValue;
+            lock (sync) return backoff.TryGetValue(pool, out t) ? t.ToLocalTime() : DateTime.MinValue;
         }
 
         /// <summary>Today's (UTC) outcome counters for a pool, with its leases in flight.</summary>
         public Observation Today(string pool, DateTime now)
         {
+            now = now.ToUniversalTime();
             lock (sync)
             {
                 Expire(now);
-                var day = now.ToUniversalTime().Date;
+                var day = now.Date;
                 var o = observed.FirstOrDefault(x => x.Pool == pool && x.Day == day);
                 var copy = o == null ? new Observation { Pool = pool, Day = day } : o.Copy();
-                copy.InFlight = Active(pool, now);
+                if (copy.LastRateLimited.HasValue) copy.LastRateLimited = copy.LastRateLimited.Value.ToLocalTime();
+                copy.InFlight = CountActive(pool, now);
                 return copy;
             }
         }
@@ -138,10 +147,16 @@ namespace AIMeter
             return Math.Min(seconds, MaxTtlSeconds);
         }
 
-        /// <summary>End leases past their expiry with an unknown outcome. Called with the lock held.</summary>
+        /// <summary>Active leases of a pool at a UTC time. Called with the lock held.</summary>
+        private int CountActive(string pool, DateTime now)
+        {
+            return leases.Count(l => l.Pool == pool && l.ExpiresAtUtc > now);
+        }
+
+        /// <summary>End leases past their expiry (now in UTC) with an unknown outcome. Called with the lock held.</summary>
         private void Expire(DateTime now)
         {
-            var due = leases.Where(l => l.ExpiresAt <= now).ToList();
+            var due = leases.Where(l => l.ExpiresAtUtc <= now).ToList();
             foreach (var l in due)
             {
                 leases.Remove(l);
@@ -150,9 +165,10 @@ namespace AIMeter
             if (due.Count > 0) Save();
         }
 
+        /// <summary>Count an ended lease in its pool's row for the UTC day of now (UTC). Called with the lock held.</summary>
         private void Record(string pool, Outcome outcome, DateTime now)
         {
-            var day = now.ToUniversalTime().Date;
+            var day = now.Date;
             var o = observed.FirstOrDefault(x => x.Pool == pool && x.Day == day);
             if (o == null) observed.Add(o = new Observation { Pool = pool, Day = day });
             o.Ended++;
@@ -174,25 +190,25 @@ namespace AIMeter
             {
                 var doc = Json.ParseFile(path);
                 if (Json.Num(doc, "version") != SchemaVersion) return;   // An unknown version is left untouched and replaced.
-                foreach (var l in Items(doc, "leases"))
+                foreach (var l in Json.Items(doc, "leases"))
                     leases.Add(new Lease
                     {
                         Id = Json.Str(l, "id"), Pool = Json.Str(l, "pool"), Service = Json.Str(l, "service"), Model = Json.Str(l, "model"),
                         Runtime = Json.Str(l, "runtime"), Client = Json.Str(l, "client"),
-                        ClaimedAt = Json.FromIso(Json.Str(l, "claimed_at")) ?? DateTime.MinValue, ExpiresAt = Json.FromIso(Json.Str(l, "expires_at")) ?? DateTime.MinValue,
+                        ClaimedAtUtc = Utc(Json.Str(l, "claimed_at")) ?? DateTime.MinValue, ExpiresAtUtc = Utc(Json.Str(l, "expires_at")) ?? DateTime.MinValue,
                     });
-                foreach (var o in Items(doc, "observed"))
+                foreach (var o in Json.Items(doc, "observed"))
                     observed.Add(new Observation
                     {
-                        Pool = Json.Str(o, "pool"), Day = (Json.FromIso(Json.Str(o, "day")) ?? DateTime.MinValue).Date,
+                        Pool = Json.Str(o, "pool"), Day = Json.Day(Json.Str(o, "day")) ?? DateTime.MinValue,
                         Ended = (int)(Json.Num(o, "ended") ?? 0), Unknown = (int)(Json.Num(o, "unknown") ?? 0), Failed = (int)(Json.Num(o, "failed") ?? 0),
                         Requests = (long)(Json.Num(o, "requests") ?? 0), RequestsUnknown = (int)(Json.Num(o, "requests_unknown") ?? 0),
                         InputTokens = (long)(Json.Num(o, "input_tokens") ?? 0), OutputTokens = (long)(Json.Num(o, "output_tokens") ?? 0),
-                        RateLimited = (int)(Json.Num(o, "rate_limited") ?? 0), LastRateLimited = Json.FromIso(Json.Str(o, "last_rate_limited")),
+                        RateLimited = (int)(Json.Num(o, "rate_limited") ?? 0), LastRateLimited = Utc(Json.Str(o, "last_rate_limited")),
                     });
-                foreach (var b in Items(doc, "backoff"))
+                foreach (var b in Json.Items(doc, "backoff"))
                 {
-                    var until = Json.FromIso(Json.Str(b, "until"));
+                    var until = Utc(Json.Str(b, "until"));
                     if (until.HasValue && Json.Str(b, "pool") != null) backoff[Json.Str(b, "pool")] = until.Value;
                 }
             }
@@ -200,14 +216,17 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { }
         }
 
-        private static IEnumerable<Dictionary<string, object>> Items(Dictionary<string, object> d, string key)
+        /// <summary>A saved time as UTC. Files written before times were kept in UTC carry a local offset, which this honours.</summary>
+        private static DateTime? Utc(string iso)
         {
-            object v;
-            var list = d != null && d.TryGetValue(key, out v) ? v as System.Collections.IList : null;
-            return list == null ? new Dictionary<string, object>[0] : list.OfType<Dictionary<string, object>>().ToArray();
+            DateTime t;
+            if (string.IsNullOrEmpty(iso)) return null;
+            if (!DateTime.TryParse(iso, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out t)) return null;
+            return DateTime.SpecifyKind(t, DateTimeKind.Utc);
         }
 
-        private static string Iso(DateTime t) { return t.ToString("o", CultureInfo.InvariantCulture); }
+        /// <summary>A UTC time in the round-trip format, ending in Z.</summary>
+        private static string Iso(DateTime utc) { return utc.ToString("o", CultureInfo.InvariantCulture); }
 
         /// <summary>Write the book; a failure is logged and the book carries on in memory. Called with the lock held.</summary>
         private void Save()
@@ -219,7 +238,7 @@ namespace AIMeter
                 { "leases", leases.Select(l => (object)new Dictionary<string, object>
                     {
                         { "id", l.Id }, { "pool", l.Pool }, { "service", l.Service }, { "model", l.Model }, { "runtime", l.Runtime },
-                        { "client", l.Client }, { "claimed_at", Iso(l.ClaimedAt) }, { "expires_at", Iso(l.ExpiresAt) },
+                        { "client", l.Client }, { "claimed_at", Iso(l.ClaimedAtUtc) }, { "expires_at", Iso(l.ExpiresAtUtc) },
                     }).ToList() },
                 { "observed", observed.Select(o => (object)new Dictionary<string, object>
                     {
@@ -228,7 +247,7 @@ namespace AIMeter
                         { "output_tokens", o.OutputTokens }, { "rate_limited", o.RateLimited },
                         { "last_rate_limited", o.LastRateLimited.HasValue ? Iso(o.LastRateLimited.Value) : null },
                     }).ToList() },
-                { "backoff", backoff.Where(kv => kv.Value > DateTime.Now).Select(kv => (object)new Dictionary<string, object> { { "pool", kv.Key }, { "until", Iso(kv.Value) } }).ToList() },
+                { "backoff", backoff.Where(kv => kv.Value > DateTime.UtcNow).Select(kv => (object)new Dictionary<string, object> { { "pool", kv.Key }, { "until", Iso(kv.Value) } }).ToList() },
             };
             try
             {
@@ -245,7 +264,7 @@ namespace AIMeter
         internal sealed class Lease
         {
             public string Id, Pool, Service, Model, Runtime, Client;
-            public DateTime ClaimedAt, ExpiresAt;
+            public DateTime ClaimedAtUtc, ExpiresAtUtc;
         }
 
         /// <summary>What a plugin reports when it releases a lease. Unknown values are null.</summary>
@@ -264,7 +283,7 @@ namespace AIMeter
             public DateTime Day;
             public int Ended, Unknown, Failed, RequestsUnknown, RateLimited, InFlight;
             public long Requests, InputTokens, OutputTokens;
-            public DateTime? LastRateLimited;
+            public DateTime? LastRateLimited;   // UTC in the book; local in the copies Today returns.
 
             public Observation Copy() { return (Observation)MemberwiseClone(); }
         }

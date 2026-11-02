@@ -354,18 +354,27 @@ namespace AIMeter
             }
         }
 
-        /// <summary>The latest Claude Code CLI installed by the desktop app.</summary>
-        public static string CliPath()
+        /// <summary>The Claude Code CLI on Windows, or null when it is not installed.</summary>
+        public static string CliPath() { return CliPath(Probe.Home, Probe.AppData); }
+
+        /// <summary>
+        /// The latest CLI bundled with the desktop app, then the native installer's (~\.local\bin), npm's shim and PATH.
+        /// Every one of them shares the sign-in in ~\.claude.
+        /// </summary>
+        internal static string CliPath(string home, string appData)
         {
-            string root = Path.Combine(Probe.AppData, @"Claude\claude-code");
+            string root = Path.Combine(appData, @"Claude\claude-code");
             try
             {
-                return Directory.Exists(root)
+                string bundled = Directory.Exists(root)
                     ? Directory.GetFiles(root, "claude.exe", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTime).FirstOrDefault()
                     : null;
+                if (bundled != null) return bundled;
             }
-            catch (IOException) { return null; }
-            catch (UnauthorizedAccessException) { return null; }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            return new[] { Path.Combine(home, @".local\bin\claude.exe"), Path.Combine(appData, @"npm\claude.cmd") }.FirstOrDefault(File.Exists)
+                ?? ServiceDefinition.OnPath("claude.exe") ?? ServiceDefinition.OnPath("claude.cmd");
         }
 
         /// <summary>Latest sample saved and updated by the Claude app.</summary>
