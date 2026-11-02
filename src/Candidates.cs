@@ -8,7 +8,8 @@ namespace AIMeter
 {
     /// <summary>
     /// Execution candidates (docs/plans/orchestration-contracts.md sections 2.1 and 2.4): the free models a task can run
-    /// on now, through a runtime that already holds its own key for the service, and why every other model cannot.
+    /// on now, through a coding agent on this PC that already holds its own key for the service, and why every other
+    /// model cannot. No particular agent is required: delegation uses whichever supported agents the user has.
     /// Nothing here starts a process or reserves capacity; the job runner re-checks and reserves when it starts a job.
     ///
     /// Selection is deterministic: the same snapshot and request give the same order. Models that share a pool share
@@ -30,7 +31,7 @@ namespace AIMeter
                 foreach (var m in p.Catalogue.Models)
                 {
                     string reason = Check(m, req);
-                    if (reason == null && access.Count == 0) reason = runtimes.KeyDiscoveryOff ? "key_discovery_off" : runtimes.Places.Count == 0 ? "no_runtime" : "runtime_has_no_key";
+                    if (reason == null && access.Count == 0) reason = runtimes.KeyDiscoveryOff ? "key_discovery_off" : runtimes.Found.Count == 0 ? "no_runtime" : "runtime_has_no_key";
                     if (reason == null && room.Blocking != null) reason = room.Blocking;
                     if (reason != null) { result.Exclude(p.Id, m.Id, reason, reason == room.Blocking ? room.Until : null); continue; }
                     foreach (var a in access)
@@ -40,7 +41,7 @@ namespace AIMeter
             // Known room first, most room first; then unknown room; ties by service, model and runtime place.
             result.Chosen = result.Chosen.OrderBy(c => c.Room.Ratio.HasValue ? 0 : 1).ThenByDescending(c => c.Room.Ratio ?? 0)
                 .ThenBy(c => c.Provider.Id, StringComparer.Ordinal).ThenBy(c => c.Model.Id, StringComparer.Ordinal)
-                .ThenBy(c => c.Access.Where, StringComparer.Ordinal).ToList();
+                .ThenBy(c => c.Access.Runtime, StringComparer.Ordinal).ThenBy(c => c.Access.Where, StringComparer.Ordinal).ToList();
             return result;
         }
 
@@ -85,32 +86,82 @@ namespace AIMeter
         private static readonly string Salt = Guid.NewGuid().ToString("N");
 
         /// <summary>
-        /// Where Pi is set up (its ~/.pi/agent folder, on Windows and in WSL while WSL runs) and which services it can
-        /// call with its own key: one kept in Pi's files, or in the environment Pi starts with (this process's
-        /// variables on Windows, shell-profile exports in WSL). Keys AI Meter keeps never count: it does not hand them
-        /// to a runtime. Follows the FindKeys setting, as reading these files is key discovery.
+        /// Coding agents that can run a delegated task on a free model with their own keys: the folders that show they
+        /// are set up in a home, and the program that shows they are still installed (a folder can outlive its agent).
+        /// App names the agent in KeyFinder's sources. Adding an agent here makes delegation consider it; running tasks
+        /// through it also needs its adapter in the job runner.
         /// </summary>
-        public static RuntimeScan ScanPi()
+        internal static readonly RuntimeKind[] Kinds =
+        {
+            new RuntimeKind { Id = "pi", Name = "Pi", App = "Pi", Program = "pi", Folders = new[] { @".pi\agent" } },
+            new RuntimeKind { Id = "opencode", Name = "OpenCode", App = "OpenCode", Program = "opencode", Folders = new[] { @".local\share\opencode", @".config\opencode" } },
+            new RuntimeKind { Id = "crush", Name = "Crush", App = "Crush", Program = "crush", Folders = new[] { @".config\crush", @".local\share\crush" } },
+        };
+
+        /// <summary>Where package managers put agents' programs, relative to a home.</summary>
+        private static readonly string[] HomeBins = { @".npm-global\bin", @".local\bin", @".opencode\bin", @".bun\bin", @"go\bin", @".volta\bin", @".local\share\pnpm" };
+
+        /// <summary>Linux system folders for programs, relative to the distribution's root.</summary>
+        private static readonly string[] SystemBins = { @"usr\local\bin", @"usr\bin", @"home\linuxbrew\.linuxbrew\bin" };
+
+        /// <summary>
+        /// Whether the agent's program is installed for this home. In WSL the usual Linux folders are checked through
+        /// the distribution's file share, so nothing is started inside WSL; on Windows, PATH and npm's global folder.
+        /// Node version managers that keep programs elsewhere are not covered.
+        /// </summary>
+        internal static bool Installed(RuntimeKind kind, string home, bool wsl)
+        {
+            var dirs = HomeBins.Select(b => Path.Combine(home, b)).ToList();
+            if (wsl)
+            {
+                var root = Directory.GetParent(home) == null ? null : Directory.GetParent(home).Parent;
+                if (root != null) dirs.AddRange(SystemBins.Select(b => Path.Combine(root.FullName, b)));
+                return dirs.Any(d => File.Exists(Path.Combine(d, kind.Program)));
+            }
+            dirs.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm"));
+            dirs.AddRange((Environment.GetEnvironmentVariable("PATH") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries));
+            var names = new[] { ".exe", ".cmd", ".bat", ".ps1" }.Select(x => kind.Program + x).ToList();
+            foreach (var d in dirs)
+            {
+                try { if (names.Any(n => File.Exists(Path.Combine(d.Trim(), n)))) return true; }
+                catch (ArgumentException) { }   // A malformed PATH entry.
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Which supported agents are set up (on Windows, and in WSL while WSL runs) and which services each can call
+        /// with its own key: one kept in that agent's files, or in the environment it starts with (this process's
+        /// variables on Windows, shell-profile exports in WSL). Keys AI Meter keeps never count: it does not hand them
+        /// to an agent. Follows the FindKeys setting, as reading these files is key discovery.
+        /// </summary>
+        public static RuntimeScan ScanRuntimes()
         {
             var scan = new RuntimeScan();
             var homes = new List<Tuple<string, bool>> { Tuple.Create(Probe.Home, false) };
             string wsl = Probe.WslHomeUp;
             if (wsl != null) homes.Add(Tuple.Create(wsl, true));
-            homes = homes.Where(h => Directory.Exists(Path.Combine(h.Item1, @".pi\agent"))).ToList();
-            foreach (var h in homes) scan.Places.Add(h.Item2 ? "wsl" : "windows");
+            var found = new List<Tuple<RuntimeKind, string, bool>>();
+            foreach (var kind in Kinds)
+                foreach (var h in homes.Where(h => kind.Folders.Any(f => Directory.Exists(Path.Combine(h.Item1, f))) && Installed(kind, h.Item1, h.Item2)))
+                {
+                    found.Add(Tuple.Create(kind, h.Item1, h.Item2));
+                    scan.Found.Add(new RuntimePlace { Runtime = kind.Id, Where = h.Item2 ? "wsl" : "windows" });
+                }
             if (Settings.Current == null || !Settings.Current.FindKeys) { scan.KeyDiscoveryOff = true; return scan; }
             foreach (var d in Definitions.All.Where(x => x.UsesKey))
-                foreach (var h in homes)
+                foreach (var f in found)
                 {
-                    string key = PiKey(d, h.Item1, h.Item2);
-                    if (key != null) scan.Access.Add(Access(d.Id, "pi", h.Item2 ? "wsl" : "windows", key));
+                    string key = RuntimeKey(f.Item1, d, f.Item2, f.Item3);
+                    if (key != null) scan.Access.Add(Access(d.Id, f.Item1.Id, f.Item3 ? "wsl" : "windows", key));
                 }
             return scan;
         }
 
-        private static string PiKey(ServiceDefinition d, string home, bool wsl)
+        /// <summary>The key an agent would use for a service: its own, or one from the environment it starts with.</summary>
+        private static string RuntimeKey(RuntimeKind kind, ServiceDefinition d, string home, bool wsl)
         {
-            var found = KeyFinder.SearchAll(d, home, wsl).FirstOrDefault(f => f.App == "Pi" || (wsl && f.App == "profile"));
+            var found = KeyFinder.SearchAll(d, home, wsl).FirstOrDefault(f => f.App == kind.App || (wsl && f.App == "profile"));
             if (found != null) return found.Key;
             if (wsl) return null;
             foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
@@ -145,10 +196,23 @@ namespace AIMeter
         public string Service, Runtime, Where, Credential;
     }
 
-    /// <summary>Where runtimes are set up and what they can call.</summary>
+    /// <summary>A coding agent delegation can use (see Candidates.Kinds).</summary>
+    internal sealed class RuntimeKind
+    {
+        public string Id, Name, App, Program;
+        public string[] Folders;
+    }
+
+    /// <summary>An agent set up in one place: "windows", or "wsl".</summary>
+    internal sealed class RuntimePlace
+    {
+        public string Runtime, Where;
+    }
+
+    /// <summary>Where agents are set up and what they can call.</summary>
     internal sealed class RuntimeScan
     {
-        public readonly List<string> Places = new List<string>();
+        public readonly List<RuntimePlace> Found = new List<RuntimePlace>();
         public readonly List<RuntimeAccess> Access = new List<RuntimeAccess>();
         public bool KeyDiscoveryOff;
     }

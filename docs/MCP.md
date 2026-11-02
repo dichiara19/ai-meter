@@ -86,7 +86,7 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `list_free_models` | Free models with id, context window, output limit, tool and reasoning support, last free day, how the price is known (`free`) and their limits (`limits`, see below); filters `tools`, `min_context`, `min_output_tokens` and `include_unconfirmed` |
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
-| `list_candidates` | Where a task can run now for free: free models that meet its needs, that Pi on this PC can call with its own key, and whose limits have room, in a fixed order; each pool's room; and why every other model is left out. See below |
+| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi, OpenCode or Crush) can call with its own key, and whose limits have room, in a fixed order; each pool's room; and why every other model is left out. See below |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
 
 All tools except `list_local_models` and `suggest_service` accept an optional `service` (`claude`, `openai`, `copilot`, `openrouter`…).
@@ -145,10 +145,10 @@ Each model from `list_free_models` says how its price is known and what limits a
 - `refresh` and `max_age_seconds`, as in the other tools.
 
 **A candidate is a model, a runtime and a credential.**
-- Pi is the only runtime so far. It counts on Windows and in WSL (while WSL is running) wherever its `~/.pi/agent` folder exists.
-- A model is a candidate only when Pi already has its own key for the service: in Pi's files, or in the environment Pi starts with. That means this process's variables on Windows, or shell-profile exports in WSL.
+- No particular agent is required. Delegation uses whichever supported agents are set up: Pi (`~/.pi/agent`), OpenCode (`~/.local/share/opencode` or `~/.config/opencode`) and Crush (`~/.config/crush` or `~/.local/share/crush`). An agent counts when its folder exists and its program is installed (a folder can outlive its agent). AI Meter checks the usual install folders on Windows, and in WSL while it is running, through the distribution's file share, without starting anything inside WSL. `runtimes.found` lists the agents found.
+- A model is a candidate for an agent only when that agent already has its own key for the service: in its own files, or in the environment it starts with. That means this process's variables on Windows, or shell-profile exports in WSL. Each agent with a key is a separate candidate, and they all share the same pool.
 - Keys saved in AI Meter do not count: AI Meter never hands a key to a runtime.
-- With *Use API keys already on the PC* turned off, AI Meter cannot check Pi's keys, and says so.
+- With *Use API keys already on the PC* turned off, AI Meter cannot check the agents' keys, and says so.
 - `credential` is an opaque id (`cred_…`): the same key gives the same id while AI Meter runs. It is never the key, its file or the account.
 
 **Order.**
@@ -165,13 +165,13 @@ Each model from `list_free_models` says how its price is known and what limits a
 | `price_not_confirmed` | The service does not state a zero price, and the policy is `free_only` |
 | `no_tools`, `tools_unknown` | The task needs tool calls; the model has none, or its list does not say |
 | `context_too_small`, `context_unknown`, `output_too_small`, `output_unknown` | The task needs more than the model takes, or the limit is not stated |
-| `no_runtime` | Pi is not set up on Windows, nor in a running WSL |
-| `runtime_has_no_key` | Pi has no key of its own for this service |
-| `key_discovery_off` | Key discovery is turned off, so Pi's keys cannot be checked |
+| `no_runtime` | No supported agent is set up on Windows, nor in a running WSL |
+| `runtime_has_no_key` | No agent that is set up has a key of its own for this service |
+| `key_discovery_off` | Key discovery is turned off, so the agents' keys cannot be checked |
 | `rate_limited` | The service answered "too many requests"; `until` is when AI Meter may ask again |
 | `exhausted` | A counter the service reports is used up; `until` is its reset |
 
-AI Meter sees only the rate limits of its own reads and the counters services report. Rate limits hit by Pi during a task are counted once AI Meter runs the task itself.
+AI Meter sees only the rate limits of its own reads and the counters services report. Rate limits an agent hits during a task are counted once AI Meter runs the task itself.
 
 ## Fresh data
 

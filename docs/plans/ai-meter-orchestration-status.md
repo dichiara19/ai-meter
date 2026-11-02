@@ -65,6 +65,14 @@ Three things the PR marked as unverified are still unverified after the release,
 
 ## Log
 
+- **2026-11-02, M3 made agent-independent; coordinator plugins read.**
+  - The maintainer asked that delegation depend on no particular agent. M3's runtime scan became a table of supported agents (`Candidates.Kinds`): Pi, OpenCode and Crush, found by their folders plus their installed program, and counted with their own keys only. A first live scan reported `opencode@wsl` from a leftover configuration folder; requiring the program fixed that, and the scan now finds only `pi@wsl` here. `list_candidates` reports `runtimes.found`. The ADR (decision 4), the plan, the contracts, CONTRIBUTING and docs/MCP.md were amended.
+  - New test: two agents with keys are separate candidates in a fixed order, sharing one pool. 106 passed.
+  - The coordinator plugins were read at pinned commits (plan, *Spikes*). Claude Code → Codex (official) drives `codex app-server` through an intermediary Sonnet subagent. Codex → Claude Code (community only) runs `claude -p` directly.
+  - **Known flaky test.** "A client that disconnects abruptly leaves the MCP pipe serving" timed out once in three runs; it predates M3.
+    - Hypothesis: after `IOException` the pipe host sleeps 5 s before creating a new instance, the same as the test's connect timeout.
+    - To fix separately.
+
 - **2026-11-02, M3 in progress.**
   - **Selection.** `src/Candidates.cs` selects execution candidates: model, runtime and credential.
     - Filters: price policy (`free_only` or `free_or_unconfirmed`), tool calls, context and output minimums, Pi holding its own key for the service.

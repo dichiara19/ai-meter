@@ -15,8 +15,9 @@ namespace AIMeter
         {
             test("Candidates keep confirmed free models a runtime can call, ordered by known room", OrderAndPolicy);
             test("Task needs, pools, backoff and used-up counters exclude candidates with their reasons", Exclusions);
+            test("Every agent with its own key is a candidate, sharing the same pool", SeveralAgents);
             test("The same request gives the same order whatever the order of services", Deterministic);
-            test("Pi counts only its own keys; credential ids match the same key and hide it", PiKeys);
+            test("Each agent counts only its own keys; credential ids match the same key and hide it", AgentKeys);
             test("list_candidates reports candidates, pools once, exclusions and runtimes", CandidatesTool);
         }
 
@@ -62,7 +63,7 @@ namespace AIMeter
         private static RuntimeScan Pi()
         {
             var scan = new RuntimeScan();
-            scan.Places.Add("wsl");
+            scan.Found.Add(new RuntimePlace { Runtime = "pi", Where = "wsl" });
             foreach (var s in new[] { "openrouter", "experientiallabs", "nvidia" }) scan.Access.Add(Candidates.Access(s, "pi", "wsl", "key-" + s + "-0123456789"));
             return scan;
         }
@@ -110,8 +111,21 @@ namespace AIMeter
 
             Assert(Excluded(Candidates.Select(Fixture(10), new RuntimeScan(), new Requirements(), DateTime.Now), "openrouter").Reason == "no_runtime", "A missing runtime was not the reason.");
             var off = new RuntimeScan { KeyDiscoveryOff = true };
-            off.Places.Add("windows");
+            off.Found.Add(new RuntimePlace { Runtime = "opencode", Where = "windows" });
             Assert(Excluded(Candidates.Select(Fixture(10), off, new Requirements(), DateTime.Now), "openrouter").Reason == "key_discovery_off", "Key discovery being off was not the reason.");
+        }
+
+        private static void SeveralAgents()
+        {
+            NetworkBackoff.Clear();
+            var scan = Pi();
+            scan.Found.Add(new RuntimePlace { Runtime = "opencode", Where = "windows" });
+            scan.Access.Add(Candidates.Access("openrouter", "opencode", "windows", "key-openrouter-0123456789"));
+            var s = Candidates.Select(Fixture(10), scan, new Requirements { Service = "openrouter" }, DateTime.Now);
+            var places = s.Chosen.Select(c => c.Model.Id + "@" + c.Access.Runtime + "/" + c.Access.Where).ToList();
+            Assert(places.SequenceEqual(new[] { "a/small:free@opencode/windows", "a/small:free@pi/wsl", "z/large:free@opencode/windows", "z/large:free@pi/wsl" }),
+                "Each agent with a key should be a candidate, in a fixed order: " + string.Join(", ", places));
+            Assert(s.Chosen.Select(c => c.Pool).Distinct().Count() == 1 && s.Chosen.All(c => c.Room.MaxNewJobs == 1), "Two agents doubled the pool's room.");
         }
 
         private static void Deterministic()
@@ -139,21 +153,40 @@ namespace AIMeter
             return home;
         }
 
-        private static void PiKeys()
+        private static void AgentKeys()
         {
             var d = ServiceDefinition.FromJson("{ \"id\": \"openrouter\", \"name\": \"OpenRouter\", \"auth\": { \"type\": \"key\", \"ids\": [\"openrouter\"], \"env\": [\"OPENROUTER_API_KEY\"] } }", "test");
-            var piKey = typeof(Candidates).GetMethod("PiKey", BindingFlags.Static | BindingFlags.NonPublic);
+            var runtimeKey = typeof(Candidates).GetMethod("RuntimeKey", BindingFlags.Static | BindingFlags.NonPublic);
+            var pi = Candidates.Kinds.Single(k => k.Id == "pi");
+            var openCode = Candidates.Kinds.Single(k => k.Id == "opencode");
+            Func<RuntimeKind, string, object> piKeyIn = (kind, home) => runtimeKey.Invoke(null, new object[] { kind, d, home, true });
             // Both apps keep a key: every key is listed with its app, in the order Find prefers.
             var both = Home(@".local\share\opencode\auth.json", "{ \"openrouter\": { \"type\": \"api\", \"key\": \"sk-or-v1-opencode-0123456789\" } }",
                             @".pi\agent\auth.json", "{ \"openrouter\": { \"type\": \"api_key\", \"key\": \"sk-or-v1-pi-0123456789\" } }");
             var all = KeyFinder.SearchAll(d, both, true).ToList();
             Assert(all.Count == 2 && all[0].App == "OpenCode" && all[1].App == "Pi" && all.All(f => f.Wsl), "Keys were not listed with their apps.");
-            Assert((string)piKey.Invoke(null, new object[] { d, both, true }) == "sk-or-v1-pi-0123456789", "Pi was given another app's key.");
+            Assert((string)piKeyIn(pi, both) == "sk-or-v1-pi-0123456789", "Pi was given another app's key.");
+            Assert((string)piKeyIn(openCode, both) == "sk-or-v1-opencode-0123456789", "OpenCode was not given its own key.");
 
             var openCodeOnly = Home(@".local\share\opencode\auth.json", "{ \"openrouter\": { \"type\": \"api\", \"key\": \"sk-or-v1-opencode-0123456789\" } }");
-            Assert(piKey.Invoke(null, new object[] { d, openCodeOnly, true }) == null, "A key Pi does not have counted as Pi's.");
+            Assert(piKeyIn(pi, openCodeOnly) == null, "A key Pi does not have counted as Pi's.");
+            Assert(piKeyIn(openCode, openCodeOnly) != null, "OpenCode's own key was not found.");
             var profile = Home(".bashrc", "export OPENROUTER_API_KEY=sk-or-v1-profile-0123456789\n");
-            Assert((string)piKey.Invoke(null, new object[] { d, profile, true }) == "sk-or-v1-profile-0123456789", "A WSL profile export Pi inherits was not counted.");
+            Assert((string)piKeyIn(pi, profile) == "sk-or-v1-profile-0123456789" && (string)piKeyIn(openCode, profile) == "sk-or-v1-profile-0123456789",
+                "A WSL profile export every agent inherits was not counted.");
+            Assert(Candidates.Kinds.Select(k => k.Id).SequenceEqual(new[] { "pi", "opencode", "crush" }), "The supported agents changed without updating this test.");
+
+            // A configuration folder can outlive its agent: the program must be installed too (checked without starting WSL).
+            string root = Path.Combine(Settings.Folder, "distro-" + Guid.NewGuid().ToString("N"));
+            string user = Path.Combine(root, @"home\someone");
+            Directory.CreateDirectory(Path.Combine(user, @".config\opencode"));
+            Assert(!Candidates.Installed(openCode, user, true), "A leftover folder counted as an installed agent.");
+            Directory.CreateDirectory(Path.Combine(root, @"usr\local\bin"));
+            File.WriteAllText(Path.Combine(root, @"usr\local\bin\opencode"), "");
+            Assert(Candidates.Installed(openCode, user, true), "A program in /usr/local/bin was not found.");
+            Directory.CreateDirectory(Path.Combine(user, @".npm-global\bin"));
+            File.WriteAllText(Path.Combine(user, @".npm-global\bin\pi"), "");
+            Assert(Candidates.Installed(pi, user, true), "A program in the npm global folder was not found.");
 
             var a = Candidates.Access("openrouter", "pi", "wsl", "same-key-0123456789");
             var b = Candidates.Access("openrouter", "pi", "windows", "same-key-0123456789");
@@ -179,7 +212,8 @@ namespace AIMeter
             Assert(Json.Num(router, "models") == 2 && Json.Num(router, "max_new_jobs_now") == 1 && Json.Num(router, "remaining_share") == 0.8, "The shared pool is wrong.");
             var excluded = ((IList)content["excluded"]).OfType<Dictionary<string, object>>().ToList();
             Assert(excluded.Any(e => Json.Str(e, "service") == "nvidia" && Json.Str(e, "reason") == "price_not_confirmed" && Json.Num(e, "count") == 1), "An exclusion lacks its reason.");
-            Assert(Json.Obj(content, "freshness") != null && ((IList)Json.Obj(content, "runtimes")["pi"]).Count == 1, "Freshness or runtimes are missing.");
+            var found = ((IList)Json.Obj(content, "runtimes")["found"]).OfType<Dictionary<string, object>>().Single();
+            Assert(Json.Obj(content, "freshness") != null && Json.Str(found, "name") == "pi" && Json.Str(found, "where") == "wsl", "Freshness or runtimes are missing.");
 
             var bad = Json.Obj(Json.Obj(Json.Parse(server.Handle("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_candidates\",\"arguments\":{\"cost_policy\":\"anything\"}}}")), "result"), "structuredContent");
             Assert(bad.ContainsKey("error"), "An unknown cost policy was accepted.");

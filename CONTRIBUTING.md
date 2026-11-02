@@ -51,7 +51,7 @@ Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypas
 
 **Running tasks** (planned, see [ADR 0001](docs/adr/0001-optional-agent-orchestration.md))
 
-Delegating tasks to a local runtime such as Pi is a separate, optional responsibility, and it does not loosen the rules above. Work on it must keep these limits:
+Delegating tasks to a local coding agent (whichever the user has, such as Pi or OpenCode) is a separate, optional responsibility, and it does not loosen the rules above. Work on it must keep these limits:
 - It is off by default, and it needs its own switch plus a workspace folder the user authorised. Permission to find keys covers monitoring only.
 - AI Meter never installs a runtime. It never sends a key to a runtime or to any host other than that key's own service. The runtime's model requests use the runtime's own sign-in.
 - MCP tools never return keys, tokens or account identities. Job tools appear only while running tasks is turned on.

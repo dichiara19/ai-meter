@@ -30,16 +30,17 @@ The rules must not be quietly stretched. Monitoring and execution must stay sepa
    - Job tools (`start_job`, `get_job`, `list_jobs`, `cancel_job`, `get_job_result`) appear in `tools/list` only while execution is on.
    - No tool ever returns a key, a token or an account identity. Credentials appear only as opaque references.
 3. **AI Meter does not perform inference and does not hand credentials to the runtime in the MVP.**
-   - The runtime (Pi) calls the model provider with its own configuration and sign-in.
+   - The runtime (the coding agent that runs the task) calls the model provider with its own configuration and sign-in.
    - A candidate model is eligible only if the runtime is already authenticated for that provider.
    - Keys found in other apps (`FindKeys`) authorise monitoring only, never execution.
    - Passing a stored key to a runtime would need a later ADR.
-4. **Runtimes are detected, never installed.**
-   - AI Meter finds the installed Pi and its version, shows what is missing, and offers an explicit setup action.
+4. **No particular agent is required; runtimes are detected, never installed.**
+   - Delegation uses whichever supported coding agents the user already has. Each agent gets an adapter, and adding one does not change the job engine. Without any agent, monitoring and every read tool keep working, and `list_candidates` says that no runtime is available. (Amended 2026-11-02: the first draft named Pi as the executor.)
+   - AI Meter finds the installed agents and their versions, shows what is missing, and offers an explicit setup action.
    - No MCP read and no job installs anything.
    - In WSL, a runtime is used only while WSL is already running.
 5. **The core stays C# 5 / .NET Framework 4.8 with no NuGet or Node.**
-   - Pi, a Node program, runs as a separate child process.
+   - Agents such as Pi, OpenCode or Codex run as separate child processes, through their own non-interactive interface.
    - Two shapes are considered for the runner: inside `AIMeter.exe`, or a second executable built from the same sources by `build.ps1`. The M4 spike chooses between them.
    - The runner must:
      - own its process trees through a Windows job object;
@@ -70,7 +71,7 @@ The rules must not be quietly stretched. Monitoring and execution must stay sepa
 
 ## Alternatives considered
 
-- **Leave delegation entirely to the coordinator.** Coordinators can already start Pi through a shell. They would not see quota freshness, free-model status or account scope, so routing would stay guesswork. This is still the fallback if the spikes fail.
+- **Leave delegation entirely to the coordinator.** Coordinators can already start an agent through a shell, as the Codex and Claude Code plugins do (see the plan, *Spikes*). They would not see quota freshness, free-model status or account scope, so routing would stay guesswork. This is still the fallback if the spikes fail.
 - **A Node or NuGet-based runner inside the WPF process.** Rejected: it breaks the dependency rule and couples the UI to the runtime.
 - **Pass discovered keys to the runtime through environment variables.** Rejected for the MVP. It would turn monitoring consent into execution consent and widen where secrets travel.
 - **Execution in a second product.** It would duplicate collection and settings. One app with an opt-in boundary is simpler.

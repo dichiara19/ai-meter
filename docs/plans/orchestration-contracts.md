@@ -158,7 +158,8 @@ With no known concurrency limit, `max_new_jobs_now` is at most 1.
 
 M3 implements this section in `src/Candidates.cs` and `list_candidates`; [docs/MCP.md](../MCP.md#choosing-where-to-run-a-task-list_candidates) is the reference. The differences from this draft:
 - The cost policies are `free_only` and `free_or_unconfirmed`. A paid policy waits until model lists carry prices for paid models.
-- `CredentialReference` is the `credential` id with its runtime and place. The source app is not returned, since only Pi's own keys count.
+- `CredentialReference` is the `credential` id with its runtime and place. The source app is not returned, since only each agent's own keys count.
+- Runtimes are a table of supported agents (Pi, OpenCode, Crush), not a single one: no particular agent is required.
 - The `observed` counters and reservations come with the runner (M4).
 
 **`list_candidates` (M3, read tool).** It takes the same `requirements` and `cost_policy` as `start_job`. It returns the ordered candidates, each with its `limits` and `headroom`, plus the reason each excluded candidate was dropped.

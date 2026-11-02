@@ -135,7 +135,7 @@ namespace AIMeter
                 Tool("list_local_models", "Models loaded by local servers such as Ollama, LM Studio and llama.cpp, on Windows and WSL, " +
                      "with memory, context and activity.", new Dictionary<string, object> { { "refresh", localRefresh } }, false),
                 Tool("list_candidates", "Where a task can run now for free: free models that meet the task's needs, that a coding agent " +
-                     "on this PC (Pi) can already call with its own key, and whose limits have room. Ordered by the room left in each " +
+                     "on this PC (Pi, OpenCode or Crush, whichever are set up) can already call with its own key, and whose limits have room. Ordered by the room left in each " +
                      "model's pool, most first, then models whose room is unknown; the same request gives the same order. pools gives " +
                      "how many new tasks each pool can take now: models in one pool share it. excluded says why every other model " +
                      "cannot be used. Nothing is started or reserved.",
@@ -538,7 +538,11 @@ namespace AIMeter
             return new Dictionary<string, object>
             {
                 { "candidates", candidates }, { "pools", pools }, { "excluded", excluded },
-                { "runtimes", new Dictionary<string, object> { { "pi", scan.Places.Cast<object>().ToList() }, { "key_discovery", !scan.KeyDiscoveryOff } } },
+                { "runtimes", new Dictionary<string, object>
+                    {
+                        { "found", scan.Found.Select(r => (object)new Dictionary<string, object> { { "name", r.Runtime }, { "where", r.Where } }).ToList() },
+                        { "key_discovery", !scan.KeyDiscoveryOff },
+                    } },
             };
         }
 
