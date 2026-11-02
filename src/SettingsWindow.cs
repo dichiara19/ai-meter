@@ -40,6 +40,7 @@ namespace AIMeter
             new[] { "display", "", "Where to see it" },
             new[] { "notifications", "", "Notifications" },
             new[] { "history", "", "Usage history" },
+            new[] { "apps", "", "AI apps" },
             new[] { "general", "", "General" },
             new[] { "about", "", "About" },
         };
@@ -110,6 +111,7 @@ namespace AIMeter
             else if (current == "display") BuildDisplay();
             else if (current == "notifications") BuildNotifications();
             else if (current == "history") BuildHistory();
+            else if (current == "apps") BuildApps();
             else if (current == "general") BuildGeneral();
             else if (current == "about") BuildAbout();
             else BuildServices();

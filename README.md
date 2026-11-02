@@ -76,6 +76,7 @@ Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now,
 | **Desktop widget** | Off by default. Always stays *below* your windows, like part of the wallpaper. Compact cards; click a card header to show its sessions. Drag it by its header. |
 | **Compact overlay** | A tiny always-on-top pill (off by default) with two micro buttons: collapse to a live ring icon, or close. Never steals focus, hides itself during full-screen games, videos and presentations, shows details on hover. |
 | **Settings** | Built like Windows 11 Settings: connected services, what to show, where, start with Windows, theme, refresh rate, live resource usage. |
+| **AI apps (MCP)** | Claude Desktop, Claude Code, Codex, Gemini CLI, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's read-only MCP server. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
 | **Usage history** | Local quota cycles, spending, session tokens, models and tools, daily totals and consumption signals. Optional feedback records whether the result was worth the consumption. Open from the notification-area menu or Settings → Usage history. |
 
 For each service: remaining share of the **5-hour** and **weekly** limits with reset times, plus the active sessions with title, model and status.
@@ -178,6 +179,8 @@ src/Sqlite.cs          read-only SQLite reader for local agent databases
 src/ProviderLocal.cs   local model servers: discovery on Windows and WSL, loaded models, memory, context
 src/CodingAgents.cs    sessions of terminal coding agents (OpenCode, Pi, Gemini CLI, Qwen Code, …)
 src/RunningAgents.cs   session folders named by running Pi processes (Windows and WSL /proc)
+src/McpServer.cs       read-only MCP server on a per-user named pipe, with its tools
+src/McpClients.cs      AI apps that can use it, their config edits, and the mcp.ps1 relay they start
 src/GpuMemory.cs       video memory per process from the Windows GPU counters
 src/Forecast.cs        when each limit runs out at the current pace; low-limit and reset notifications, tips
 src/HistoryCollector.cs incremental, read-only local usage capture
@@ -242,6 +245,7 @@ Network connections are limited to reading your own usage:
 - **OpenRouter, Vercel AI Gateway, Experiential Labs, DeepSeek, Kimi**: a request to `openrouter.ai`, `ai-gateway.vercel.sh`, `api.experientiallabs.ai`, `api.deepseek.com` or `api.moonshot.ai` with your API key, only if you turn the service on and a key is added or found on the PC. For OpenRouter and Experiential Labs, AI Meter also reads the model list every six hours to show the free models (OpenRouter's is public and gets no key; Experiential Labs' needs the key). Click the free models count to list them all; a click on a model copies its id. Keys saved by other programs are looked for only if you allow it on the first-launch screen or in Settings → Services; a key found there is read where it is, never copied, and sent only to its own service; values that are commands (`!…` in Pi) are never run.
 - **Definitions you add**: a request to the address named in the file.
 - **Local models**: requests to `127.0.0.1` only, which never leave the PC.
+- **AI apps (MCP)**: apps you connect in Settings → AI apps read AI Meter's latest data through a named pipe that only your Windows user can open. Nothing leaves the PC because of it, but what an app reads can reach that app's model provider as part of your conversation. Keys, tokens and account identities are never shared; session titles only if you turn on *Share session titles*.
 
 With these off, AI Meter makes no network connections at all.
 
