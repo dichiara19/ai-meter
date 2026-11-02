@@ -214,7 +214,6 @@ namespace AIMeter
             return scan;
         }
 
-        /// <summary>The key an agent would use for a service: its own, or one from the environment it starts with.</summary>
         /// <summary>
         /// The key an agent would use for a service: its own, or one from the environment it starts with. Alias is the
         /// provider id the agent keeps it under, when it is in the agent's own files.

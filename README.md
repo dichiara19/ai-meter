@@ -76,7 +76,7 @@ Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now,
 | **Desktop widget** | Off by default. Always stays *below* your windows, like part of the wallpaper. Compact cards; click a card header to show its sessions. Drag it by its header. |
 | **Compact overlay** | A tiny always-on-top pill (off by default) with two micro buttons: collapse to a live ring icon, or close. Never steals focus, hides itself during full-screen games, videos and presentations, shows details on hover. |
 | **Settings** | Built like Windows 11 Settings: connected services, what to show, where, start with Windows, theme, refresh rate, live resource usage. |
-| **AI apps (MCP)** | Claude Desktop, Claude Code, Codex, Antigravity CLI, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's read-only MCP server. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
+| **AI apps (MCP)** | Claude Desktop, Claude Code, Codex, Antigravity CLI, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's MCP server, which changes nothing except its own `leases.json` when coding agents lease capacity. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
 | **Usage history** | Local quota cycles, spending, session tokens, models and tools, daily totals and consumption signals. Optional feedback records whether the result was worth the consumption. Open from the notification-area menu or Settings → Usage history. |
 
 For each service: remaining share of the **5-hour** and **weekly** limits with reset times, plus the active sessions with title, model and status.
@@ -180,7 +180,7 @@ src/Sqlite.cs          read-only SQLite reader for local agent databases
 src/ProviderLocal.cs   local model servers: discovery on Windows and WSL, loaded models, memory, context
 src/CodingAgents.cs    sessions of terminal coding agents (OpenCode, Pi, Gemini CLI, Qwen Code, …)
 src/RunningAgents.cs   session folders named by running Pi processes (Windows and WSL /proc)
-src/McpServer.cs       read-only MCP server on a per-user named pipe, with its tools
+src/McpServer.cs       MCP server on a per-user named pipe, with its tools (only leases write)
 src/McpClients.cs      AI apps that can use it, their config edits, and the mcp.ps1 relay they start
 src/GpuMemory.cs       video memory per process from the Windows GPU counters
 src/Forecast.cs        when each limit runs out at the current pace; low-limit and reset notifications, tips

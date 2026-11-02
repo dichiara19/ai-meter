@@ -255,6 +255,8 @@ namespace AIMeter
     {
         private readonly Probe probe;
         private readonly List<Provider> providers;
+        private readonly HashSet<string> failing = new HashSet<string>();   // Providers whose last read threw, already logged.
+        private readonly Dictionary<string, string> names = new Dictionary<string, string>();   // Card names from the last good reads.
 
         public Collector(Settings settings)
         {
@@ -262,6 +264,13 @@ namespace AIMeter
             providers = new List<Provider> { new ClaudeProvider(settings), new CodexProvider(settings), new CopilotProvider(settings), new AntigravityProvider(settings) };
             foreach (var d in Definitions.All) providers.Add(new DefinedProvider(d));
             providers.Add(new LocalProvider(settings));
+        }
+
+        /// <summary>A collector of the given providers only, for tests.</summary>
+        internal Collector(Settings settings, List<Provider> providers)
+        {
+            probe = new Probe(settings);
+            this.providers = providers;
         }
 
         public bool WslUp { get { return probe.WslUp; } }
@@ -287,11 +296,33 @@ namespace AIMeter
             foreach (var p in providers)
             {
                 if (!p.Enabled(probe.S)) continue;
-                try { snap.Providers.Add(p.Collect(probe)); }
-                catch (Exception ex) { Trace.WriteLine(p.Id + ": " + ex); }   // A faulty service does not stop the others.
+                try
+                {
+                    var state = p.Collect(probe);
+                    snap.Providers.Add(state);
+                    failing.Remove(p.Id);
+                    if (state.Name != null) names[p.Id] = state.Name;
+                }
+                catch (Exception ex) { snap.Providers.Add(Failed(p.Id, ex)); }   // A faulty service does not stop the others.
             }
             PlaceAgentSessions(snap);
             return snap;
+        }
+
+        /// <summary>
+        /// The card of a provider whose read threw: it stays in place with a notice instead of vanishing. The error is
+        /// logged once until a read succeeds again, so a provider that fails every cycle does not fill the log.
+        /// </summary>
+        private ProviderState Failed(string id, Exception ex)
+        {
+            if (failing.Add(id)) Program.LogError("collect-" + id, ex);
+            string name;
+            if (!names.TryGetValue(id, out name))
+            {
+                var definition = Definitions.Get(id);
+                name = definition != null ? definition.Name : id;
+            }
+            return new ProviderState { Id = id, Name = name, Notice = L.T("Could not read this service: see errors.log") };
         }
 
         // Agent provider ids for the services implemented in code; defined services use their key ids ("auth.ids").

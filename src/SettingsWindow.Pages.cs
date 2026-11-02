@@ -142,7 +142,7 @@ namespace AIMeter
                     Combo(new[] { Tuple.Create("auto", L.T("Automatic")), Tuple.Create("low", L.T("Maximum saving")) }, S.Refresh, v => { S.Refresh = v; Changed(); })));
             Section(L.T("Windows Subsystem for Linux"));
             Group(Row(Ui.Glyph("", 20, "Text"), L.T("WSL distribution"), L.T("Where to look for Claude Code and Codex installed in Linux. AI Meter never starts WSL: it reads it only if it is already running."),
-                Combo(new[] { S.WslDistro }.Concat(WslDistros()).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => Tuple.Create(x, x)).ToArray(), S.WslDistro,
+                Combo(new[] { S.WslDistro }.Concat(Settings.WslDistros()).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => Tuple.Create(x, x)).ToArray(), S.WslDistro,
                       v => { S.WslDistro = v; Changed(); })));
         }
 
@@ -161,22 +161,6 @@ namespace AIMeter
                     L.T("Show invented figures to preview AI Meter without signing in to any service. Not saved: real data returns at the next start."),
                     Toggle(Program.Demo, v => C.SetSampleData(v))));
             UpdateStats();
-        }
-
-        private static string[] WslDistros()
-        {
-            try
-            {
-                using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Lxss"))
-                {
-                    if (k == null) return new string[0];
-                    return k.GetSubKeyNames().Select(n =>
-                    {
-                        using (var d = k.OpenSubKey(n)) return d == null ? null : d.GetValue("DistributionName") as string;
-                    }).Where(n => n != null && !n.StartsWith("docker-desktop", StringComparison.OrdinalIgnoreCase)).ToArray();
-                }
-            }
-            catch (Exception) { return new string[0]; }
         }
     }
 }
