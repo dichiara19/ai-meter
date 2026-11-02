@@ -40,12 +40,12 @@ The first version targets Windows. It uses WSL only when WSL is already running.
 | ID | Deliverable / branch | Depends on | Exit criteria |
 | --- | --- | --- | --- |
 | M0 | Baseline, ADR, contracts, epic issue / `docs/agent-orchestration-plan` | — | SHAs and versions recorded; boundaries updated in CONTRIBUTING and SECURITY; MVP scope decided |
-| M1 | MCP freshness / `feat/mcp-freshness` | M0 | Real clients verified on Windows and WSL; refresh bypasses the right caches; timeout and concurrency tested; Settings → AI apps and the Store relay path verified |
+| M1 | MCP freshness / `feat/mcp-freshness` | M0 | Real clients verified on Windows and WSL; refresh bypasses the right caches; timeout and concurrency tested; Settings → AI apps verified. The Store relay path moved to M6 |
 | M2 | NVIDIA and Gemini discovery, catalogues and free-model limits / `feat/provider-discovery` | M0, M1 contract | Keys found with fixtures; catalogues independent of quotas; `list_free_models` returns `limits` and `pool` for every free model of every supported provider, with source and `checked_at`; documented limits live in the provider JSON; unknown stays unknown |
 | M3 | Quota-aware candidate selection / `feat/execution-candidates` | M1, M2 | `list_candidates` with `headroom`; selection is deterministic; per-request caps filter; pools never add up; `free_only`, quota scope and `429` tested |
 | M4 | Pi spike, then runner MVP / `feat/agent-jobs` | M0; M3 for real routing | A job can be started, watched and cancelled; isolation and restart verified |
 | M5 | Claude Code and Codex adapters / `feat/client-delegation` | M4 | One real task from each client, in the foreground or background where supported, with result and cancellation |
-| M6 | Stabilisation, UX, packaging, release candidate | M1–M5 | End-to-end tests; upgrade from 0.8.6 verified; artefacts verified; version decided |
+| M6 | Stabilisation, UX, packaging, release candidate | M1–M5 | End-to-end tests; upgrade from 0.8.6 verified; artefacts verified, including the MCP relay in the Store package; version decided |
 
 M1 and M2 can proceed independently after M0. A coding agent works on one milestone at a time unless it is explicitly told otherwise.
 

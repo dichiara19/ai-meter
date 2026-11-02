@@ -11,7 +11,7 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | Milestone | State | Branch / PR | Base / head SHA | Tests and evidence | Blockers / next action |
 | --- | --- | --- | --- | --- | --- |
 | M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
-| M1 MCP freshness | in_progress | `feat/mcp-freshness`, draft [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / working tree after `f778d85` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps | Store relay path: **NOT RUN**. Gemini CLI is discontinued (replaced by Antigravity CLI, `agy`): a separate PR updates AI apps. Then move the PR out of draft |
+| M1 MCP freshness | in_review | [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / `f3f3aeb` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. Trial merge of #18, #19 and #20 on `main`: no conflicts, 97 tests passed | Store relay path deferred to M6 (maintainer decision, 2026-11-02). Next: merge #18, then #19 and #20 |
 | M2 Provider discovery | planned | `feat/provider-discovery` | — | — | Needs the M1 freshness contract |
 | M3 Execution candidates | planned | `feat/execution-candidates` | — | — | Needs M1 and M2 |
 | M4 Pi spike and runner MVP | planned | `feat/agent-jobs` | — | — | Spike first. Real routing needs M3 |
@@ -64,6 +64,12 @@ Three things the PR marked as unverified are still unverified after the release,
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M1 ready for review.**
+  - The maintainer deferred the Store package relay check to M6, with packaging, and asked to continue towards the complete system.
+  - A trial merge of #18, #19 (Antigravity CLI in AI apps) and #20 (copy confirmation) on `main` had no conflicts. On the combined tree, `tests/run.ps1` passed 97 tests and the build compiled.
+  - Recommended merge order: #18, #19, #20, each squash-merged.
+  - M2 starts on a branch stacked on `feat/mcp-freshness`. It is rebased onto `main` once #18 is merged.
 
 - **2026-11-02, M1 live check with Antigravity CLI.** The maintainer pointed out that Gemini CLI no longer exists: Antigravity CLI (`agy`) replaces it.
   - **Version.** `agy` 1.4.12 is installed in WSL only.
