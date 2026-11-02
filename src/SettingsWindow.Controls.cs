@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -144,6 +146,81 @@ namespace AIMeter
             b.SetResourceReference(FrameworkElement.StyleProperty, accent ? "AccentButton" : "StdButton");
             b.Click += (o, e) => click();
             return b;
+        }
+
+        /// <summary>The label and timer of a button that is showing "Copied".</summary>
+        private sealed class CopiedState { public object Label; public double MinWidth; public DispatcherTimer Timer; }
+
+        /// <summary>A check mark and "Copied", shown on a copy button after a successful copy.</summary>
+        private static FrameworkElement CopiedContent()
+        {
+            var content = new StackPanel { Orientation = Orientation.Horizontal };
+            var check = Ui.Glyph("", 12, "Text");
+            check.Margin = new Thickness(0, 0, 6, 0);
+            content.Children.Add(check);
+            content.Children.Add(new TextBlock { Text = L.T("Copied"), VerticalAlignment = VerticalAlignment.Center });
+            return content;
+        }
+
+        /// <summary>
+        /// Give a copy button, once laid out, room for both its label and the "Copied" confirmation, so showing the
+        /// confirmation never moves the buttons beside it. Measuring both contents draws nothing.
+        /// </summary>
+        internal static void ReserveCopiedWidth(Button button)
+        {
+            RoutedEventHandler loaded = null;
+            loaded = (o, e) =>
+            {
+                button.Loaded -= loaded;
+                button.MinWidth = Math.Max(button.MinWidth, CopiedWidth(button));
+            };
+            button.Loaded += loaded;
+        }
+
+        /// <summary>The width a button needs for the wider of its label and the "Copied" confirmation.</summary>
+        internal static double CopiedWidth(Button button)
+        {
+            // A new content invalidates only the presenter inside the button's template; a direct Measure of the
+            // button would return the size cached for the previous content. UpdateLayout runs the pending layout
+            // from the presenter up, as rendering would, and draws nothing in between.
+            var label = button.Content;
+            button.Content = CopiedContent();
+            button.UpdateLayout();
+            double copied = button.DesiredSize.Width;
+            button.Content = label;
+            button.UpdateLayout();
+            return Math.Max(copied, button.DesiredSize.Width);
+        }
+
+        /// <summary>
+        /// Confirm a copy on the button itself: for a moment it reads "Copied" with a check mark, then returns to its
+        /// label. Screen readers hear the change as a live region. Clicking again while it shows "Copied" restarts
+        /// the moment. Use ReserveCopiedWidth so the wider confirmation does not shift the row.
+        /// </summary>
+        internal static void ShowCopied(Button button, TimeSpan duration)
+        {
+            var state = button.Tag as CopiedState;
+            if (state == null)
+            {
+                state = new CopiedState { Label = button.Content, MinWidth = button.MinWidth, Timer = new DispatcherTimer { Interval = duration } };
+                button.Tag = state;
+                state.Timer.Tick += (o, e) =>
+                {
+                    state.Timer.Stop();
+                    button.Tag = null;
+                    button.Content = state.Label;
+                    button.MinWidth = state.MinWidth;
+                    button.ClearValue(AutomationProperties.NameProperty);
+                };
+                button.MinWidth = Math.Max(state.MinWidth, button.ActualWidth);
+                button.Content = CopiedContent();
+                AutomationProperties.SetName(button, L.T("Copied"));
+                AutomationProperties.SetLiveSetting(button, AutomationLiveSetting.Polite);
+                var peer = UIElementAutomationPeer.FromElement(button) ?? UIElementAutomationPeer.CreatePeerForElement(button);
+                if (peer != null) peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+            }
+            state.Timer.Stop();
+            state.Timer.Start();
         }
 
         private static ComboBox Combo(Tuple<string, string>[] options, string selected, Action<string> changed)
