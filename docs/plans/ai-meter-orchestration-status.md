@@ -13,7 +13,7 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
 | M1 MCP freshness | in_review | [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / `f3f3aeb` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. Trial merge of #18, #19 and #20 on `main`: no conflicts, 97 tests passed | Store relay path deferred to M6 (maintainer decision, 2026-11-02). Next: merge #18, then #19 and #20 |
 | M2 Provider discovery | in_progress | `feat/provider-discovery`, stacked on `feat/mcp-freshness` | `5eacffc` / not yet pushed | `tests/run.ps1`: 100 passed (5 new). `build.ps1 -NoInstall` compiled. Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: **NOT RUN**. Rebase onto `main` after #18 |
-| M3 Execution candidates | planned | `feat/execution-candidates` | — | — | Needs M1 and M2 |
+| M3 Execution candidates | in_progress | `feat/execution-candidates`, stacked on `feat/provider-discovery` | `3411e33` / not yet pushed | `tests/run.ps1`: 105 passed (5 new). Live Pi scan on this PC | Rebase onto `main` after #18 and #21 |
 | M4 Pi spike and runner MVP | planned | `feat/agent-jobs` | — | — | Spike first. Real routing needs M3 |
 | M5 Client delegation | planned | `feat/client-delegation` | — | — | Needs M4 |
 | M6 Stabilisation and release candidate | planned | — | — | — | Needs M1–M5 |
@@ -64,6 +64,26 @@ Three things the PR marked as unverified are still unverified after the release,
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M3 in progress.**
+  - **Selection.** `src/Candidates.cs` selects execution candidates: model, runtime and credential.
+    - Filters: price policy (`free_only` or `free_or_unconfirmed`), tool calls, context and output minimums, Pi holding its own key for the service.
+    - Exclusions: the service's `429` backoff and used-up reported counters.
+    - Order: known room first, by the remaining share of the pool's tightest known limit; then unknown room, one task at a time; ties by ids, so the result is deterministic.
+    - Exclusions are grouped with reasons and `until`.
+  - **MCP.** `list_candidates` returns `candidates`, `pools` (each pool once, never added up), `excluded`, `runtimes` and `freshness`. Headroom in `list_free_models` now uses the same `Candidates.Room`.
+  - **Credentials.** `KeyFinder.FindAll` and `SearchAll` list every key with its app and whether it is in WSL. This covers code point 7: several keys, and where each came from.
+  - **Pi.** It is found by its `~/.pi/agent` folder. Only its own keys count, and its environment: process variables on Windows, profile exports in WSL.
+  - **Credential ids.** A salted, truncated SHA-256 (`cred_…`). The same key gives the same id within one run; the salt changes at every start.
+  - **Tests.** Five new:
+    - order and price policy;
+    - task needs, shared pools, a used-up counter, `429` backoff, missing runtime and key discovery off;
+    - deterministic order regardless of input order;
+    - Pi taking only its own keys, and credential ids;
+    - the MCP answer, which never contains a key.
+  - **Live on this PC.** Pi is set up in WSL with its own keys for OpenRouter and Experiential Labs. It has none for NVIDIA or Gemini.
+  - **Not run:** a live `list_candidates` call through the relay, because OpenRouter and Experiential Labs are turned off in this PC's settings, so they have no catalogue.
+  - **Deferred:** declaring a key free-tier in Settings (a `configured` free status), and a paid cost policy.
 
 - **2026-11-02, M2 in progress.**
   - **Research.** A research agent read the official documentation and made keyless calls, with each fact sourced. What it found:

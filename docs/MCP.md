@@ -86,6 +86,7 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `list_free_models` | Free models with id, context window, output limit, tool and reasoning support, last free day, how the price is known (`free`) and their limits (`limits`, see below); filters `tools`, `min_context`, `min_output_tokens` and `include_unconfirmed` |
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
+| `list_candidates` | Where a task can run now for free: free models that meet its needs, that Pi on this PC can call with its own key, and whose limits have room, in a fixed order; each pool's room; and why every other model is left out. See below |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
 
 All tools except `list_local_models` and `suggest_service` accept an optional `service` (`claude`, `openai`, `copilot`, `openrouter`…).
@@ -132,6 +133,45 @@ Each model from `list_free_models` says how its price is known and what limits a
   - Without a known concurrency limit, `max_new_jobs_now` is at most 1.
   - AI Meter decides how many tasks start. It does not pace the requests a running agent makes.
   - Counters of AI Meter's own tasks arrive with the task runner.
+
+### Choosing where to run a task: `list_candidates`
+
+`list_candidates` answers "where can this task run now, for free, and how many tasks can start?". It starts nothing and reserves nothing.
+
+**Arguments:**
+- `tools`, `min_context` and `min_output_tokens`: what the task needs;
+- `service`: only this service;
+- `cost_policy`: `free_only` (default) admits only models whose list states a zero price. `free_or_unconfirmed` also admits models whose price the service does not state, such as NVIDIA and Gemini models;
+- `refresh` and `max_age_seconds`, as in the other tools.
+
+**A candidate is a model, a runtime and a credential.**
+- Pi is the only runtime so far. It counts on Windows and in WSL (while WSL is running) wherever its `~/.pi/agent` folder exists.
+- A model is a candidate only when Pi already has its own key for the service: in Pi's files, or in the environment Pi starts with. That means this process's variables on Windows, or shell-profile exports in WSL.
+- Keys saved in AI Meter do not count: AI Meter never hands a key to a runtime.
+- With *Use API keys already on the PC* turned off, AI Meter cannot check Pi's keys, and says so.
+- `credential` is an opaque id (`cred_…`): the same key gives the same id while AI Meter runs. It is never the key, its file or the account.
+
+**Order.**
+1. Candidates whose pool has known room come first, most room first. The room is the remaining share of the pool's tightest limit with a known value.
+2. Candidates whose room is unknown come next, one task at a time.
+3. Ties are broken by service, model and place, so the same request always gives the same order.
+
+**`pools`** gives each pool once, with `max_new_jobs_now`, `remaining_share` and `binding_limit`. Models in one pool share it, so plan by pool, not by model.
+
+**`excluded`** groups the other models by service and reason, with `until` when the reason ends at a known time:
+
+| `reason` | Meaning |
+|---|---|
+| `price_not_confirmed` | The service does not state a zero price, and the policy is `free_only` |
+| `no_tools`, `tools_unknown` | The task needs tool calls; the model has none, or its list does not say |
+| `context_too_small`, `context_unknown`, `output_too_small`, `output_unknown` | The task needs more than the model takes, or the limit is not stated |
+| `no_runtime` | Pi is not set up on Windows, nor in a running WSL |
+| `runtime_has_no_key` | Pi has no key of its own for this service |
+| `key_discovery_off` | Key discovery is turned off, so Pi's keys cannot be checked |
+| `rate_limited` | The service answered "too many requests"; `until` is when AI Meter may ask again |
+| `exhausted` | A counter the service reports is used up; `until` is its reset |
+
+AI Meter sees only the rate limits of its own reads and the counters services report. Rate limits hit by Pi during a task are counted once AI Meter runs the task itself.
 
 ## Fresh data
 

@@ -37,13 +37,15 @@ namespace AIMeter
         private readonly Func<bool> titlesAllowed;
         private readonly RefreshGate gate;   // Null when refreshing is not possible, as in tests of the plain reads.
         private readonly TimeSpan timeout;
+        private readonly Func<RuntimeScan> runtimes;
 
-        public McpServer(Func<Snapshot> snapshot, Func<bool> titlesAllowed, RefreshGate gate = null, TimeSpan? timeout = null)
+        public McpServer(Func<Snapshot> snapshot, Func<bool> titlesAllowed, RefreshGate gate = null, TimeSpan? timeout = null, Func<RuntimeScan> runtimes = null)
         {
             this.snapshot = snapshot;
             this.titlesAllowed = titlesAllowed;
             this.gate = gate;
             this.timeout = timeout ?? RefreshGate.DefaultTimeout;
+            this.runtimes = runtimes ?? (() => new RuntimeScan());
         }
 
         /// <summary>Handle one JSON-RPC message; returns the response line, or "" for a notification.</summary>
@@ -132,6 +134,22 @@ namespace AIMeter
                      new Dictionary<string, object> { { "service", service }, { "refresh", refresh("their usage") }, { "max_age_seconds", maxAge("their usage") } }, true),
                 Tool("list_local_models", "Models loaded by local servers such as Ollama, LM Studio and llama.cpp, on Windows and WSL, " +
                      "with memory, context and activity.", new Dictionary<string, object> { { "refresh", localRefresh } }, false),
+                Tool("list_candidates", "Where a task can run now for free: free models that meet the task's needs, that a coding agent " +
+                     "on this PC (Pi) can already call with its own key, and whose limits have room. Ordered by the room left in each " +
+                     "model's pool, most first, then models whose room is unknown; the same request gives the same order. pools gives " +
+                     "how many new tasks each pool can take now: models in one pool share it. excluded says why every other model " +
+                     "cannot be used. Nothing is started or reserved.",
+                     new Dictionary<string, object>
+                     {
+                         { "service", service },
+                         { "tools", Property("boolean", "The task needs tool calls.") },
+                         { "min_context", Property("integer", "Smallest context window the task needs, in tokens.") },
+                         { "min_output_tokens", Property("integer", "Smallest reply size the task needs, in tokens.") },
+                         { "cost_policy", new Dictionary<string, object> { { "type", "string" }, { "enum", new List<object> { Candidates.FreeOnly, Candidates.FreeOrUnconfirmed } },
+                             { "description", "free_only (default): only models whose list states a zero price. free_or_unconfirmed: also models whose price the service does not state." } } },
+                         { "refresh", refresh("their limits") },
+                         { "max_age_seconds", maxAge("their limits") },
+                     }, true),
                 Tool("suggest_service", "Services ordered by the room left in their tightest limit, to choose where to run the next task, " +
                      "with the number of free models each one offers. Services whose limits are unknown come after those with known room.",
                      new Dictionary<string, object> { { "refresh", refresh("their limits") }, { "max_age_seconds", maxAge("their limits") } }, true),
@@ -157,7 +175,7 @@ namespace AIMeter
 
         private static readonly Dictionary<string, Scope> Scopes = new Dictionary<string, Scope>
         {
-            { "get_limits", Scope.Usage }, { "get_spend", Scope.Usage }, { "suggest_service", Scope.Usage },
+            { "get_limits", Scope.Usage }, { "get_spend", Scope.Usage }, { "suggest_service", Scope.Usage }, { "list_candidates", Scope.Usage },
             { "list_free_models", Scope.Catalogue }, { "list_sessions", Scope.Local }, { "list_local_models", Scope.Local },
         };
 
@@ -170,6 +188,9 @@ namespace AIMeter
             bool refresh = Json.Bool(args, "refresh");
             double? maxAge = Json.Num(args, "max_age_seconds");
             if (maxAge < 0) return ToolResult(new Dictionary<string, object> { { "error", "max_age_seconds cannot be negative." } }, true);
+            string policy = Json.Str(args, "cost_policy") ?? Candidates.FreeOnly;
+            if (policy != Candidates.FreeOnly && policy != Candidates.FreeOrUnconfirmed)
+                return ToolResult(new Dictionary<string, object> { { "error", "cost_policy must be free_only or free_or_unconfirmed." } }, true);
 
             string service = Json.Str(args, "service");
             Func<Snapshot, List<ProviderState>> pick = s => s.Providers.Where(p => p.Models == null && (name == "suggest_service" || service == null ||
@@ -207,9 +228,19 @@ namespace AIMeter
                     break;
                 case "get_spend": result = Spend(providers); break;
                 case "list_local_models": result = LocalModels(snap.Providers); break;
+                case "list_candidates":
+                    result = CandidatesJson(Candidates.Select(snap, runtimes(), new Requirements
+                    {
+                        Service = service, Tools = Json.Bool(args, "tools"), MinContext = (long)(Json.Num(args, "min_context") ?? 0),
+                        MinOutput = (long)(Json.Num(args, "min_output_tokens") ?? 0), CostPolicy = policy,
+                    }, DateTime.Now), runtimes());
+                    break;
                 default: result = Suggest(snap.Providers); break;
             }
-            var content = new Dictionary<string, object> { { "updated_at", Time(snap.Taken) }, { "sample_data", Program.Demo }, { ResultKey(name), result } };
+            var content = new Dictionary<string, object> { { "updated_at", Time(snap.Taken) }, { "sample_data", Program.Demo } };
+            var parts = result as Dictionary<string, object>;
+            if (parts != null) foreach (var kv in parts) content[kv.Key] = kv.Value;   // list_candidates has several parts.
+            else content[ResultKey(name)] = result;
             bool requested = refresh || maxAge.HasValue;
             if (scope == Scope.Local)
             {
@@ -460,23 +491,55 @@ namespace AIMeter
         /// </summary>
         internal static Dictionary<string, object> Headroom(string service, IList<RateLimit> rates)
         {
-            var d = new Dictionary<string, object>();
-            DateTime wait = NetworkBackoff.Until(service);
-            var exhausted = rates.FirstOrDefault(r => r.Remaining.HasValue && r.Remaining.Value <= 0);
-            if (wait > DateTime.Now) d["blocking"] = new Dictionary<string, object> { { "reason", "rate_limited" }, { "until", Time(wait) } };
-            else if (exhausted != null)
+            return RoomJson(Candidates.Room(service, rates, DateTime.Now));
+        }
+
+        private static Dictionary<string, object> RoomJson(PoolRoom room)
+        {
+            Dictionary<string, object> blocking = null;
+            if (room.Blocking != null)
             {
-                var b = new Dictionary<string, object> { { "reason", "exhausted" }, { "metric", exhausted.Metric } };
-                if (exhausted.ResetsAt.HasValue) b["until"] = Time(exhausted.ResetsAt.Value);
-                d["blocking"] = b;
+                blocking = new Dictionary<string, object> { { "reason", room.Blocking } };
+                if (room.Metric != null) blocking["metric"] = room.Metric;
+                if (room.Until.HasValue) blocking["until"] = Time(room.Until.Value);
             }
-            else d["blocking"] = null;
-            bool can = d["blocking"] == null;
-            var concurrency = rates.FirstOrDefault(r => r.Metric == "concurrent_requests" && r.Limit.HasValue);
-            int max = !can ? 0 : concurrency == null ? 1 : (int)Math.Max(0, concurrency.Limit.Value - (concurrency.Used ?? 0));
-            d["can_start_now"] = can && max > 0;
-            d["max_new_jobs_now"] = max;
+            var d = new Dictionary<string, object> { { "blocking", blocking }, { "can_start_now", room.CanStart }, { "max_new_jobs_now", room.MaxNewJobs } };
+            if (room.Ratio.HasValue)
+            {
+                d["remaining_share"] = Math.Round(room.Ratio.Value, 3);
+                d["binding_limit"] = room.BindingMetric;
+            }
             return d;
+        }
+
+        /// <summary>list_candidates: the ordered candidates, each pool's room once, the exclusions and the runtimes found.</summary>
+        private static Dictionary<string, object> CandidatesJson(Selection s, RuntimeScan scan)
+        {
+            var candidates = s.Chosen.Select(c => (object)new Dictionary<string, object>
+            {
+                { "service", c.Provider.Id }, { "model", c.Model.Id }, { "name", c.Model.Name },
+                { "runtime", new Dictionary<string, object> { { "name", c.Access.Runtime }, { "where", c.Access.Where } } },
+                { "credential", c.Access.Credential }, { "pool", c.Pool }, { "free", FreeJson(c.Model.Free) }, { "limits", LimitsJson(c.Provider, c.Model) },
+            }).ToList();
+            var pools = s.Chosen.GroupBy(c => c.Pool).Select(g =>
+            {
+                var d = RoomJson(g.First().Room);
+                d["pool"] = g.Key;
+                d["service"] = g.First().Provider.Id;
+                d["models"] = g.Select(c => c.Model.Id).Distinct().Count();
+                return (object)d;
+            }).ToList();
+            var excluded = s.Excluded.Select(e =>
+            {
+                var d = new Dictionary<string, object> { { "service", e.Service }, { "reason", e.Reason }, { "count", e.Models.Count }, { "models", e.Models.Take(10).Cast<object>().ToList() } };
+                if (e.Until.HasValue) d["until"] = Time(e.Until.Value);
+                return (object)d;
+            }).ToList();
+            return new Dictionary<string, object>
+            {
+                { "candidates", candidates }, { "pools", pools }, { "excluded", excluded },
+                { "runtimes", new Dictionary<string, object> { { "pi", scan.Places.Cast<object>().ToList() }, { "key_discovery", !scan.KeyDiscoveryOff } } },
+            };
         }
 
         private static List<object> Spend(IEnumerable<ProviderState> providers)

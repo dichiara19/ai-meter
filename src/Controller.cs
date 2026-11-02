@@ -111,7 +111,7 @@ namespace AIMeter
             // The relay is written at every start, so it names this copy and exists before anyone adds AI Meter with an
             // agent's own "mcp add" command.
             refreshGate = new RefreshGate((id, catalogue) => collector.Invalidate(id, catalogue), () => wake.Set(), () => paused);
-            mcpHost = new McpPipeHost(new McpServer(() => refreshGate.Newest(Last), () => Settings.McpTitles, refreshGate));
+            mcpHost = new McpPipeHost(new McpServer(() => refreshGate.Newest(Last), () => Settings.McpTitles, refreshGate, null, Candidates.ScanPi));
             mcpHost.Start();
             try { McpRelay.Write(); } catch (Exception ex) { Program.LogError("mcp-relay", ex); }
 
