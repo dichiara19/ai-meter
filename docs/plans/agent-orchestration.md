@@ -2,7 +2,7 @@
 
 The plan for taking AI Meter from reading usage to controlled delegation:
 - a coordinator (Claude Code or Codex) hands a bounded task to a local executor that uses a free model;
-- the first executor is Pi;
+- the executor is whichever supported coding agent the user already has: no particular one is required;
 - AI Meter picks the model from what it knows about quotas and free catalogues, then lets the coordinator watch, read and cancel the job.
 
 | Document | Contents |
@@ -23,13 +23,13 @@ This file is a plan. Nothing here exists in code until a milestone's pull reques
   - concurrency;
   - the shared pool the model draws from.
 - OpenRouter, Experiential Labs, NVIDIA API Catalog and Gemini Developer API.
-- Delegation to a full executor, Pi first, with status, result and cancellation.
+- Delegation to a full executor, with status, result and cancellation. Delegation is offered according to the agents the user has: one adapter per agent, none required.
 - Claude Code and Codex as coordinators, in the foreground or background where the client supports it.
 - No promised savings without measuring the coordinator, any intermediary, the executor and the checks.
 
 ## Architecture
 
-One job engine, one Pi execution adapter, provider adapters, and thin client integrations. AI Meter keeps collection and the UI.
+One job engine, one execution adapter per supported agent, provider adapters, and thin client integrations. AI Meter keeps collection and the UI.
 
 The runner is optional and local, and its exact shape comes from the M4 spike ([ADR 0001](../adr/0001-optional-agent-orchestration.md), decision 5).
 
@@ -43,7 +43,7 @@ The first version targets Windows. It uses WSL only when WSL is already running.
 | M1 | MCP freshness / `feat/mcp-freshness` | M0 | Real clients verified on Windows and WSL; refresh bypasses the right caches; timeout and concurrency tested; Settings → AI apps verified. The Store relay path moved to M6 |
 | M2 | NVIDIA and Gemini discovery, catalogues and free-model limits / `feat/provider-discovery` | M0, M1 contract | Keys found with fixtures; catalogues independent of quotas; `list_free_models` returns `limits` and `pool` for every free model of every supported provider, with source and `checked_at`; documented limits live in the provider JSON; unknown stays unknown |
 | M3 | Quota-aware candidate selection / `feat/execution-candidates` | M1, M2 | `list_candidates` with `headroom`; selection is deterministic; per-request caps filter; pools never add up; `free_only`, quota scope and `429` tested |
-| M4 | Pi spike, then runner MVP / `feat/agent-jobs` | M0; M3 for real routing | A job can be started, watched and cancelled; isolation and restart verified |
+| M4 | Agent spike, then runner MVP / `feat/agent-jobs` | M0; M3 for real routing | A job can be started, watched and cancelled; isolation and restart verified |
 | M5 | Claude Code and Codex adapters / `feat/client-delegation` | M4 | One real task from each client, in the foreground or background where supported, with result and cancellation |
 | M6 | Stabilisation, UX, packaging, release candidate | M1–M5 | End-to-end tests; upgrade from 0.8.6 verified; artefacts verified, including the MCP relay in the Store package; version decided |
 
@@ -54,7 +54,7 @@ A milestone may land as several small pull requests. Read-side improvements do n
 **MVP for M4:**
 1. a read-only job;
 2. a modifying job that runs its tests in a worktree;
-3. Pi already installed.
+3. At least two agents behind the same adapter interface (Pi, already installed, and a second one), so the interface is not shaped around one agent.
 
 Not in the MVP:
 - a universal installer;
@@ -67,7 +67,20 @@ Not in the MVP:
 
 Each spike records the version tested and what it observed, in the status log.
 
-- **Pi.**
+- **Coordinator plugins (read 2026-11-02).** These show the two ways agents are driven today.
+  - **Claude Code → Codex.** [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) at `db52e28`, official.
+    - `/codex:rescue` starts a real Claude Code subagent (`codex:codex-rescue`, on Sonnet, with only Bash), which makes one Bash call to `codex-companion.mjs task`.
+    - That script starts **`codex app-server`**, Codex's JSON-RPC protocol over stdio (`thread/start`, `turn/start`, `turn/interrupt`, `thread/resume`), optionally through a shared broker on a local socket.
+    - Background jobs are a detached `task-worker` process with job files, read by `/codex:status`, `/codex:result` and `/codex:cancel`.
+    - So Codex is driven indirectly, through its server protocol, and the intermediary subagent costs tokens.
+  - **Codex → Claude Code.** No official plugin; several community ones: `pejmanjohn/cc-plugin-codex` (`9445dcb`), `lzhgus/cc-plugin-codex` (`b198c3d`), `andiradulescu/cc-plugin-codex` (`244b83a`), `KewkLW/codex-plugin-claude` (`e02c81b`), `farmage/codex-plugin-claude-subagent` (`d686e91`).
+    - They all launch the `claude` CLI directly in headless mode: `claude -p … --output-format json` or `stream-json`.
+    - Background jobs are a detached process writing a log.
+  - **Consequences.**
+    - `codex app-server` and `claude -p` are candidate adapter interfaces next to Pi's and OpenCode's.
+    - These plugins delegate to another paid agent, not to free models. Whether Codex can run free models through an OpenAI-compatible provider is still to be checked.
+    - A lighter route is also possible: AI Meter chooses the model and pool (`list_candidates`) and counts consumption, while the coordinators' own plugins run the task. Weigh it against the runner owned by AI Meter before building M4.
+- **Agents (Pi first, as it is installed here; then at least one more).**
   - Pick the structured interface available in the pinned version.
   - Check events, EOF, errors, cancellation, resume and the usage it reports.
   - Check whether it exposes per-request counts, rate-limit responses and a way to cap output or pace requests.

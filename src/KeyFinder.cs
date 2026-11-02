@@ -15,7 +15,8 @@ namespace AIMeter
     /// </summary>
     internal static class KeyFinder
     {
-        internal sealed class Found { public string Key, Source; }
+        /// <summary>A discovered key: Source is the display text; App ("OpenCode", "Pi", "Crush" or "profile") and Wsl say where.</summary>
+        internal sealed class Found { public string Key, Source, App; public bool Wsl; }
 
         /// <summary>App name, home-relative path and JSON value path, with {id} standing for a service alias.</summary>
         private static readonly string[][] Sources =
@@ -51,7 +52,24 @@ namespace AIMeter
 
         public static void Forget() { lock (cache) cache.Clear(); }
 
-        private static Found Search(ServiceDefinition d, string home, bool wsl)
+        /// <summary>
+        /// Every key for the service, on Windows and in WSL while it runs, in the order Find prefers them. The same key
+        /// kept by several apps appears once per app; callers that need accounts compare the keys. Follows FindKeys.
+        /// </summary>
+        public static List<Found> FindAll(ServiceDefinition d)
+        {
+            var list = new List<Found>();
+            if (d == null || !d.UsesKey || Settings.Current == null || !Settings.Current.FindKeys) return list;
+            list.AddRange(SearchAll(d, Probe.Home, false));
+            string wsl = Probe.WslHomeUp;
+            if (wsl != null) list.AddRange(SearchAll(d, wsl, true));
+            return list;
+        }
+
+        private static Found Search(ServiceDefinition d, string home, bool wsl) { return SearchAll(d, home, wsl).FirstOrDefault(); }
+
+        /// <summary>Keys in one home, lazily: taking the first one reads no further files.</summary>
+        internal static IEnumerable<Found> SearchAll(ServiceDefinition d, string home, bool wsl)
         {
             var ids = ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id).ToList();
             string where = wsl ? " (WSL)" : "";
@@ -62,16 +80,15 @@ namespace AIMeter
                 foreach (var id in ids)
                 {
                     string v = Resolve(JPath.Str(JPath.Get(doc, s[2].Replace("{id}", id))), home, wsl);
-                    if (v != null) return new Found { Key = v, Source = s[0] + where };
+                    if (v != null) { yield return new Found { Key = v, Source = s[0] + where, App = s[0], Wsl = wsl }; break; }
                 }
             }
             // Read exports from WSL or Windows Git Bash shell profiles.
             foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
             {
                 string v = FromProfiles(name, home);
-                if (Plausible(v)) return new Found { Key = v, Source = L.T("shell profile") + where };
+                if (Plausible(v)) { yield return new Found { Key = v, Source = L.T("shell profile") + where, App = "profile", Wsl = wsl }; break; }
             }
-            return null;
         }
 
         /// <summary>Resolve a literal key or environment reference, without executing commands.</summary>

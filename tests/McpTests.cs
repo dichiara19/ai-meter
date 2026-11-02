@@ -110,7 +110,7 @@ namespace AIMeter
 
             Assert(server.Handle("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}") == "", "A notification received an answer.");
             var tools = (IList)Json.Obj(Reply(server, "{\"jsonrpc\":\"2.0\",\"id\":\"t\",\"method\":\"tools/list\"}"), "result")["tools"];
-            Assert(tools.Count == 6, "Unexpected tool count.");
+            Assert(tools.Count == 7, "Unexpected tool count.");
             Assert(tools.OfType<Dictionary<string, object>>().All(t => Json.Bool(Json.Obj(t, "annotations"), "readOnlyHint")), "A tool is not marked read-only.");
 
             var missing = Json.Obj(Reply(server, "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\"}"), "error");
