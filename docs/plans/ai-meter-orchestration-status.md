@@ -14,7 +14,7 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | M1 MCP freshness | in_review | [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / `f3f3aeb` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. Trial merge of #18, #19 and #20 on `main`: no conflicts, 97 tests passed | Store relay path deferred to M6 (maintainer decision, 2026-11-02). Next: merge #18, then #19 and #20 |
 | M2 Provider discovery | in_progress | `feat/provider-discovery`, stacked on `feat/mcp-freshness` | `5eacffc` / not yet pushed | `tests/run.ps1`: 100 passed (5 new). `build.ps1 -NoInstall` compiled. Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: **NOT RUN**. Rebase onto `main` after #18 |
 | M3 Execution candidates | in_progress | `feat/execution-candidates`, stacked on `feat/provider-discovery` | `3411e33` / not yet pushed | `tests/run.ps1`: 105 passed (5 new). Live Pi scan on this PC | Rebase onto `main` after #18 and #21 |
-| M4 Dispatch descriptions and capacity leases | planned | `feat/dispatch-leases` | — | — | Agent spike first: Pi and a second agent, non-interactive, on a free model |
+| M4 Dispatch descriptions and capacity leases | in_progress | `feat/dispatch-leases`, stacked on `docs/delegation-plugins` | `c844bc2` / not yet pushed | Pi verified live in WSL; OpenCode verified live in WSL and on Windows ([spike-agents.md](spike-agents.md)) | Write the dispatch table and the leases |
 | M5 Claude Code and Codex plugins | planned | `feat/coordinator-plugins` | — | — | Needs M4 |
 | M6 Stabilisation and release candidate | planned | — | — | — | Needs M1–M5 |
 
@@ -64,6 +64,32 @@ Three things the PR marked as unverified are still unverified after the release,
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M4 spike: OpenCode, and Windows.**
+  - **Requirement.** The maintainer required delegation to work for coordinators run natively on Windows, without WSL.
+  - **Install.** OpenCode 1.19.5 was installed with npm, with the maintainer's agreement, in WSL and on Windows. The maintainer added the OpenRouter key in both places.
+  - **WSL and Windows behave the same:**
+    - the task goes through stdin, which must be closed, otherwise OpenCode waits;
+    - JSONL events: `step_start`, `text`, `tool_use`, `step_finish` (tokens), `error`;
+    - exit code 1 with an `error` event on failure;
+    - `--agent plan` is read-only;
+    - `SIGINT` / `SIGTERM` in WSL and `taskkill /T` on Windows stop it, leaving no process.
+  - **Isolation.** Without the isolation variables, OpenCode loaded 65 user skills (24,927 input tokens for "OK") and called a paid small model to title the session. With them: 9,655 tokens, and only the free model.
+  - **Packaged apps.** The first Windows install landed in the Claude app's MSIX-virtualised `AppData` and was invisible to the user. Plugins must find agents in their real paths and never install them; M6 checks this from AI Meter's Store package.
+  - **WSL.** npm-installed agents are on the PATH only in a login shell.
+
+- **2026-11-02, M4 agent spike.**
+  - **Pi 1.4.0, live in WSL, on OpenRouter free models.**
+    - `pi -p --mode json` takes the task on stdin and writes JSONL events: `session` … `agent_settled`.
+    - The outcome is in `stopReason`. The exit code was 0 for a provider error.
+    - One `turn_end` per request. The read task made 3 requests and used about 4.8k tokens, about 4.6k of them system prompt.
+    - `SIGINT` and `SIGTERM` stop it at once with no final event, exit codes 130 and 143, and leave no process behind.
+    - RPC `abort` answers in 0.2 s with `aborted`. Tokens are 0 in both cases.
+    - The first try on `google/gemma-4-31b-it:free` fell from a `429` to the user's BYOK Google key, which answered `402` with credits depleted. So a `:free` model can be billed to the user's own provider.
+    - `pi auth check --json` reports readiness without the key.
+  - **Codex 0.163.0.** Its `codex exec` flags are verified (stdin, `--json`, `-s`, `-C`, `--ephemeral`, `-c`, `--oss`). No free-model run, because no key is exported for it and AI Meter passes none.
+  - **OpenCode.** Its documented flags are recorded; it is not installed here.
+  - Details in [spike-agents.md](spike-agents.md). No code yet.
 
 - **2026-11-02, delegation through coordinator plugins.**
   - The maintainer chose plugins over a runner owned by AI Meter. [ADR 0002](../adr/0002-delegation-through-coordinator-plugins.md) supersedes ADR 0001 decisions 2, 5, 6 and 7.

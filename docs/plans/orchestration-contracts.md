@@ -198,7 +198,8 @@ Output:
 }
 ```
 
-- The description comes from a data table per agent, one row per verified version range. The M4 spike fills it, and nothing is written from memory.
+- The description comes from a data table per agent, one row per verified version range. The M4 spike fills it, and nothing is written from memory. [spike-agents.md](spike-agents.md) has the first row (Pi 1.x).
+- Besides the fields above, each row says how to tell the end (Pi: `agent_settled`), where the outcome is (Pi: the last assistant `stopReason`, not the exit code), how to count requests and tokens, and how to stop the agent.
 - `arguments` is an array. The plugin starts the program without a shell and passes the task as data, through stdin or a single argument, as `task_input` says. There is no field for an arbitrary command, and the task text never enters the description.
 - `where: "wsl"` means the plugin starts the agent inside WSL, which must already be running. AI Meter never starts WSL.
 - An agent without a verified row returns `unsupported`, and the reason.
