@@ -190,7 +190,7 @@ namespace AIMeter
                 var price = Json.Obj(m, "pricing");
                 if (id == null || price == null || id.StartsWith("openrouter/", StringComparison.Ordinal)) continue;
                 if (JPath.Num(Json.Str(price, "prompt")) != 0 || JPath.Num(Json.Str(price, "completion")) != 0) continue;
-                var f = new FreeModel { Id = id, Name = Json.Str(m, "name") ?? id, Context = (long)(Json.Num(m, "context_length") ?? 0), Expires = Day(Json.Str(m, "expiration_date")), Free = FreeStatus.ZeroPrice };
+                var f = new FreeModel { Id = id, Name = Json.Str(m, "name") ?? id, Context = (long)(Json.Num(m, "context_length") ?? 0), Expires = Json.Day(Json.Str(m, "expiration_date")), Free = FreeStatus.ZeroPrice };
                 if (f.Expires.HasValue && f.Expires.Value < today) continue;
                 var arch = Json.Obj(m, "architecture");
                 // Media generators such as Lyria list zero token prices but are not chat models.
@@ -206,16 +206,6 @@ namespace AIMeter
             }
             // Expiring models first, soonest first; then by name.
             return list.OrderBy(f => f.Expires ?? DateTime.MaxValue).ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
-        }
-
-        /// <summary>"2026-10-31" as a calendar day; other ISO forms through Json.FromIso.</summary>
-        private static DateTime? Day(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return null;
-            DateTime d;
-            if (DateTime.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d)) return d.Date;
-            var t = Json.FromIso(s);
-            return t.HasValue ? t.Value.Date : (DateTime?)null;
         }
 
         /// <summary>"today", "tomorrow" or "31 Dec".</summary>

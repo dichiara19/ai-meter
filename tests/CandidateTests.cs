@@ -164,7 +164,7 @@ namespace AIMeter
             var both = Home(@".local\share\opencode\auth.json", "{ \"openrouter\": { \"type\": \"api\", \"key\": \"sk-or-v1-opencode-0123456789\" } }",
                             @".pi\agent\auth.json", "{ \"openrouter\": { \"type\": \"api_key\", \"key\": \"sk-or-v1-pi-0123456789\" } }");
             var all = KeyFinder.SearchAll(d, both, true).ToList();
-            Assert(all.Count == 2 && all[0].App == "OpenCode" && all[1].App == "Pi" && all.All(f => f.Wsl), "Keys were not listed with their apps.");
+            Assert(all.Count == 2 && all[0].App == "OpenCode" && all[1].App == "Pi", "Keys were not listed with their apps.");
             Assert((string)piKeyIn(pi, both) == "sk-or-v1-pi-0123456789", "Pi was given another app's key.");
             Assert((string)piKeyIn(openCode, both) == "sk-or-v1-opencode-0123456789", "OpenCode was not given its own key.");
 

@@ -101,14 +101,23 @@ namespace AIMeter
             }
             else
             {
-                string exe = Path.Combine(Probe.Home, @".local\bin\agy.exe");
-                if (!File.Exists(exe)) exe = Path.Combine(Probe.LocalAppData, @"Programs\Antigravity CLI\agy.exe");
-                if (!File.Exists(exe)) return false;
+                string exe = CliPath();
+                if (exe == null) return false;
                 Probe.Run(exe, "models", 70000, null);
             }
             string again;
             token = Token(p, out again);
             return token != null;
+        }
+
+        /// <summary>Antigravity CLI on Windows, or null when it is not installed.</summary>
+        public static string CliPath() { return CliPath(Probe.Home, Probe.LocalAppData); }
+
+        /// <summary>The installer's folders (~\.local\bin, then Programs\Antigravity CLI), then PATH.</summary>
+        internal static string CliPath(string home, string localAppData)
+        {
+            return new[] { Path.Combine(home, @".local\bin\agy.exe"), Path.Combine(localAppData, @"Programs\Antigravity CLI\agy.exe") }.FirstOrDefault(File.Exists)
+                ?? ServiceDefinition.OnPath("agy.exe") ?? ServiceDefinition.OnPath("agy.cmd");
         }
 
         /// <summary>"2026-10-27T19:10:44.851940758+01:00": up to 9 decimal places, while .NET reads at most 7.</summary>

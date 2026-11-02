@@ -20,6 +20,7 @@ namespace AIMeter
         private Usage live;
         private string livePlan;
         private DateTime fetchedAt = DateTime.MinValue;
+        private bool programFound = true;   // False once a live read found no codex program; the card says so.
 
         public CodexProvider(Settings s) { S = s; }
 
@@ -70,8 +71,9 @@ namespace AIMeter
             if (p.AllowNetwork && (DateTime.Now - fetchedAt).TotalMinutes >= interval)
             {
                 fetchedAt = DateTime.Now;
-                string plan;
-                var fresh = FetchLive(out plan);
+                string exe = CodexPath(), plan = null;
+                programFound = exe != null;
+                var fresh = exe == null ? null : FetchLive(exe, out plan);
                 if (fresh != null) { live = fresh; livePlan = plan; }
             }
             Tuple<Usage, string> logged = null;
@@ -83,41 +85,45 @@ namespace AIMeter
                 st.Plan = livePlan;
             }
             else if (logged != null) { st.Usage = logged.Item1; st.Plan = logged.Item2; }
+            if (!programFound) st.Notice = L.T("Codex was not found on this PC: limits from local logs only");
             return st;
         }
 
         // Live limits through codex app-server.
-        /// <summary>Find the ChatGPT/Codex bundled executable, falling back to PATH.</summary>
-        public static string CodexPath()
+        /// <summary>The Codex program on Windows, or null when it is not installed.</summary>
+        public static string CodexPath() { return CodexPath(Probe.LocalAppData, Probe.AppData); }
+
+        /// <summary>
+        /// The ChatGPT/Codex app's bundled codex.exe, then the one npm unpacks under node_modules\@openai, then PATH and
+        /// npm's codex.cmd shim. The real executable comes first: app-server talks over stdin and stdout, which a shim
+        /// started through cmd.exe would sit in between.
+        /// </summary>
+        internal static string CodexPath(string localAppData, string appData)
+        {
+            var found = new[] { Path.Combine(localAppData, @"OpenAI\Codex\bin"), Path.Combine(appData, @"npm\node_modules\@openai") }
+                .Select(root => Latest(root, "codex.exe")).FirstOrDefault(f => f != null);
+            if (found != null) return found;
+            string shim = Path.Combine(appData, @"npm\codex.cmd");
+            return ServiceDefinition.OnPath("codex.exe") ?? (File.Exists(shim) ? shim : null) ?? ServiceDefinition.OnPath("codex.cmd");
+        }
+
+        /// <summary>The most recently written file of that name under root, or null.</summary>
+        private static string Latest(string root, string name)
         {
             try
             {
-                string bin = Path.Combine(Probe.LocalAppData, @"OpenAI\Codex\bin");
-                if (Directory.Exists(bin))
-                {
-                    var f = Directory.GetFiles(bin, "codex.exe", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTime).FirstOrDefault();
-                    if (f != null) return f;
-                }
+                return Directory.Exists(root)
+                    ? Directory.GetFiles(root, name, SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTime).FirstOrDefault()
+                    : null;
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
-            {
-                try
-                {
-                    string f = Path.Combine(dir.Trim(), "codex.exe");
-                    if (File.Exists(f)) return f;
-                }
-                catch (ArgumentException) { }
-            }
-            return null;
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
         }
 
-        private Usage FetchLive(out string plan)
+        private Usage FetchLive(string exe, out string plan)
         {
             plan = null;
-            string exe = CodexPath();
-            if (exe == null || !File.Exists(Path.Combine(Probe.Home, @".codex\auth.json"))) return null;
+            if (!File.Exists(Path.Combine(Probe.Home, @".codex\auth.json"))) return null;
 
             Process proc = null;
             try

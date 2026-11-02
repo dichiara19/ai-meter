@@ -286,11 +286,12 @@ namespace AIMeter
                 case "get_spend": result = Spend(providers); break;
                 case "list_local_models": result = LocalModels(snap.Providers); break;
                 case "list_candidates":
-                    result = CandidatesJson(Candidates.Select(snap, runtimes(), new Requirements
+                    var scan = runtimes();   // Once per call: a scan reads every agent's files, in WSL too.
+                    result = CandidatesJson(Candidates.Select(snap, scan, new Requirements
                     {
                         Service = service, Tools = Json.Bool(args, "tools"), MinContext = (long)(Json.Num(args, "min_context") ?? 0),
                         MinOutput = (long)(Json.Num(args, "min_output_tokens") ?? 0), CostPolicy = policy,
-                    }, DateTime.Now, leases), runtimes());
+                    }, DateTime.Now, leases), scan);
                     break;
                 default: result = Suggest(snap.Providers); break;
             }
@@ -622,7 +623,7 @@ namespace AIMeter
                 var lease = room.Blocking != null ? null : leases.Claim(pool, service, model, runtime, Json.Str(args, "client"), (int)(Json.Num(args, "ttl_seconds") ?? 0), room.MaxNewJobs, now);
                 if (lease == null)
                     return ToolResult(new Dictionary<string, object> { { "refused", true }, { "pool", pool }, { "headroom", RoomJson(Candidates.Room(service, provider.Catalogue.Rates, now, leases, pool)) } }, false);
-                return ToolResult(new Dictionary<string, object> { { "lease_id", lease.Id }, { "pool", pool }, { "expires_at", Time(lease.ExpiresAt) }, { "coverage", "ai_meter_leases_only" } }, false);
+                return ToolResult(new Dictionary<string, object> { { "lease_id", lease.Id }, { "pool", pool }, { "expires_at", Time(lease.ExpiresAtUtc.ToLocalTime()) }, { "coverage", "ai_meter_leases_only" } }, false);
             }
 
             string distro = Settings.Current == null ? null : Settings.Current.WslDistro;

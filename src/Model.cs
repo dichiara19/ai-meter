@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Web.Script.Serialization;
 
@@ -310,6 +311,27 @@ namespace AIMeter
         }
 
         public static DateTime? FromUnix(double? s) { return s == null ? null : FromUnixMs(s * 1000); }
+
+        /// <summary>The objects in the array at key; empty when it is missing or not an array.</summary>
+        public static IEnumerable<Dictionary<string, object>> Items(Dictionary<string, object> d, string key)
+        {
+            object v;
+            var list = d != null && d.TryGetValue(key, out v) ? v as System.Collections.IList : null;
+            return list == null ? new Dictionary<string, object>[0] : list.OfType<Dictionary<string, object>>().ToArray();
+        }
+
+        /// <summary>
+        /// "2026-10-31" as that calendar day, whatever the local time zone; other ISO forms through FromIso. A plain
+        /// date must not go through FromIso, which reads it as UTC midnight and moves it to the previous day west of UTC.
+        /// </summary>
+        public static DateTime? Day(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return null;
+            DateTime d;
+            if (DateTime.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d)) return d.Date;
+            var t = FromIso(s);
+            return t.HasValue ? t.Value.Date : (DateTime?)null;
+        }
 
         public static DateTime? FromIso(string s)
         {

@@ -66,16 +66,24 @@ namespace AIMeter
             RefreshNow();
         }
 
-        /// <summary>Open Antigravity CLI sign-in in a terminal, preferring Windows when installed.</summary>
+        /// <summary>
+        /// Open Antigravity CLI sign-in in a terminal, preferring Windows when installed. WSL is used only when a
+        /// distribution is configured and, while it runs, has the CLI; otherwise a message says nothing was found.
+        /// </summary>
         public void LoginAntigravity()
         {
             try
             {
-                string exe = Path.Combine(Probe.Home, @".local\bin\agy.exe");
-                if (File.Exists(exe))
+                string exe = AntigravityProvider.CliPath();
+                if (exe != null)
                     Process.Start(new ProcessStartInfo("cmd.exe", "/c \"\"" + exe + "\"\"") { UseShellExecute = true });
-                else
+                else if (MayBeInWsl(@".local\bin\agy"))
                     Process.Start(new ProcessStartInfo("wsl.exe", "-d " + Settings.WslDistro + " -- bash -lc \"~/.local/bin/agy\"") { UseShellExecute = true });
+                else
+                {
+                    MessageBox.Show(L.T("Antigravity CLI was not found on this PC."), "AI Meter");
+                    return;
+                }
             }
             catch (System.ComponentModel.Win32Exception) { return; }
             RefreshNow();
@@ -110,12 +118,28 @@ namespace AIMeter
             loginWatch.Start();
         }
 
-        /// <summary>Sign in where Claude Code is installed: configured WSL (explicitly requested here), otherwise Windows.</summary>
+        /// <summary>
+        /// Sign in where Claude Code is used. Windows when it holds the sign-in, or when WSL is not running and Claude
+        /// Code is installed on Windows, so that a stopped distribution is not started for nothing; otherwise the
+        /// configured distribution when it may have Claude Code.
+        /// </summary>
         private bool UseWslForLogin()
+        {
+            if (File.Exists(Path.Combine(Probe.Home, @".claude\.credentials.json"))) return false;
+            if (!collector.WslUp && ClaudeProvider.CliPath() != null) return false;
+            return MayBeInWsl(".claude");
+        }
+
+        /// <summary>
+        /// Whether the configured distribution may hold this home-relative path: never without a distribution; when WSL
+        /// is not running it cannot be checked without starting it, so the explicit configuration is trusted.
+        /// </summary>
+        private bool MayBeInWsl(string homePath)
         {
             if (string.IsNullOrEmpty(Settings.WslDistro)) return false;
             if (!collector.WslUp) return true;
-            return Directory.Exists(@"\\wsl.localhost\" + Settings.WslDistro + @"\home\" + Settings.WslUser + @"\.claude");
+            string path = @"\\wsl.localhost\" + Settings.WslDistro + @"\home\" + Settings.WslUser + @"\" + homePath;
+            return Directory.Exists(path) || File.Exists(path);
         }
     }
 }

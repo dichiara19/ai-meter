@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Microsoft.Win32;
 
@@ -147,7 +149,7 @@ namespace AIMeter
                     var s = Json.Deserialize<Settings>(File.ReadAllText(FilePath, Encoding.UTF8));
                     if (s != null)
                     {
-                        if (string.IsNullOrEmpty(s.WslDistro)) s.WslDistro = DefaultWslDistro();
+                        if (string.IsNullOrEmpty(s.WslDistro) || IsDockerDistro(s.WslDistro)) s.WslDistro = DefaultWslDistro();
                         if (string.IsNullOrEmpty(s.WslUser)) s.WslUser = Environment.UserName;
                         if (s.Services == null) s.Services = new System.Collections.Generic.Dictionary<string, bool>();
                         if (s.ExpandedServices == null) s.ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
@@ -177,19 +179,53 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { }
         }
 
+        /// <summary>Windows' default WSL distribution, unless it is Docker Desktop's; "" without one.</summary>
         private static string DefaultWslDistro()
+        {
+            string def = null;
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Lxss"))
+                {
+                    var id = k == null ? null : k.GetValue("DefaultDistribution") as string;
+                    if (id != null) using (var d = k.OpenSubKey(id)) def = d == null ? null : d.GetValue("DistributionName") as string;
+                }
+            }
+            catch (Exception) { }
+            return ChooseWslDistro(def, WslDistros());
+        }
+
+        /// <summary>
+        /// The default distribution, or the first other one registered when the default is Docker Desktop's, which
+        /// holds no tools of the user's and would only be started for nothing; "" when none is left.
+        /// </summary>
+        internal static string ChooseWslDistro(string defaultName, IEnumerable<string> registered)
+        {
+            if (!string.IsNullOrEmpty(defaultName) && !IsDockerDistro(defaultName)) return defaultName;
+            return registered.FirstOrDefault(n => !IsDockerDistro(n)) ?? "";
+        }
+
+        /// <summary>Docker Desktop's distributions ("docker-desktop", "docker-desktop-data").</summary>
+        internal static bool IsDockerDistro(string name)
+        {
+            return name != null && name.StartsWith("docker-desktop", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Registered WSL distributions without Docker Desktop's, in registry order.</summary>
+        internal static string[] WslDistros()
         {
             try
             {
                 using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Lxss"))
                 {
-                    if (k == null) return "";
-                    var def = k.GetValue("DefaultDistribution") as string;
-                    if (def == null) return "";
-                    using (var d = k.OpenSubKey(def)) return d == null ? "" : (d.GetValue("DistributionName") as string ?? "");
+                    if (k == null) return new string[0];
+                    return k.GetSubKeyNames().Select(n =>
+                    {
+                        using (var d = k.OpenSubKey(n)) return d == null ? null : d.GetValue("DistributionName") as string;
+                    }).Where(n => n != null && !IsDockerDistro(n)).ToArray();
                 }
             }
-            catch (Exception) { return ""; }
+            catch (Exception) { return new string[0]; }
         }
 
         // Automatic startup through the AI Meter shortcut.

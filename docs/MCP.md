@@ -2,7 +2,7 @@
 
 AI Meter includes a [Model Context Protocol](https://modelcontextprotocol.io) server. With it, AI apps and coding agents can read the data AI Meter already shows: how much room your limits have, which sessions are running, which models are free and what you spent today. A coding agent can then check its own limits before a long task, or choose a free model.
 
-The server is **read-only** and never returns API keys, tokens or account identities. Session titles often repeat your first request, so they are shared only when you turn on *Share session titles*.
+The server changes nothing on your PC or your accounts, with one exception: the three lease tools (`claim_capacity`, `renew_capacity`, `release_capacity`) write AI Meter's own `leases.json`, next to its settings, which other tools also update when they find a lease expired. It never returns API keys, tokens or account identities. Session titles often repeat your first request, so they are shared only when you turn on *Share session titles*.
 
 ## Connecting an app
 

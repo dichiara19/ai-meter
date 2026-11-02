@@ -335,7 +335,7 @@ namespace AIMeter
         /// </summary>
         private void FetchMore(string token)
         {
-            var list = Items(D.Raw, "more").ToList();
+            var list = Json.Items(D.Raw, "more").ToList();
             for (int i = 0; i < list.Count; i++)
             {
                 var spec = list[i];
@@ -448,7 +448,7 @@ namespace AIMeter
             return new FreeStatus
             {
                 Status = Json.Str(f, "status") ?? "unknown", Kind = Json.Str(f, "kind"), Source = Json.Str(f, "source") ?? "documented",
-                Reference = Json.Str(f, "reference"), CheckedAt = Json.FromIso(Json.Str(f, "checked")), Note = Json.Str(f, "note"),
+                Reference = Json.Str(f, "reference"), CheckedAt = Json.Day(Json.Str(f, "checked")), Note = Json.Str(f, "note"),
             };
         }
 
@@ -464,13 +464,13 @@ namespace AIMeter
             var spec = Json.Obj(D.Raw, "freeModels");
             var result = new Catalogue { Models = read.Models, ReadAt = read.ReadAt, Pool = Json.Str(spec, "pool") };
             object doc = live != null ? usageDoc : null;
-            foreach (var l in Items(spec, "limits"))
+            foreach (var l in Json.Items(spec, "limits"))
             {
                 var r = new RateLimit
                 {
                     Metric = Json.Str(l, "metric"), Scope = Json.Str(l, "scope") ?? "account", PerModel = Json.Bool(l, "perModel"),
                     Source = Json.Str(l, "source") ?? "documented", Reference = Json.Str(l, "reference"), Note = Json.Str(l, "note"),
-                    CheckedAt = Json.FromIso(Json.Str(l, "checked")), ResetZone = Json.Str(l, "resetZone"),
+                    CheckedAt = Json.Day(Json.Str(l, "checked")), ResetZone = Json.Str(l, "resetZone"),
                 };
                 r.Limit = LimitValue(l, "limit", doc);
                 r.Used = LimitValue(l, "used", doc);
@@ -533,30 +533,23 @@ namespace AIMeter
         private Usage Map(object doc, Dictionary<string, object> block)
         {
             var u = new Usage { Source = "live", At = DateTime.Now };
-            foreach (var spec in Items(block, "limits"))
+            foreach (var spec in Json.Items(block, "limits"))
             {
                 if (!Applies(doc, spec)) continue;
                 var w = Limit(doc, spec);
                 if (w != null) u.Windows.Add(w);
             }
             var notes = new List<Func<string>>();
-            foreach (var spec in Items(block, "notes"))
+            foreach (var spec in Json.Items(block, "notes"))
             {
                 if (!Applies(doc, spec)) continue;
                 string text = Json.Str(spec, "text");
-                var values = Items(spec, "values").Select(v => FormatValue(doc, v)).ToArray();
+                var values = Json.Items(spec, "values").Select(v => FormatValue(doc, v)).ToArray();
                 if (text == null || values.Any(v => v == null)) continue;
                 notes.Add(() => L.F(text, values.Cast<object>().ToArray()));
             }
             if (notes.Count > 0) u.CreditsNote = () => string.Join("\n", notes.Select(n => n()));
             return u.Windows.Count > 0 || notes.Count > 0 ? u : null;
-        }
-
-        private static IEnumerable<Dictionary<string, object>> Items(Dictionary<string, object> d, string key)
-        {
-            object v;
-            var list = d != null && d.TryGetValue(key, out v) ? v as IList : null;
-            return list == null ? new Dictionary<string, object>[0] : list.OfType<Dictionary<string, object>>().ToArray();
         }
 
         /// <summary>Require all "when" paths and reject any truthy "unless" path.</summary>
