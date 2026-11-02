@@ -11,7 +11,7 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | Milestone | State | Branch / PR | Base / head SHA | Tests and evidence | Blockers / next action |
 | --- | --- | --- | --- | --- | --- |
 | M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
-| M1 MCP freshness | in_progress | `feat/mcp-freshness`, draft [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / working tree after `f778d85` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows, Claude Code and Codex in WSL, Settings → AI apps | Store relay path and Gemini CLI: **NOT RUN**. Then move the PR out of draft |
+| M1 MCP freshness | in_progress | `feat/mcp-freshness`, draft [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / working tree after `f778d85` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps | Store relay path: **NOT RUN**. Gemini CLI is discontinued (replaced by Antigravity CLI, `agy`): a separate PR updates AI apps. Then move the PR out of draft |
 | M2 Provider discovery | planned | `feat/provider-discovery` | — | — | Needs the M1 freshness contract |
 | M3 Execution candidates | planned | `feat/execution-candidates` | — | — | Needs M1 and M2 |
 | M4 Pi spike and runner MVP | planned | `feat/agent-jobs` | — | — | Spike first. Real routing needs M3 |
@@ -64,6 +64,18 @@ Three things the PR marked as unverified are still unverified after the release,
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M1 live check with Antigravity CLI.** The maintainer pointed out that Gemini CLI no longer exists: Antigravity CLI (`agy`) replaces it.
+  - **Version.** `agy` 1.4.12 is installed in WSL only.
+  - **Where it stores MCP servers.** With the maintainer's approval, `ai-meter` was added temporarily with `agy mcp add`. The command wrote `~/.gemini/config/mcp_config.json`, using the standard `mcpServers` format plus `"disabled": false`.
+  - **Permissions.** Headless runs need an allow rule for MCP tools. It was given for the session only, with `--settings '{"permissions":{"allow":["mcp(...)"]}}'`.
+  - **Result against the M1 build.** `get_limits` with `max_age_seconds: 30` gave `refreshed` for Claude, ChatGPT and Antigravity. The run used 24,040 tokens.
+  - **Clean-up.** `ai-meter` was removed again and `mcp_config.json` restored byte for byte. The schema cache that `agy` wrote to `~/.gemini/antigravity-cli/mcp/ai-meter` was deleted. The installed 0.8.6 was restarted.
+  - **Consequences for AI apps, to fix in a separate PR:**
+    - AI apps still offers "Gemini CLI". It detects it from `~/.gemini`, which exists because of `agy`, so the detection is false.
+    - It would write `~/.gemini/settings.json`, which `agy` does not read.
+    - It copies a `gemini mcp add` command that no longer works.
+    - Sessions are still looked for in `~/.gemini/tmp`, while `agy` keeps them in `~/.gemini/antigravity-cli/conversations`.
 
 - **2026-11-02, M1 live check.**
   - **Setup.** Build from `feat/mcp-freshness` on Windows 11.
