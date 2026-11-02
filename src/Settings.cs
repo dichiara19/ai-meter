@@ -116,7 +116,7 @@ namespace AIMeter
         {
             bool on;
             if (Services.TryGetValue(d.Id, out on)) return on;
-            return d.Detected();
+            return !d.CatalogueOnly && d.Detected();   // A model list alone is not worth a service the user did not ask for.
         }
 
         public static string Folder

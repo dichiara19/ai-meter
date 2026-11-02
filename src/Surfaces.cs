@@ -87,8 +87,9 @@ namespace AIMeter
         public void Render(Snapshot s)
         {
             body.Children.Clear();
-            if (s.Providers.Count == 0) { body.Children.Add(EmptyState()); return; }
-            foreach (var p in s.Providers)
+            var shown = s.Shown;
+            if (shown.Count == 0) { body.Children.Add(EmptyState()); return; }
+            foreach (var p in shown)
             {
                 if (p.IsIdleLocal) continue;   // Local models: show the card only when there is something to display.
                 string id = p.Id;
@@ -149,7 +150,7 @@ namespace AIMeter
 
         private FrameworkElement Collapsed(Snapshot s)
         {
-            var five = s.Providers.Where(p => p.Models == null).Select(p => Tuple.Create(p, Ui.Primary(p))).ToList();
+            var five = s.Shown.Where(p => p.Models == null).Select(p => Tuple.Create(p, Ui.Primary(p))).ToList();
             var icon = Ui.RingIcon(five, 24);
             // A real button: click, keyboard and accessibility tools all expand it again in the same way.
             var b = new Button { Content = icon, Padding = new Thickness(6), Cursor = Cursors.Hand };
@@ -273,8 +274,9 @@ namespace AIMeter
         public void Render(Snapshot s)
         {
             body.Children.Clear();
-            if (s.Providers.Count == 0) body.Children.Add(DesktopWidget.EmptyState());
-            foreach (var p in s.Providers)
+            var shown = s.Shown;
+            if (shown.Count == 0) body.Children.Add(DesktopWidget.EmptyState());
+            foreach (var p in shown)
             {
                 if (p.IsIdleLocal) continue;   // Local models: show the card only when there is something to display.
                 // Long lists fold here as on the desktop widget, sharing the same remembered choice.

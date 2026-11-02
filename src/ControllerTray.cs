@@ -131,7 +131,7 @@ namespace AIMeter
 
         private void UpdateTrayText(Snapshot s)
         {
-            var parts = s.Providers.Where(p => p.Models == null).Select(p =>
+            var parts = s.Shown.Where(p => p.Models == null).Select(p =>
             {
                 var w = Ui.Primary(p);
                 return w == null ? p.Name + " –" : p.Name + " " + Math.Round(p.Usage.Room(w)) + "%";

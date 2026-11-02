@@ -38,7 +38,7 @@ namespace AIMeter
 
         public override ProviderState Collect(Probe p)
         {
-            var st = new ProviderState { Id = D.Id, Name = D.Name, CanSignIn = D.UsesKey };
+            var st = new ProviderState { Id = D.Id, Name = D.Name, CanSignIn = D.UsesKey, CatalogueOnly = D.CatalogueOnly };
             foreach (var proc in ProcessList())
                 if (p.IsRunning(Json.Str(proc, "name") ?? ""))
                     st.Sessions.Add(new Session { Kind = "App", Title = Json.Str(proc, "title") ?? D.Name, Status = "app" });

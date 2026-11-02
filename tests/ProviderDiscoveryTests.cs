@@ -16,9 +16,45 @@ namespace AIMeter
             test("Free-model limits come from the definition or the usage answer, with the reset of their zone", DefinedRates);
             test("Daily resets follow the zone's daylight-saving rules", ZoneResets);
             test("list_free_models reports price status, pool, caps, rates and headroom", FreeModelLimits);
+            test("Catalogue-only services stay off the surfaces and off by default, but reach MCP", CatalogueOnlyServices);
         }
 
         private static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic;
+
+        private static void CatalogueOnlyServices()
+        {
+            // As providers\nvidia.json: a model list and no usage request. OpenRouter has both.
+            var nvidia = ServiceDefinition.FromJson("{ \"id\": \"nvidia\", \"name\": \"NVIDIA NIM\", \"detect\": { \"env\": [\"NVIDIA_API_KEY\"] }, " +
+                "\"auth\": { \"type\": \"key\", \"env\": [\"NVIDIA_API_KEY\"] }, \"freeModels\": { \"url\": \"https://example.test/models\", \"format\": \"openai\" } }", "test");
+            var router = ServiceDefinition.FromJson("{ \"id\": \"openrouter\", \"name\": \"OpenRouter\", \"auth\": { \"type\": \"key\" }, " +
+                "\"request\": { \"url\": \"https://example.test/key\" }, \"freeModels\": { \"url\": \"https://example.test/models\" } }", "test");
+            var plain = ServiceDefinition.FromJson("{ \"id\": \"vercel\", \"name\": \"Vercel\", \"request\": { \"url\": \"https://example.test/usage\" } }", "test");
+            Assert(nvidia.CatalogueOnly && !router.CatalogueOnly && !plain.CatalogueOnly, "Only a model list without a usage request is catalogue-only.");
+
+            // Found keys turn a monitored service on, never a catalogue-only one; an explicit choice wins either way.
+            var settings = new Settings();
+            string old = Environment.GetEnvironmentVariable("NVIDIA_API_KEY");
+            try
+            {
+                Environment.SetEnvironmentVariable("NVIDIA_API_KEY", "nvapi-test-0123456789");
+                Assert(nvidia.Detected() && !settings.ServiceOn(nvidia), "A catalogue-only service turned itself on because its key was found.");
+                settings.Services["nvidia"] = true;
+                Assert(settings.ServiceOn(nvidia), "The user's choice to turn a catalogue on was ignored.");
+            }
+            finally { Environment.SetEnvironmentVariable("NVIDIA_API_KEY", old); }
+
+            var snap = new Snapshot();
+            snap.Providers.Add(new ProviderState { Id = "openrouter", Name = "OpenRouter", Usage = new Usage() });
+            snap.Providers.Add(new ProviderState { Id = "nvidia", Name = "NVIDIA", CatalogueOnly = true,
+                Catalogue = new Catalogue { ReadAt = DateTime.Now, Models = new System.Collections.Generic.List<FreeModel> { new FreeModel { Id = "m", Name = "m" } } } });
+            Assert(snap.Shown.Select(p => p.Id).SequenceEqual(new[] { "openrouter" }), "A catalogue-only service reached the surfaces.");
+            Assert(!Ui.Summary(snap).Contains("NVIDIA"), "A catalogue-only service reached the tooltip.");
+            Assert(Ui.PillRow(snap, null, false).Children.Count == 1, "A catalogue-only service reached the pill.");
+
+            var server = new McpServer(() => snap, () => false);
+            var reply = Json.Parse(server.Handle("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"list_free_models\",\"arguments\":{\"include_unconfirmed\":true}}}"));
+            Assert(JsonText.Indented(Json.Obj(reply, "result")).Contains("\"nvidia\""), "A catalogue-only service did not reach MCP.");
+        }
 
         private static void UnpricedLists()
         {

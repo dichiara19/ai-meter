@@ -46,7 +46,7 @@ Claude, ChatGPT/Codex and GitHub Copilot need custom sign-in flows and stay in c
 | `plan` | Path of the plan name in the answer, shown as a badge. |
 | `limits` | The bars, see below. |
 | `notes` | Extra lines under the bars, see below. |
-| `freeModels` | A request (`url`, `headers`, `interval` in minutes, default 360; `{token}` is filled as in `request`) for the service's model list, see below. With a `request`, the list is read only while that request succeeds; without one, it is read whenever the key it names is available, so a service without a usage endpoint can still list its models. |
+| `freeModels` | A request (`url`, `headers`, `interval` in minutes, default 360; `{token}` is filled as in `request`) for the service's model list, see below. With a `request`, the list is read only while that request succeeds. Without one, it is read whenever the key it names is available, so a service without a usage endpoint can still list its models. Such a service is a **model catalogue**: it has nothing to show on the taskbar, in the panel or on the widget, so it appears only in Settings, under *Model catalogues for AI apps*. It stays off until the user turns it on, even when its key is found, and its models reach AI apps through MCP. |
 | `i18n` | Translations of your texts: `{ "it": { "English text": "Testo italiano" } }`. Languages: `it`, `es`, `fr`, `de`, `pt`. |
 
 ### `auth`

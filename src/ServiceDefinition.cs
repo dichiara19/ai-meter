@@ -29,6 +29,12 @@ namespace AIMeter
         public string AuthType { get { return Json.Str(Auth, "type") ?? "none"; } }
         /// <summary>Whether the service authenticates with an API key.</summary>
         public bool UsesKey { get { return AuthType == "key"; } }
+        /// <summary>
+        /// A service that only lists its models (freeModels without a usage request), such as NVIDIA NIM and the Gemini
+        /// API, whose keys cannot read limits. Its models serve AI apps through MCP; it has no place on the taskbar,
+        /// panel or widget, and is never turned on just because its key is found.
+        /// </summary>
+        public bool CatalogueOnly { get { return Json.Obj(Raw, "freeModels") != null && Json.Obj(Raw, "request") == null; } }
         public string KeyPage { get { return Json.Str(Auth, "page"); } }
 
         public static ServiceDefinition FromJson(string text, string origin)
