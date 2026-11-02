@@ -162,6 +162,7 @@ M3 implements this section in `src/Candidates.cs` and `list_candidates`; [docs/M
 - Runtimes are a data table of agents (`agents/*.json`, plus the user's `%APPDATA%\AIMeter\agents`), not a single one. Only agents with a verified dispatch for their place are candidates (Pi in WSL, OpenCode in WSL and on Windows); none of them is required. Agents found without one (Codex, Claude Code, Gemini CLI, Antigravity CLI, Cursor Agent, Crush, Pi on Windows) are listed in `runtimes.unsupported` with a reason, so a plugin can tell the user why. The table's shape is in [docs/MCP.md](../MCP.md#agent-definitions).
 - Every running WSL distribution is scanned, each candidate carrying its `distro`; the Linux home is the one holding any agent's folder.
 - `warnings` flags candidates a plugin must watch: `openrouter_byok_fallback` today.
+- **Best effort.** Models whose service list leaves the price or a needed capability unstated can be filled in from an agent's own model list (`models` in its definition). They are returned apart, in `best_effort`, only with `include_best_effort`, labelled with `estimated` and `unverified`, as point 4 requires. NVIDIA and Gemini have no ordinary candidates otherwise ([docs/MCP.md](../MCP.md#best-effort-candidates)).
 - Reservations and the `observed` counters come with capacity leases (M4, §3).
 
 **`list_candidates` (M3, read tool).** It takes the task's `requirements` and a `cost_policy`. It returns the ordered candidates, each with its `limits` and `headroom`, plus the reason each excluded candidate was dropped.
