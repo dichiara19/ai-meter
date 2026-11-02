@@ -258,11 +258,14 @@ namespace AIMeter
             }
         }
 
-        /// <summary>Enable startup on first use only when no registration already exists.</summary>
-        internal static void InitialiseStartup(bool firstRun)
+        /// <summary>
+        /// Apply the welcome window's "Start with Windows" choice, once the window has closed. Enabling keeps an existing
+        /// registration (another copy's shortcut, the legacy Run command or an entry disabled in Windows); declining
+        /// removes any registration, as the same toggle in Settings does.
+        /// </summary>
+        internal static void ApplyFirstRunStartup(bool enabled)
         {
-            if (!firstRun) return;
-            if (Native.IsPackaged) { StartsWithWindows = true; return; }
+            if (!enabled || Native.IsPackaged) { StartsWithWindows = enabled; return; }
             if (File.Exists(StartupLink)) return;
             using (var k = Registry.CurrentUser.OpenSubKey(RunKey))
                 if (k != null && k.GetValue("AI Meter") != null) return;

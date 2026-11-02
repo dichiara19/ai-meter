@@ -14,7 +14,7 @@ The Store signs the MSIX package with a Microsoft certificate, so the installed 
    | `STORE_PUBLISHER` | Package/Identity/Publisher (`CN=…`) |
    | `STORE_PUBLISHER_NAME` | Package/Properties/PublisherDisplayName |
 
-   Without them the package is built with placeholder values that the Store rejects.
+   Without them `build.ps1` uses placeholder values that the Store rejects. They are fine for local and pull-request builds, but on a `v*` tag the workflow's MSIX step fails and names the missing variables.
 
 ## Each release
 
@@ -27,15 +27,76 @@ The Store signs the MSIX package with a Microsoft certificate, so the installed 
 - **Category:** Developer tools (or Utilities & tools).
 - **Privacy policy URL:** `https://github.com/dichiara19/ai-meter#privacy-policy`
 - **Restricted capability `runFullTrust`, justification:**
-  > AI Meter is a desktop app (WPF on .NET Framework) packaged as MSIX. It needs full trust to read the local session files written by Claude Code, Codex and Cursor, to run the user's installed `codex` and `claude` command-line tools to read their own usage limits, and to place its compact indicator inside the Windows taskbar. With the user's consent it also reads two kinds of credentials that other programs already store on the PC: the OAuth access token of the user's Claude Code login, sent only to Anthropic's usage endpoint, and API keys saved by OpenCode, Pi or Crush or exported in shell profiles, each sent only to its own service's usage endpoint. Both are asked on the first-launch screen (API keys are off unless the user turns them on), can be turned off in Settings, are never stored by AI Meter and are never sent to its authors. It does not install drivers or services and does not require administrator rights.
-- **Start at login:** the app declares a startup task. It is turned on at first launch, as in the other builds, and the user can turn it off in AI Meter's Settings or in Windows Settings → Apps → Startup.
+  > AI Meter is a desktop app (WPF on .NET Framework) packaged as MSIX. It needs full trust for the following, always as the signed-in user and without administrator rights:
+  > - Read the local session and usage files that Claude Code, Codex, GitHub Copilot, Cursor and other AI tools already write on the PC, and place its compact indicator inside the Windows taskbar.
+  > - Run the user's installed command-line tools: `codex` and `claude` to read their own usage limits; `wsl.exe` to list running WSL distributions (`wsl.exe -l --running`, which starts nothing) and to run `claude` or `agy` inside a WSL distribution that is already running, only to renew an expired sign-in; `cmd.exe` or `wsl.exe` to open a terminal with `claude auth login` or `agy` when the user clicks *Sign in*.
+  > - Use sign-ins the user already has: the OAuth access token of the Claude Code login (sent only to Anthropic's usage endpoint), the Cursor app's sign-in (sent only to Cursor), the Antigravity CLI sign-in (sent only to Google) and, when the user chooses *Sign in* for Copilot, a GitHub device-flow sign-in whose token is kept encrypted with Windows DPAPI. With the user's consent, API keys saved by OpenCode, Pi or Crush or exported in shell profiles, each sent only to its own service's usage endpoint. The Claude login and API keys are asked on the first-launch screen (API keys are off unless the user turns them on); every service can be turned off in Settings. Nothing is sent to AI Meter's authors.
+  > - When the user clicks *Connect* in Settings → AI apps, add an `ai-meter` entry to that app's MCP configuration (Claude Desktop, VS Code, Claude Code, Codex, Cursor, OpenCode, Pi or Antigravity CLI, on Windows or in WSL), keeping a backup of the previous file; *Disconnect* removes it. The entry starts a relay script that AI Meter writes to `%USERPROFILE%\.aimeter\mcp.ps1`, outside the package so that the other apps can read it; the script starts AI Meter through its execution alias when it is not running.
+  >
+  > It does not install drivers or services.
+- **Restricted capability `unvirtualizedResources`, justification:**
+  > AI Meter writes the MCP configuration of Claude Desktop (`%APPDATA%\Claude\claude_desktop_config.json`) and VS Code (`%APPDATA%\Code\User\mcp.json`) when the user connects those apps in Settings. With AppData write virtualisation a new file would be created in AI Meter's private package folder, invisible to Claude Desktop and VS Code, whilst AI Meter reported them as connected. The manifest uses Windows 11 flexible virtualisation to exclude only three folders: those two apps' folders and `%APPDATA%\AIMeter`, AI Meter's own settings, which the other builds of AI Meter already use and which File Explorer must be able to open from Settings → About. Every other AppData write stays virtualised.
+- **Start at login:** the app declares a startup task, disabled in the manifest. The first-launch screen has a *Start with Windows* switch (on by default, as in the other builds); the startup task is requested only after the user closes that screen, and only if the switch is on. The user can turn it off later in AI Meter's Settings or in Windows Settings → Apps → Startup.
 - **Taskbar indicator:** placed only after the user confirms *Show in the taskbar* on the first-launch screen; otherwise the app shows a desktop widget. It can be switched off at any time from the notification area menu or Settings → Where to see it.
 - **Notes for certification:** no account is needed to test the app. On the first-launch screen choose **Preview with sample data**, or later turn on Settings → About → **Sample data**: every surface then shows invented figures for Claude, Codex, Copilot and local models. Real data needs at least one of Claude Code, Codex, GitHub Copilot or Cursor signed in; without them the app shows the services as not connected, which is the expected behaviour.
 
 Tip: publish the first submission with **Visibility → Private audience** to install it from the Store on your own PC and check it before making it public.
 
+## Store listing
+
+The package declares one language, `en-us`, so Partner Center asks for one listing, in English (policy 10.7 requires a listing for every language a package declares). The app still follows the Windows display language, or the one chosen in Settings → General, in English, Italian, Spanish, French, German and Portuguese: its strings are compiled into the executable and do not depend on the package's languages.
+
+**Description.** Policy 10.2.4 requires the dependency to be disclosed at the start:
+
+> AI Meter shows the usage of AI tools you already have: it needs at least one of Claude Code, Codex (ChatGPT), GitHub Copilot, Cursor, Antigravity CLI or a local model server such as Ollama or LM Studio, installed and signed in on this PC, or an API key of a supported service. It reads the data those tools save on your PC and is not affiliated with Anthropic, OpenAI, GitHub, Microsoft, Cursor or Google.
+>
+> A small pill inside the Windows taskbar shows how much of your AI limits is left: 5-hour and weekly limits, a forecast of when you will run out at the current pace, and a notification before you hit the wall that tells you which service still has room. Click it for every service, the coding agents that are running and the local models in video memory, on Windows and in WSL.
+>
+> • Lives in the taskbar, follows light and dark mode and hides with full-screen apps; a desktop widget and a compact overlay are there if you prefer.
+> • A local history of quota cycles, daily activity, models and tools.
+> • Claude, ChatGPT / Codex, GitHub Copilot, Google Antigravity, Cursor, OpenRouter, Vercel AI Gateway, DeepSeek, Kimi and more; a new service is a small definition file.
+> • Your AI apps can ask it, through MCP, how much room your limits have.
+> • Private: no telemetry and no account; the only network requests go to each service's own usage endpoint. Open source under Apache 2.0.
+> • Six languages: English, Italian, Spanish, French, German and Portuguese.
+
+**Short description:** AI limits in your taskbar, and a local history of what you use, for the AI tools already on your PC.
+
+**Screenshots** (2560x2000, within Partner Center's limits): `docs/media/consumption-dark.png`, `docs/media/consumption-light.png`, `docs/media/history-dark.png`, `docs/media/history-light.png`. The other images in `docs/media` are too narrow or too short for the Store.
+
+**Store logo:** `bin\StoreIcon-300.png`, written by `build.ps1 -NoInstall -Package` (the app icon's rings, 300x300, transparent background).
+
+## Age rating (IARC questionnaire)
+
+Category **All other app types** (not a game, not a social or communication app). Every content question is answered **No**:
+
+- Violence, blood, fear or horror: none.
+- Sexual content or nudity: none.
+- Crude humour, profanity or discriminatory language: none.
+- Drugs, alcohol or tobacco: none.
+- Gambling, simulated gambling or real-money purchases: none.
+- Users can interact or exchange content (chat, posting, sharing): no. The app shows only the user's own data from their own tools.
+- Shares the user's location or personal information with third parties: no. Requests go only to each service's usage endpoint, with the user's own sign-in.
+- Unrestricted internet access through the app (a browser): no. Links open in the user's browser.
+- Digital purchases: none.
+
+Expected result: the lowest rating in every region (for example PEGI 3, ESRB Everyone).
+
+## Testing the package locally
+
+The Windows SDK (`makeappx`, `makepri`) is needed only to produce `AIMeter.msix`; the unpacked layout in `bin\msix` can be registered without it:
+
+1. Turn on **Developer Mode** (Windows Settings → System → For developers).
+2. `powershell -ExecutionPolicy Bypass -File build.ps1 -NoInstall -Package` (without the SDK it stops after writing `bin\msix`, with the warning *Windows SDK not found*).
+3. `Add-AppxPackage -Register bin\msix\AppxManifest.xml`, then start **AI Meter** from the Start menu.
+4. Check the first-launch screen and *Start with Windows*; Settings → AI apps → *Connect* for Claude Desktop and VS Code (the files must appear in the real `%APPDATA%` folders); an AI app starting AI Meter through `%LOCALAPPDATA%\Microsoft\WindowsApps\AIMeter.exe` while AI Meter is closed; Settings → About → *Open data folder*.
+5. Remove it with `Get-AppxPackage *AIMeter* | Remove-AppxPackage`.
+
+Without the `STORE_*` values the registered package has the placeholder identity, so it installs next to, not over, a copy from the Store.
+
 ## Packaged mode differences
 
 - Start with Windows uses the package's startup task instead of the "AI Meter" shortcut in the Startup folder used by the other builds.
 - The taskbar identity comes from the package, so the per-window AppUserModel properties are not set.
-- `%APPDATA%\AIMeter` is redirected by Windows to the package's private folder; settings and diagnostic files live there and are removed when the app is uninstalled.
+- `%APPDATA%\AIMeter`, `%APPDATA%\Claude` and `%APPDATA%\Code` are excluded from AppData write virtualisation (Windows 11 flexible virtualisation, `unvirtualizedResources`). Settings and diagnostic files live in the same `%APPDATA%\AIMeter` as in the other builds and are **kept** when the app is uninstalled, and the MCP configurations written for Claude Desktop and VS Code are visible to those apps. Other AppData writes, if any, stay in the package's private folder.
+- AI apps start AI Meter through the execution alias `%LOCALAPPDATA%\Microsoft\WindowsApps\AIMeter.exe` (`Program.LaunchCommand`), which survives Store updates. The relay script is `%USERPROFILE%\.aimeter\mcp.ps1`, since other apps cannot read a package's private folders. Disconnect AI apps in Settings → AI apps before uninstalling, or their `ai-meter` entries point at a missing alias.
+- The package declares only English as its language ([Store listing](#store-listing)); the interface languages are unchanged.

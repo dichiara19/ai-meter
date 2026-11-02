@@ -44,11 +44,27 @@ namespace AIMeter
         /// </summary>
         private bool AskFirstRunConsent()
         {
-            var welcome = new WelcomeWindow(Settings);
-            welcome.ShowDialog();
-            Settings.FirstRunDone = true;
-            Settings.Save();
-            return welcome.SampleDataRequested;
+            bool sampleData = false;
+            CompleteFirstRun(Settings, () =>
+            {
+                var welcome = new WelcomeWindow(Settings);
+                welcome.ShowDialog();
+                sampleData = welcome.SampleDataRequested;
+                return welcome.StartWithWindowsRequested;
+            });
+            return sampleData;
+        }
+
+        /// <summary>
+        /// Run the consent step (<paramref name="ask"/> returns the "Start with Windows" choice) and only then record it,
+        /// so start-up is never registered before the user has seen the choice (Store policy 10.2.8).
+        /// </summary>
+        internal static void CompleteFirstRun(Settings settings, Func<bool> ask)
+        {
+            bool startWithWindows = ask();
+            settings.FirstRunDone = true;
+            settings.Save();
+            try { Settings.ApplyFirstRunStartup(startWithWindows); } catch (Exception ex) { Program.LogError("startup", ex); }
         }
 
         /// <summary>
