@@ -65,6 +65,21 @@ Three things the PR marked as unverified are still unverified after the release,
 
 ## Log
 
+- **2026-11-02, best-effort candidates, and a first task on NVIDIA.**
+  - **The change.** NVIDIA and Gemini gave no candidates, because their lists state neither tools nor prices. With the maintainer, they were made a category of their own:
+    - [#39](https://github.com/dichiara19/ai-meter/pull/39), stacked on #30, reads the agents' own model lists into `best_effort`, only with consent;
+    - `33ee74a` here adds `allow_best_effort` to the plugin, with the skill asking the user first.
+  - **Pi's list is a good proxy for tool support.**
+    - All 21 of its NVIDIA models have `tool_call` on models.dev.
+    - 377 of its 386 OpenRouter models have tools on OpenRouter. Of the other 9, 8 are image models Pi marks as `image`; the ninth is the `openrouter/fusion` router.
+  - **Live candidates:**
+    - NVIDIA: 20 best effort;
+    - Gemini: 2 best effort (Gemma 4), and 21 excluded as `agent_lists_price`, because Pi prices them at the paid-tier rate.
+  - **First task, approved by the maintainer.** Read-only, through the plugin, on `deepseek-ai/deepseek-v4.1-flash` with Pi in WSL.
+    - It completed with a correct answer: 2 requests, 12,176 input and 176 output tokens, price 0. The lease was released and `observed` counted it.
+    - **It took 6 min 24 s for two requests.** NVIDIA's hosted models can queue: Pi's own list sets `NVCF-POLL-SECONDS: 3600` for them. Unstated latency is one of the limits best effort warns about. The plugin's 20-minute default timeout covered it.
+
+
 - **2026-11-02, M2 checked live with real NVIDIA and Gemini keys.**
   - **Setup.** The maintainer added both keys to Pi in WSL (`~/.pi/agent/auth.json`, under `nvidia` and `google`), and turned NVIDIA on in Settings. The AI Meter build was from #30.
   - **Pi.** `pi auth check` answered `ready` for both. Pi lists 21 NVIDIA and 24 Google models.
