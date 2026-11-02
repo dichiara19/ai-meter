@@ -10,7 +10,8 @@ namespace AIMeter
     /// Execution candidates (docs/plans/orchestration-contracts.md sections 2.1 and 2.4): the free models a task can run
     /// on now, through a coding agent on this PC that already holds its own key for the service, and why every other
     /// model cannot. No particular agent is required: delegation uses whichever supported agents the user has.
-    /// Nothing here starts a process or reserves capacity; the job runner re-checks and reserves when it starts a job.
+    /// Nothing here starts a process or reserves capacity: coordinator plugins run the agents (ADR 0002), and capacity
+    /// leases reserve room.
     ///
     /// Selection is deterministic: the same snapshot and request give the same order. Models that share a pool share
     /// its limits, so capacity is reported per pool and never added up across the pool's models.
@@ -89,7 +90,7 @@ namespace AIMeter
         /// Coding agents that can run a delegated task on a free model with their own keys: the folders that show they
         /// are set up in a home, and the program that shows they are still installed (a folder can outlive its agent).
         /// App names the agent in KeyFinder's sources. Adding an agent here makes delegation consider it; running tasks
-        /// through it also needs its adapter in the job runner.
+        /// through it also needs its dispatch description.
         /// </summary>
         internal static readonly RuntimeKind[] Kinds =
         {

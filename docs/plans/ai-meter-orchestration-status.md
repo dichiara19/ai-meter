@@ -14,8 +14,8 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | M1 MCP freshness | in_review | [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / `f3f3aeb` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. Trial merge of #18, #19 and #20 on `main`: no conflicts, 97 tests passed | Store relay path deferred to M6 (maintainer decision, 2026-11-02). Next: merge #18, then #19 and #20 |
 | M2 Provider discovery | in_progress | `feat/provider-discovery`, stacked on `feat/mcp-freshness` | `5eacffc` / not yet pushed | `tests/run.ps1`: 100 passed (5 new). `build.ps1 -NoInstall` compiled. Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: **NOT RUN**. Rebase onto `main` after #18 |
 | M3 Execution candidates | in_progress | `feat/execution-candidates`, stacked on `feat/provider-discovery` | `3411e33` / not yet pushed | `tests/run.ps1`: 105 passed (5 new). Live Pi scan on this PC | Rebase onto `main` after #18 and #21 |
-| M4 Pi spike and runner MVP | planned | `feat/agent-jobs` | — | — | Spike first. Real routing needs M3 |
-| M5 Client delegation | planned | `feat/client-delegation` | — | — | Needs M4 |
+| M4 Dispatch descriptions and capacity leases | planned | `feat/dispatch-leases` | — | — | Agent spike first: Pi and a second agent, non-interactive, on a free model |
+| M5 Claude Code and Codex plugins | planned | `feat/coordinator-plugins` | — | — | Needs M4 |
 | M6 Stabilisation and release candidate | planned | — | — | — | Needs M1–M5 |
 
 ## Baseline (verified 2026-11-02)
@@ -64,6 +64,12 @@ Three things the PR marked as unverified are still unverified after the release,
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, delegation through coordinator plugins.**
+  - The maintainer chose plugins over a runner owned by AI Meter. [ADR 0002](../adr/0002-delegation-through-coordinator-plugins.md) supersedes ADR 0001 decisions 2, 5, 6 and 7.
+  - **AI Meter:** chooses (`list_candidates`), describes how to run the chosen agent (`describe_dispatch`: data, no shell string, no task text) and keeps cooperative capacity leases (`claim_capacity`, `renew_capacity`, `release_capacity`). The leases feed the `observed` counters.
+  - **Coordinator plugins in `plugins/`:** run the agent in the background and own status, result, cancellation and worktrees.
+  - **Updated:** the plan (M4 and M5, the MVP, the test plan, release), the contracts (section 3 replaced), CONTRIBUTING, SECURITY and code comments.
 
 - **2026-11-02, M3 made agent-independent; coordinator plugins read.**
   - The maintainer asked that delegation depend on no particular agent. M3's runtime scan became a table of supported agents (`Candidates.Kinds`): Pi, OpenCode and Crush, found by their folders plus their installed program, and counted with their own keys only. A first live scan reported `opencode@wsl` from a leftover configuration folder; requiring the program fixed that, and the scan now finds only `pi@wsl` here. `list_candidates` reports `runtimes.found`. The ADR (decision 4), the plan, the contracts, CONTRIBUTING and docs/MCP.md were amended.
