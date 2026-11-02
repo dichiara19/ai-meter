@@ -9,6 +9,7 @@
     { "file": ".config/opencode/opencode.json", "path": "provider.{id}.options.apiKey" }
   ],
   "package": "opencode-ai",
+  "models": { "format": "models.dev", "file": "{home}/.cache/opencode/models.json" },
   "dispatch": {
     "places": {
       "wsl": { "versions": ["1.x"] },

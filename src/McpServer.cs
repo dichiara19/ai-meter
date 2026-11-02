@@ -142,7 +142,9 @@ namespace AIMeter
                      "model's pool, most first, then models whose room is unknown; the same request gives the same order. pools gives " +
                      "how many new tasks each pool can take now: models in one pool share it. excluded says why every other model " +
                      "cannot be used; runtimes.unsupported lists the agents found that delegation cannot use, with the reason. " +
-                     "warnings flags candidates a plugin must watch, such as openrouter_byok_fallback. Nothing is started or reserved.",
+                     "warnings flags candidates a plugin must watch, such as openrouter_byok_fallback. With include_best_effort, best_effort " +
+                     "lists models the service's own list leaves short (price, tool support or limits unstated) that an agent's own model " +
+                     "list has at no price: they may fail or stop, so ask the user before using one. Nothing is started or reserved.",
                      new Dictionary<string, object>
                      {
                          { "service", service },
@@ -151,6 +153,7 @@ namespace AIMeter
                          { "min_output_tokens", Property("integer", "Smallest reply size the task needs, in tokens.") },
                          { "cost_policy", new Dictionary<string, object> { { "type", "string" }, { "enum", new List<object> { Candidates.FreeOnly, Candidates.FreeOrUnconfirmed } },
                              { "description", "free_only (default): only models whose list states a zero price. free_or_unconfirmed: also models whose price the service does not state." } } },
+                         { "include_best_effort", Property("boolean", "Also list best-effort candidates, built on the agents' own model lists where the service states nothing. Off by default.") },
                          { "refresh", refresh("their limits") },
                          { "max_age_seconds", maxAge("their limits") },
                      }, true),
@@ -292,7 +295,7 @@ namespace AIMeter
                     result = CandidatesJson(Candidates.Select(snap, scan, new Requirements
                     {
                         Service = service, Tools = Json.Bool(args, "tools"), MinContext = (long)(Json.Num(args, "min_context") ?? 0),
-                        MinOutput = (long)(Json.Num(args, "min_output_tokens") ?? 0), CostPolicy = policy,
+                        MinOutput = (long)(Json.Num(args, "min_output_tokens") ?? 0), CostPolicy = policy, BestEffort = Json.Bool(args, "include_best_effort"),
                     }, DateTime.Now, leases), scan);
                     break;
                 default: result = Suggest(snap.Providers); break;
@@ -656,10 +659,13 @@ namespace AIMeter
             return ToolResult(described, false);
         }
 
-        /// <summary>list_candidates: the ordered candidates, each pool's room once, the exclusions and the runtimes found.</summary>
+        /// <summary>
+        /// list_candidates: the ordered candidates, the best-effort ones when asked for (or how many there would be),
+        /// each pool's room once, the exclusions and the runtimes found.
+        /// </summary>
         private Dictionary<string, object> CandidatesJson(Selection s, RuntimeScan scan)
         {
-            var candidates = s.Chosen.Select(c =>
+            Func<Candidate, Dictionary<string, object>> entry = c =>
             {
                 var d = new Dictionary<string, object>
                 {
@@ -668,10 +674,13 @@ namespace AIMeter
                     { "credential", c.Access.Credential }, { "pool", c.Pool }, { "free", FreeJson(c.Model.Free) }, { "limits", LimitsJson(c.Provider, c.Model) },
                 };
                 var warnings = Dispatch.Warnings(c.Provider.Id);
+                if (c.Estimated != null) warnings.Insert(0, "best_effort");
                 if (warnings.Count > 0) d["warnings"] = warnings.Cast<object>().ToList();
-                return (object)d;
-            }).ToList();
-            var pools = s.Chosen.GroupBy(c => c.Pool).Select(g =>
+                if (c.Estimated != null) d["estimated"] = EstimatedJson(c);
+                return d;
+            };
+            var candidates = s.Chosen.Select(c => (object)entry(c)).ToList();
+            var pools = s.Chosen.Concat(s.BestEffort).GroupBy(c => c.Pool).Select(g =>
             {
                 var d = RoomJson(g.First().Room);
                 d["pool"] = g.Key;
@@ -685,7 +694,7 @@ namespace AIMeter
                 if (e.Until.HasValue) d["until"] = Time(e.Until.Value);
                 return (object)d;
             }).ToList();
-            return new Dictionary<string, object>
+            var result = new Dictionary<string, object>
             {
                 { "candidates", candidates }, { "pools", pools }, { "excluded", excluded },
                 { "runtimes", new Dictionary<string, object>
@@ -702,6 +711,30 @@ namespace AIMeter
                         { "key_discovery", !scan.KeyDiscoveryOff },
                     } },
             };
+            if (s.BestEffort.Count > 0) result["best_effort"] = s.BestEffort.Select(c => (object)entry(c)).ToList();
+            if (s.BestEffortAvailable > 0) result["best_effort_available"] = s.BestEffortAvailable;
+            return result;
+        }
+
+        /// <summary>
+        /// What a best-effort candidate rests on: the agent whose own list was read, the values taken from it where the
+        /// service's list is silent, and which facts no one has confirmed (unverified; limits whenever none is known).
+        /// </summary>
+        private static Dictionary<string, object> EstimatedJson(Candidate c)
+        {
+            var known = c.Estimated;
+            var unverified = new List<string>(c.Unverified);
+            if (!c.Provider.Catalogue.Rates.Any(r => r.Limit.HasValue)) unverified.Add("limits");
+            var d = new Dictionary<string, object>
+            {
+                { "source", "agent:" + c.Access.Runtime },
+                { "tools", known.Tools }, { "reasoning", known.Reasoning },
+                { "context_tokens", known.Context > 0 ? (object)known.Context : null }, { "max_output_tokens", known.MaxOutput > 0 ? (object)known.MaxOutput : null },
+                { "price_per_million", new Dictionary<string, object> { { "input", known.InputPrice }, { "output", known.OutputPrice } } },
+                { "unverified", unverified.Cast<object>().ToList() },
+                { "note", "Taken from " + c.Access.Runtime + "'s own model list, not from the service: the task may fail, stop or hit limits no one has stated. Ask the user before using it." },
+            };
+            return d;
         }
 
         /// <summary>A runtime and its place: name and where, with the distribution in WSL.</summary>

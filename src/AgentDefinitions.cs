@@ -29,6 +29,8 @@ namespace AIMeter
         public string Package;
         /// <summary>How a plugin starts it; null when delegation does not support the agent at all.</summary>
         public AgentDispatch Dispatch;
+        /// <summary>Where the agent keeps its own model list, for best-effort candidates; null when it declares none.</summary>
+        public AgentModelSource Models;
         /// <summary>"built-in" or the user file the definition came from.</summary>
         public string Origin;
 
@@ -66,6 +68,8 @@ namespace AIMeter
                     kind.Keys.Add(new KeySource { File = Local(Json.Str(k, "file")), Path = Json.Str(k, "path") });
             var dispatch = Json.Obj(d, "dispatch");
             if (dispatch != null) kind.Dispatch = AgentDispatch.FromJson(dispatch);
+            var models = Json.Obj(d, "models");
+            if (models != null) kind.Models = AgentModelSource.FromJson(models);
             return kind;
         }
 

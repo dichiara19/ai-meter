@@ -9,6 +9,7 @@
     { "file": ".pi/agent/models.json", "path": "providers.{id}.apiKey" }
   ],
   "package": "@earendil-works/pi-coding-agent",
+  "models": { "format": "pi", "file": "{package}/node_modules/@earendil-works/pi-ai/dist/providers/data/{provider}.json", "versions": ["1.x"] },
   "dispatch": {
     "places": {
       "wsl": { "versions": ["1.x"] }

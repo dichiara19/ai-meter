@@ -88,7 +88,7 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `list_free_models` | Free models with id, context window, output limit, tool and reasoning support, last free day, how the price is known (`free`) and their limits (`limits`, see below); filters `tools`, `min_context`, `min_output_tokens` and `include_unconfirmed` |
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
-| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, in a fixed order; each pool's room; why every other model is left out; and which agents were found but cannot be used. See below |
+| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, in a fixed order; each pool's room; why every other model is left out; which agents were found but cannot be used; and, when asked, best-effort candidates built on the agents' own model lists. See below |
 | `describe_dispatch` | How to start a candidate: program, argument list and environment for a verified agent and place. The task goes on stdin, never in the arguments. See below |
 | `claim_capacity`, `renew_capacity`, `release_capacity` | Cooperative capacity leases on a candidate's pool. These are the only tools that change anything: AI Meter's own lease book. See below |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
@@ -193,6 +193,25 @@ AI Meter sees only the rate limits of its own reads and the counters services re
 |---|---|
 | `openrouter_byok_fallback` | OpenRouter can retry a `:free` request that hit the free route's limit on a provider key the user linked to OpenRouter (BYOK), billed to that provider account. The catalogue's zero price cannot show this. Watch `output.cost` and stop the agent at the first request priced above zero, or ask the user to unlink BYOK keys before delegating |
 
+### Best-effort candidates
+
+Some services list their models without the facts delegation needs. NVIDIA's list gives only ids; the Gemini API's gives no tool support; neither gives prices. Their models are therefore never ordinary candidates. The coding agents often know more: their own model lists give tool support, the context window, the reply size and the price they charge.
+
+With `include_best_effort: true`, `list_candidates` also returns **`best_effort`**: models the service's list leaves short that an agent with a key of its own lists **at no price**, filling in what the task needs.
+
+- **They are a separate list, never mixed with `candidates`.** A plugin uses one only when the user agreed beforehand. The task may fail, stop or meet limits nobody has stated, so failures are handled case by case, without automatic retries on the same model.
+- **Without the flag**, `best_effort_available` counts them, and the models keep their exclusions.
+- **Order and room.** Best-effort candidates follow the same order as ordinary ones, and their pools appear in `pools`.
+- **What each entry adds:**
+  - `warnings` starting with `best_effort`;
+  - `estimated`, which gives `source` (`agent:pi`), the agent's `tools`, `reasoning`, `context_tokens`, `max_output_tokens` and `price_per_million`, and `unverified`: what rests on the agent's word (`price`, `tools`, `context`, `output`, and `limits` when the service states none).
+- **The agent must list the model at no price.** A model the agent prices is excluded as `agent_lists_price`, because the plugin stops an agent at its first priced request. For example, Pi prices Gemini Flash at its paid-tier rate, whatever the project's tier.
+- **A zero price in an agent's list is not proof that the model is free.** It means only that the agent will not stop it as paid.
+
+Checked on 2026-11-02 against public lists:
+- all 21 NVIDIA models in Pi's list have tool calling according to models.dev;
+- of the 386 OpenRouter models Pi lists, 377 have tools on OpenRouter. Pi marks 8 of the others as image models (`type: "image"`), which are not counted as having tools here. The one Pi lists as a chat model, the `openrouter/fusion` router, is the kind of exception best effort is for.
+
 ### Running a task: `describe_dispatch` and capacity leases
 
 AI Meter starts nothing. A coordinator plugin runs the agent ([ADR 0002](adr/0002-delegation-through-coordinator-plugins.md)), following these steps:
@@ -261,6 +280,7 @@ The coding agents AI Meter knows are data, like services: `agents/*.json`, built
 | `folders` | Settings folders relative to the home: any one shows the agent is set up |
 | `keys` | Where the agent keeps API keys: a home-relative `file` and a JSON `path`, with `{id}` for the service's aliases (`auth.ids` in its service definition) |
 | `package` | npm package, to read the version without running the agent; an agent npm installed in WSL also needs `node` |
+| `models` | The agent's own model list, for [best-effort candidates](#best-effort-candidates): `format` (`pi` or `models.dev`), `file` under `{home}/` or `{package}/` with `{provider}` for the service's alias, and optional `versions` whose layout was checked. Pi: `{package}/node_modules/@earendil-works/pi-ai/dist/providers/data/{provider}.json` for 1.x; OpenCode: `{home}/.cache/opencode/models.json` |
 | `dispatch` | How a plugin starts it. Without it, the agent is reported in `runtimes.unsupported` |
 | `dispatch.places` | The verified places, each with `versions` (`"1.x"` matches every 1.* version, `"1.4.0"` only that one), optional `executables` (native Windows programs inside the npm package) and optional own `arguments` and `environment` |
 | `dispatch.arguments` | The argument list per mode, `read_only` and `modify` |

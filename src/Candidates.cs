@@ -23,29 +23,114 @@ namespace AIMeter
         public const string FreeOnly = "free_only";
         public const string FreeOrUnconfirmed = "free_or_unconfirmed";
 
-        /// <summary>Choose the candidates for a task and explain each exclusion.</summary>
+        /// <summary>Exclusions an agent's own model list can make up for: the price or a capability the service does not state.</summary>
+        private static readonly string[] Unstated = { "price_not_confirmed", "tools_unknown", "context_unknown", "output_unknown" };
+
+        /// <summary>
+        /// Choose the candidates for a task and explain each exclusion. A model the service's list leaves short (its
+        /// price, tool support, context or reply size unstated) can still be a best-effort candidate through an agent
+        /// whose own list has the model at no price and fills in what the task needs. Those are listed apart, only when
+        /// the request asks for them; otherwise they are counted in BestEffortAvailable and keep their exclusion.
+        /// </summary>
         public static Selection Select(Snapshot snap, RuntimeScan runtimes, Requirements req, DateTime now, LeaseBook leases = null)
         {
             var result = new Selection();
             foreach (var p in snap.Providers.Where(x => x.Catalogue != null && (req.Service == null || string.Equals(x.Id, req.Service, StringComparison.OrdinalIgnoreCase))))
             {
-                var access = runtimes.Access.Where(a => a.Service == p.Id).ToList();
+                // Sorted so that the agent whose reason is reported does not depend on the scan's order.
+                var access = runtimes.Access.Where(a => a.Service == p.Id).OrderBy(a => a.Runtime, StringComparer.Ordinal)
+                    .ThenBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).ToList();
                 foreach (var m in p.Catalogue.Models)
                 {
-                    var room = Room(p.Id, p.Catalogue.Rates, now, leases, p.Catalogue.PoolOf(m) ?? p.Id);
+                    string pool = p.Catalogue.PoolOf(m) ?? p.Id;
+                    var room = Room(p.Id, p.Catalogue.Rates, now, leases, pool);
                     string reason = Check(m, req);
                     if (reason == null && access.Count == 0) reason = runtimes.KeyDiscoveryOff ? "key_discovery_off" : runtimes.Found.Count == 0 ? "no_runtime" : "runtime_has_no_key";
                     if (reason == null && room.Blocking != null) reason = room.Blocking;
-                    if (reason != null) { result.Exclude(p.Id, m.Id, reason, reason == room.Blocking ? room.Until : null); continue; }
-                    foreach (var a in access)
-                        result.Chosen.Add(new Candidate { Provider = p, Model = m, Access = a, Room = room, Pool = p.Catalogue.PoolOf(m) ?? p.Id });
+                    if (reason == null)
+                    {
+                        foreach (var a in access)
+                            result.Chosen.Add(new Candidate { Provider = p, Model = m, Access = a, Room = room, Pool = pool });
+                        continue;
+                    }
+                    if (Unstated.Contains(reason) && room.Blocking == null && EstimateFrom(result, p, m, access, req, room, ref reason)) continue;
+                    result.Exclude(p.Id, m.Id, reason, reason == room.Blocking ? room.Until : null);
                 }
             }
-            // Known room first, most room first; then unknown room; ties by service, model and runtime place.
-            result.Chosen = result.Chosen.OrderBy(c => c.Room.Ratio.HasValue ? 0 : 1).ThenByDescending(c => c.Room.Ratio ?? 0)
-                .ThenBy(c => c.Provider.Id, StringComparer.Ordinal).ThenBy(c => c.Model.Id, StringComparer.Ordinal)
-                .ThenBy(c => c.Access.Runtime, StringComparer.Ordinal).ThenBy(c => c.Access.Where, StringComparer.Ordinal).ToList();
+            result.Chosen = Ordered(result.Chosen);
+            result.BestEffort = Ordered(result.BestEffort);
             return result;
+        }
+
+        /// <summary>
+        /// Try each agent's own list for a model the service's list leaves short. Returns true when the model went to the
+        /// best-effort list. Otherwise, when best effort was asked for, reason becomes the first agent's own reason, such
+        /// as agent_lists_price, if an agent lists the model.
+        /// </summary>
+        private static bool EstimateFrom(Selection result, ProviderState p, FreeModel m, List<RuntimeAccess> access, Requirements req, PoolRoom room, ref string reason)
+        {
+            bool added = false;
+            string agentReason = null;
+            foreach (var a in access)
+            {
+                List<string> unverified;
+                var known = AgentModels.Find(a, m.Id);
+                string why = Estimate(m, known, req, out unverified);
+                if (why != null)
+                {
+                    if (known != null && agentReason == null) agentReason = why;
+                    continue;
+                }
+                if (!req.BestEffort) { result.BestEffortAvailable++; continue; }
+                result.BestEffort.Add(new Candidate { Provider = p, Model = m, Access = a, Room = room, Pool = p.Catalogue.PoolOf(m) ?? p.Id, Estimated = known, Unverified = unverified });
+                added = true;
+            }
+            if (!added && req.BestEffort && agentReason != null) reason = agentReason;
+            return added;
+        }
+
+        /// <summary>Known room first, most room first; then unknown room; ties by service, model and runtime place.</summary>
+        private static List<Candidate> Ordered(IEnumerable<Candidate> candidates)
+        {
+            return candidates.OrderBy(c => c.Room.Ratio.HasValue ? 0 : 1).ThenByDescending(c => c.Room.Ratio ?? 0)
+                .ThenBy(c => c.Provider.Id, StringComparer.Ordinal).ThenBy(c => c.Model.Id, StringComparer.Ordinal)
+                .ThenBy(c => c.Access.Runtime, StringComparer.Ordinal).ThenBy(c => c.Access.Where, StringComparer.Ordinal)
+                .ThenBy(c => c.Access.Distro, StringComparer.Ordinal).ToList();
+        }
+
+        /// <summary>
+        /// Whether a model can take the task on what an agent's own list says, where the service's list is silent; null
+        /// when it can, with what rests on the agent's word in unverified ("price", "tools", "context", "output").
+        /// The agent must list the model at no price: a priced model would make the plugin stop at the first request.
+        /// </summary>
+        private static string Estimate(FreeModel m, AgentModel known, Requirements req, out List<string> unverified)
+        {
+            unverified = new List<string>();
+            if (m.Free != null && !m.Free.Confirmed)
+            {
+                if (m.Free.Status != "unknown") return "price_not_confirmed";
+                unverified.Add("price");
+            }
+            if (known == null) return "not_in_agent_list";
+            if (known.Priced) return "agent_lists_price";
+            if (req.Tools)
+            {
+                bool tools = m.FeaturesUnknown ? known.Tools == true : m.Tools;
+                if (!tools) return m.FeaturesUnknown && known.Tools == null ? "tools_unknown" : "no_tools";
+                if (m.FeaturesUnknown) unverified.Add("tools");
+            }
+            long context = m.Context > 0 ? m.Context : known.Context, output = m.MaxOutput > 0 ? m.MaxOutput : known.MaxOutput;
+            if (req.MinContext > 0)
+            {
+                if (context < req.MinContext) return context == 0 ? "context_unknown" : "context_too_small";
+                if (m.Context == 0) unverified.Add("context");
+            }
+            if (req.MinOutput > 0)
+            {
+                if (output < req.MinOutput) return output == 0 ? "output_unknown" : "output_too_small";
+                if (m.MaxOutput == 0) unverified.Add("output");
+            }
+            return null;
         }
 
         /// <summary>Why a model cannot take the task, before runtime and capacity; null when it can.</summary>
@@ -328,6 +413,8 @@ namespace AIMeter
                         access.NodeFolder = node == null ? null : LinuxPath(node, f.Item2.Home);
                     }
                     else access.Program = NativeProgram(f.Item1, f.Item3, package);
+                    access.ModelsFile = AgentModels.FileFor(f.Item1, f.Item2.Home, package, access.Provider, access.Version);
+                    access.ModelsFormat = f.Item1.Models == null ? null : f.Item1.Models.Format;
                     scan.Access.Add(access);
                 }
             return scan;
@@ -383,6 +470,8 @@ namespace AIMeter
         public long MinContext, MinOutput;
         public string CostPolicy = Candidates.FreeOnly;
         public string Service;
+        /// <summary>Also list best-effort candidates, built on the agents' own model lists.</summary>
+        public bool BestEffort;
     }
 
     /// <summary>A runtime that can call a service with its own key; Credential is an opaque id, never the key or its file.</summary>
@@ -400,6 +489,8 @@ namespace AIMeter
         /// <summary>In WSL: whether the program is a Node script (npm installed it), and the Linux folder of node, or null.</summary>
         public bool NeedsNode;
         public string NodeFolder;
+        /// <summary>The agent's own model list for this service's provider alias, and its format; null when it has none.</summary>
+        public string ModelsFile, ModelsFormat;
     }
 
     /// <summary>An agent set up in one place: "windows", or "wsl" with its distribution.</summary>
@@ -444,12 +535,20 @@ namespace AIMeter
         public RuntimeAccess Access;
         public PoolRoom Room;
         public string Pool;
+        /// <summary>For a best-effort candidate: what the agent's own list says, and which facts rest on it.</summary>
+        public AgentModel Estimated;
+        public List<string> Unverified;
     }
 
-    /// <summary>The ordered candidates and the excluded models, grouped by service, reason and time.</summary>
+    /// <summary>
+    /// The ordered candidates, the best-effort ones when asked for (or how many there would be), and the excluded
+    /// models, grouped by service, reason and time.
+    /// </summary>
     internal sealed class Selection
     {
         public List<Candidate> Chosen = new List<Candidate>();
+        public List<Candidate> BestEffort = new List<Candidate>();
+        public int BestEffortAvailable;
         public readonly List<Exclusion> Excluded = new List<Exclusion>();
 
         public void Exclude(string service, string model, string reason, DateTime? until)
