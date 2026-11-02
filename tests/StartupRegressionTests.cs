@@ -14,9 +14,11 @@ namespace AIMeter
             test("Launching another copy preserves an existing startup shortcut", () => Fixture(PreserveShortcut));
             test("First use preserves a startup entry disabled by Windows", () => Fixture(PreserveDisabledShortcut));
             test("Launching another copy preserves the legacy Run command", () => Fixture(PreserveLegacyCommand));
-            test("An ordinary launch does not restore removed startup entries", () => Fixture(PreserveAbsence));
+            test("Declining start-up on first use removes any registration", () => Fixture(DeclineOnFirstUse));
             test("First use creates startup and explicit changes select the current copy", () => Fixture(ExplicitChanges));
             test("Explicit startup preserves a script path containing spaces", () => Fixture(ScriptLaunch));
+            test("Start-up is registered only after the welcome window, as chosen", () => Fixture(StartupAfterConsent));
+            test("The packaged app is launched through its execution alias", () => Fixture(PackagedLaunch));
         }
 
         private static void Fixture(Action test)
@@ -31,6 +33,8 @@ namespace AIMeter
             }
             finally
             {
+                Native.PackagedOverride = null;
+                if (File.Exists(Settings.StartupLink)) File.Delete(Settings.StartupLink);
                 Registry.CurrentUser.DeleteSubKeyTree(Settings.StartupRegistryRoot, false);
                 Environment.SetEnvironmentVariable("AIMETER_HOME", home);
                 Environment.SetEnvironmentVariable("AIMETER_LAUNCH", launch);
@@ -74,8 +78,7 @@ namespace AIMeter
         private static void PreserveShortcut()
         {
             byte[] original = CreateShortcut();
-            Settings.InitialiseStartup(false);
-            Settings.InitialiseStartup(true);
+            Settings.ApplyFirstRunStartup(true);
             Assert(File.ReadAllBytes(Settings.StartupLink).SequenceEqual(original), "A launch replaced another copy's shortcut.");
         }
 
@@ -85,8 +88,7 @@ namespace AIMeter
             byte[] disabled = new byte[12]; disabled[0] = 3;
             using (var key = Registry.CurrentUser.CreateSubKey(Settings.StartupRegistryRoot + @"\Explorer\StartupApproved\StartupFolder"))
                 key.SetValue("AI Meter.lnk", disabled, RegistryValueKind.Binary);
-            Settings.InitialiseStartup(true);
-            Settings.InitialiseStartup(false);
+            Settings.ApplyFirstRunStartup(true);
             Assert(!Settings.StartsWithWindows, "A launch re-enabled startup disabled by Windows.");
             Assert(File.ReadAllBytes(Settings.StartupLink).SequenceEqual(original), "A launch replaced a disabled shortcut.");
             using (var key = Registry.CurrentUser.OpenSubKey(Settings.StartupRegistryRoot + @"\Explorer\StartupApproved\StartupFolder"))
@@ -98,22 +100,24 @@ namespace AIMeter
             const string command = "\"C:\\Installed AI Meter\\AIMeter.exe\" --startup";
             using (var key = Registry.CurrentUser.CreateSubKey(Settings.StartupRegistryRoot + @"\Run"))
                 key.SetValue("AI Meter", command);
-            Settings.InitialiseStartup(false);
-            Settings.InitialiseStartup(true);
+            Settings.ApplyFirstRunStartup(true);
             using (var key = Registry.CurrentUser.OpenSubKey(Settings.StartupRegistryRoot + @"\Run"))
                 Assert((string)key.GetValue("AI Meter") == command, "A launch replaced the legacy command.");
             Assert(!File.Exists(Settings.StartupLink), "A launch migrated the legacy entry to the test copy.");
         }
 
-        private static void PreserveAbsence()
+        private static void DeclineOnFirstUse()
         {
-            Settings.InitialiseStartup(false);
-            Assert(!File.Exists(Settings.StartupLink) && !Settings.StartsWithWindows, "An ordinary launch restored startup.");
+            CreateShortcut();
+            using (var key = Registry.CurrentUser.CreateSubKey(Settings.StartupRegistryRoot + @"\Run"))
+                key.SetValue("AI Meter", "old command");
+            Settings.ApplyFirstRunStartup(false);
+            Assert(!File.Exists(Settings.StartupLink) && !Settings.StartsWithWindows, "Declining start-up left a registration.");
         }
 
         private static void ExplicitChanges()
         {
-            Settings.InitialiseStartup(true);
+            Settings.ApplyFirstRunStartup(true);
             Assert(File.Exists(Settings.StartupLink) && Settings.StartsWithWindows, "First use did not enable startup.");
             AssertCurrentShortcut();
             Settings.StartsWithWindows = false;
@@ -137,6 +141,55 @@ namespace AIMeter
             Environment.SetEnvironmentVariable("AIMETER_LAUNCH", "conhost.exe " + arguments);
             Settings.StartsWithWindows = true;
             AssertCurrentShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "conhost.exe"), arguments + " --startup");
+        }
+
+        /// <summary>Store policy 10.2.8: nothing registers start-up while the consent window is still open.</summary>
+        private static void StartupAfterConsent()
+        {
+            var settings = Settings.Current;
+            bool firstRunDone = settings.FirstRunDone;
+            try
+            {
+                foreach (bool packaged in new[] { false, true })
+                {
+                    Native.PackagedOverride = packaged;
+                    string mode = packaged ? " (packaged)" : "";
+                    settings.FirstRunDone = false;
+                    Controller.CompleteFirstRun(settings, () =>
+                    {
+                        Assert(!Settings.StartsWithWindows && !File.Exists(Settings.StartupLink), "Start-up was registered before consent" + mode + ".");
+                        Assert(!settings.FirstRunDone, "The first run was recorded before consent" + mode + ".");
+                        return true;
+                    });
+                    // The packaged registration is the manifest's startup task, compiled only into the MSIX build.
+                    Assert(settings.FirstRunDone && (packaged || Settings.StartsWithWindows), "Accepting start-up did not register it" + mode + ".");
+
+                    settings.FirstRunDone = false;
+                    Controller.CompleteFirstRun(settings, () => false);
+                    Assert(settings.FirstRunDone && !Settings.StartsWithWindows && !File.Exists(Settings.StartupLink), "Declining start-up registered it" + mode + ".");
+                }
+            }
+            finally
+            {
+                settings.FirstRunDone = firstRunDone;
+                settings.Save();
+            }
+        }
+
+        /// <summary>The MCP relay must name a path that survives Store updates, not the versioned package folder.</summary>
+        private static void PackagedLaunch()
+        {
+            Environment.SetEnvironmentVariable("AIMETER_LAUNCH", null);
+            string alias = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WindowsApps\AIMeter.exe");
+            Native.PackagedOverride = true;
+            Assert(Program.LaunchCommand == "\"" + alias + "\"", "The packaged launch command is not the execution alias: " + Program.LaunchCommand);
+            string target, args;
+            Program.SplitLaunch(out target, out args);
+            Assert(target == alias && args == "", "The relay would not start the execution alias.");
+            Assert(McpRelay.Script(McpPipeHost.PipePrefix, target, args).Contains("$launch = '" + alias + "'"), "The relay script does not name the execution alias.");
+
+            Native.PackagedOverride = false;
+            Assert(Program.LaunchCommand.IndexOf("WindowsApps", StringComparison.OrdinalIgnoreCase) < 0, "An unpackaged copy used the execution alias.");
         }
     }
 }

@@ -73,7 +73,6 @@ namespace AIMeter
             Settings = Settings.Load();
             Settings.Current = Settings;
             bool firstRun = !Settings.FirstRunDone;
-            try { Settings.InitialiseStartup(firstRun); } catch (Exception) { }
             L.Init(Settings.Language);
             collector = new Collector(Settings);
             historyStore = new HistoryStore(Path.Combine(Settings.Folder, "history.sqlite3"));

@@ -4,14 +4,17 @@
 #   -Mode exe     install the compiled executable (needs a signed executable if Smart App Control is on)
 #   -Mode script  install the sources with the AIMeter.ps1 launcher (default: works with Smart App Control)
 #   -Package      also build the MSIX package for the Microsoft Store (bin\AIMeter.msix; needs the Windows SDK)
-#                 package identity from Partner Center: -IdentityName, -Publisher, -PublisherName
-#                 (or the environment variables STORE_IDENTITY_NAME, STORE_PUBLISHER, STORE_PUBLISHER_NAME)
+#                 package identity from Partner Center: -IdentityName, -Publisher, -PublisherName, -DisplayName
+#                 (or the environment variables STORE_IDENTITY_NAME, STORE_PUBLISHER, STORE_PUBLISHER_NAME,
+#                 STORE_DISPLAY_NAME: the app name reserved in Partner Center, which the package must carry);
+#                 without them the identity is a placeholder, fine for local tests and refused by CI on release tags
 param(
     [switch]$NoInstall, [ValidateSet('script', 'exe')][string]$Mode = 'script',
     [switch]$Package,
     [string]$IdentityName = $(if ($env:STORE_IDENTITY_NAME) { $env:STORE_IDENTITY_NAME } else { 'dichiara19.AIMeter' }),
     [string]$Publisher = $(if ($env:STORE_PUBLISHER) { $env:STORE_PUBLISHER } else { 'CN=dichiara19' }),
-    [string]$PublisherName = $(if ($env:STORE_PUBLISHER_NAME) { $env:STORE_PUBLISHER_NAME } else { 'dichiara19' })
+    [string]$PublisherName = $(if ($env:STORE_PUBLISHER_NAME) { $env:STORE_PUBLISHER_NAME } else { 'dichiara19' }),
+    [string]$DisplayName = $(if ($env:STORE_DISPLAY_NAME) { $env:STORE_DISPLAY_NAME } else { 'AI Meter' })
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -147,6 +150,8 @@ if ($Package) {
         Save-Png "Wide310x150Logo.scale-$sc.png" (New-RingPng ([int](72 * $f)) ([int](310 * $f)) ([int](150 * $f)))
         Save-Png "StoreLogo.scale-$sc.png" (New-RingPng ([int](50 * $f)))
     }
+    # Store listing icon, uploaded in Partner Center rather than packaged.
+    [IO.File]::WriteAllBytes((Join-Path $bin 'StoreIcon-300.png'), (New-RingPng 300))
 
     $version = ([regex]::Match((Get-Content (Join-Path $root 'src\AssemblyInfo.cs') -Raw), 'AssemblyVersion\("(\d+\.\d+\.\d+)')).Groups[1].Value + '.0'
     $esc = { param($s) [Security.SecurityElement]::Escape($s) }
@@ -154,25 +159,36 @@ if ($Package) {
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
          xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         IgnorableNamespaces="uap desktop rescap">
+         xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10"
+         IgnorableNamespaces="uap uap3 desktop rescap virtualization">
   <Identity Name="$(& $esc $IdentityName)" Publisher="$(& $esc $Publisher)" Version="$version" ProcessorArchitecture="neutral"/>
   <Properties>
-    <DisplayName>AI Meter</DisplayName>
+    <DisplayName>$(& $esc $DisplayName)</DisplayName>
     <PublisherDisplayName>$(& $esc $PublisherName)</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
+    <!-- Writes to these AppData folders reach the real ones: the Claude Desktop and VS Code MCP configurations must be
+         visible to those apps even when AI Meter creates them, and AI Meter's own data stays where the other builds keep
+         it, so Explorer can open it and an upgrade from them finds the same settings (Windows 11 flexible virtualisation). -->
+    <virtualization:FileSystemWriteVirtualization>
+      <virtualization:ExcludedDirectories>
+        <virtualization:ExcludedDirectory>`$(KnownFolder:RoamingAppData)\AIMeter</virtualization:ExcludedDirectory>
+        <virtualization:ExcludedDirectory>`$(KnownFolder:RoamingAppData)\Claude</virtualization:ExcludedDirectory>
+        <virtualization:ExcludedDirectory>`$(KnownFolder:RoamingAppData)\Code</virtualization:ExcludedDirectory>
+      </virtualization:ExcludedDirectories>
+    </virtualization:FileSystemWriteVirtualization>
   </Properties>
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0"/>
   </Dependencies>
   <Resources>
-    <Resource Language="en-us"/><Resource Language="it-it"/><Resource Language="es-es"/>
-    <Resource Language="fr-fr"/><Resource Language="de-de"/><Resource Language="pt-pt"/>
+    <Resource Language="en-us"/>
   </Resources>
   <Applications>
     <Application Id="App" Executable="AIMeter.exe" EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements DisplayName="AI Meter" Description="Sessions and usage limits of your AI services"
+      <uap:VisualElements DisplayName="$(& $esc $DisplayName)" Description="Sessions and usage limits of your AI services"
                           BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png"/>
       </uap:VisualElements>
@@ -180,12 +196,19 @@ if ($Package) {
         <desktop:Extension Category="windows.startupTask" Executable="AIMeter.exe" EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="AIMeterStartup" Enabled="false" DisplayName="AI Meter"/>
         </desktop:Extension>
+        <!-- %LOCALAPPDATA%\Microsoft\WindowsApps\AIMeter.exe: a launch path that survives updates, used by the MCP relay. -->
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="AIMeter.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="AIMeter.exe"/>
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
       </Extensions>
     </Application>
   </Applications>
   <Capabilities>
     <Capability Name="internetClient"/>
     <rescap:Capability Name="runFullTrust"/>
+    <rescap:Capability Name="unvirtualizedResources"/>
   </Capabilities>
 </Package>
 "@ | Set-Content (Join-Path $layout 'AppxManifest.xml') -Encoding UTF8
@@ -198,11 +221,11 @@ if ($Package) {
     $cfg = Join-Path $work 'priconfig.xml'
     & "$sdk\makepri.exe" createconfig /cf $cfg /dq en-US /pv 10.0.0 /o | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed" }
-    # A single resources.pri with every scale (no separate resource packages, which only bundles need)
-    # and the six interface languages as package languages.
+    # A single resources.pri with every scale (no separate resource packages, which only bundles need). The package
+    # declares English only, since each declared language needs its own Store listing (policy 10.7); the interface
+    # still follows the Windows language, from the strings compiled into the executable.
     $x = [IO.File]::ReadAllText($cfg)
     $x = [regex]::Replace($x, '(?s)<packaging>.*?</packaging>', '')
-    $x = $x.Replace('name="Language" value="en-US"', 'name="Language" value="en-US;it-IT;es-ES;fr-FR;de-DE;pt-PT"')
     [IO.File]::WriteAllText($cfg, $x)
     & "$sdk\makepri.exe" new /pr $layout /cf $cfg /mn (Join-Path $layout 'AppxManifest.xml') /of (Join-Path $layout 'resources.pri') /o
     if ($LASTEXITCODE -ne 0) { throw "makepri failed" }

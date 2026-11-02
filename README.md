@@ -146,7 +146,7 @@ A Microsoft Store version, signed by Microsoft and updated automatically, is in 
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Compiles with the `csc.exe` that ships with .NET Framework (no SDK needed), installs to `%LOCALAPPDATA%\Programs\AI Meter`, adds a Start menu shortcut and updates any existing startup registration to the installed copy. On first use it enables startup if no registration exists (you can turn this off in Settings). Launching another copy preserves existing startup entries, including those disabled in Windows. `-NoInstall` only builds into `bin\`.
+Compiles with the `csc.exe` that ships with .NET Framework (no SDK needed), installs to `%LOCALAPPDATA%\Programs\AI Meter`, adds a Start menu shortcut and updates any existing startup registration to the installed copy. On first use the welcome window asks whether to start with Windows (on by default); startup is registered only after that window closes, if no registration exists (you can turn this off later in Settings). Launching another copy preserves existing startup entries, including those disabled in Windows. `-NoInstall` only builds into `bin\`.
 
 Two install modes:
 
