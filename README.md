@@ -268,6 +268,12 @@ With these off, AI Meter makes no network connections at all.
 
 Bug reports, translations, new services and code are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Questions and ideas go to [Discussions](https://github.com/dichiara19/ai-meter/discussions), security issues to a [private report](SECURITY.md). Everyone is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
+## Support
+
+AI Meter is free and open source, and it stays that way. If it is useful to you and you would like to chip in, you can [buy me a coffee](https://buymeacoffee.com/giuseppedichiara); a star or a bug report helps just as much.
+
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-f59e0b)](https://buymeacoffee.com/giuseppedichiara)
+
 ## Third-party services
 
 AI Meter is an independent project, not affiliated with, endorsed or sponsored by Anthropic, OpenAI, GitHub, Microsoft, Anysphere (Cursor) or any other service it shows. Names and logos belong to their owners (see [NOTICE](NOTICE)); logos are read at runtime from apps installed on your PC, and screenshots show them only to identify the services.
