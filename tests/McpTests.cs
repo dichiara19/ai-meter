@@ -28,6 +28,39 @@ namespace AIMeter
             test("Codex TOML gains and loses only AI Meter's tables", TomlEdits);
             test("Antigravity CLI is found by its own folder and its empty MCP file is connected", AntigravityCli);
             test("Command-line installation quotes paths and places -- for each agent", Commands);
+            test("A copy button confirms the copy on itself, then returns to its label", CopiedFeedback);
+        }
+
+        private static void CopiedFeedback()
+        {
+            var button = new System.Windows.Controls.Button { Content = "WSL", MinWidth = 10 };
+            SettingsWindow.ShowCopied(button, TimeSpan.FromMilliseconds(150));
+            Assert(button.Content is System.Windows.Controls.Panel, "The button does not show the confirmation.");
+            Assert(System.Windows.Automation.AutomationProperties.GetName(button) == L.T("Copied"), "Screen readers are not told about the copy.");
+            Assert(System.Windows.Automation.AutomationProperties.GetLiveSetting(button) != System.Windows.Automation.AutomationLiveSetting.Off, "The confirmation is not a live region.");
+            SettingsWindow.ShowCopied(button, TimeSpan.FromMilliseconds(150));   // A second click while it shows "Copied".
+
+            // Let the dispatcher run the timer.
+            var frame = new System.Windows.Threading.DispatcherFrame();
+            var stop = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+            stop.Tick += (o, e) => { stop.Stop(); frame.Continue = false; };
+            stop.Start();
+            System.Windows.Threading.Dispatcher.PushFrame(frame);
+
+            Assert(button.Content as string == "WSL", "The label did not come back, or a second click replaced it.");
+            Assert(button.MinWidth == 10 && string.IsNullOrEmpty(System.Windows.Automation.AutomationProperties.GetName(button)), "The button kept its temporary width or name.");
+
+            // The reserved width fits the wider confirmation, so showing it does not move the buttons beside it.
+            var narrow = new System.Windows.Controls.Button { Content = "WSL" };
+            var infinite = new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity);
+            narrow.Measure(infinite);
+            double labelWidth = narrow.DesiredSize.Width;
+            double reserved = SettingsWindow.CopiedWidth(narrow);
+            Assert(narrow.Content as string == "WSL", "Measuring changed the label.");
+            SettingsWindow.ShowCopied(narrow, TimeSpan.FromSeconds(5));
+            narrow.UpdateLayout();
+            Assert(reserved > labelWidth && reserved >= narrow.DesiredSize.Width - 0.5,
+                "The reserved width does not fit the confirmation: label " + labelWidth + ", reserved " + reserved + ", shown " + narrow.DesiredSize.Width + ".");
         }
 
         private static void Assert(bool condition, string message)

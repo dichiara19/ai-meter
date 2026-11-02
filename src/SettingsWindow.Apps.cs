@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 
 namespace AIMeter
 {
@@ -34,7 +35,7 @@ namespace AIMeter
 
             Group(
                 Row(Ui.Glyph("", 20, "Text"), L.T("Other apps"), L.T("Copy the configuration for apps that are not listed, such as the ChatGPT app when it accepts local servers."),
-                    Button(L.T("Copy configuration"), CopyMcpSnippet, false)),
+                    CopyButton(L.T("Copy configuration"), () => McpClients.Snippet(McpRelay.Write()))),
                 Row(Ui.Glyph("", 20, "Text"), L.T("Share session titles"), L.T("Titles often repeat your first request. When off, apps see only the agent, status, model and provider of each session."),
                     Toggle(S.McpTitles, v => { S.McpTitles = v; S.Save(); })));
 
@@ -45,7 +46,8 @@ namespace AIMeter
             {
                 string id = cli[0];
                 return Row(null, cli[1], null,
-                    Pair(Button("Windows", () => CopyMcpCommand(id, false), false), Button("WSL", () => CopyMcpCommand(id, true), false)));
+                    Pair(CopyButton("Windows", () => McpClients.Command(id, McpRelay.Write(), false)),
+                         CopyButton("WSL", () => McpClients.Command(id, McpRelay.Write(), true))));
             }).ToArray());
         }
 
@@ -72,18 +74,22 @@ namespace AIMeter
             MessageBox.Show(this, L.F("{0} was not changed.", c.Name) + "\n\n" + reason + snippet, "AI Meter", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
-        private void CopyMcpSnippet()
+        private static readonly TimeSpan CopiedDuration = TimeSpan.FromSeconds(2);
+
+        /// <summary>A button that copies text naming the relay and confirms the copy on itself.</summary>
+        private Button CopyButton(string label, Func<string> text)
         {
-            CopyMcpText(() => McpClients.Snippet(McpRelay.Write()));
+            Button button = null;
+            button = Button(label, () => { if (CopyMcpText(text)) ShowCopied(button, CopiedDuration); }, false);
+            ReserveCopiedWidth(button);
+            return button;
         }
 
-        private void CopyMcpCommand(string clientId, bool wsl)
-        {
-            CopyMcpText(() => McpClients.Command(clientId, McpRelay.Write(), wsl));
-        }
-
-        /// <summary>Copy text that names the relay; writing the relay first makes sure the pasted command works.</summary>
-        private void CopyMcpText(Func<string> text)
+        /// <summary>
+        /// Copy text that names the relay; writing the relay first makes sure the pasted command works.
+        /// Returns false, after explaining why, when the relay or the clipboard could not be written.
+        /// </summary>
+        private bool CopyMcpText(Func<string> text)
         {
             string failure = null;
             try { Clipboard.SetText(text()); }
@@ -91,6 +97,7 @@ namespace AIMeter
             catch (UnauthorizedAccessException ex) { failure = ex.Message; }
             catch (System.Runtime.InteropServices.ExternalException ex) { failure = ex.Message; }
             if (failure != null) MessageBox.Show(this, failure, "AI Meter", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return failure == null;
         }
     }
 }
