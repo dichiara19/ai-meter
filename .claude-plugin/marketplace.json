@@ -1,0 +1,14 @@
+{
+  "name": "ai-meter",
+  "owner": { "name": "Giuseppe Di Chiara", "url": "https://github.com/dichiara19" },
+  "description": "AI Meter's plugins for coordinators: delegate tasks to coding agents on free models.",
+  "plugins": [
+    {
+      "name": "ai-meter",
+      "description": "Delegate self-contained coding tasks to agents on free models (Pi, OpenCode), chosen and paced with AI Meter.",
+      "version": "0.1.0",
+      "author": { "name": "Giuseppe Di Chiara" },
+      "source": "./plugins/ai-meter"
+    }
+  ]
+}

@@ -226,7 +226,7 @@ Output:
 
 ### 3.3 What the plugins own
 
-These belong to the plugin, not to AI Meter:
+M5 implements this in [plugins/ai-meter](../../plugins/ai-meter/README.md), one plugin for both Claude Code and Codex. These belong to the plugin, not to AI Meter:
 - status, result and cancellation;
 - background runs and their logs;
 - the worktree for tasks that change a repository: read-only by default, never merged automatically;

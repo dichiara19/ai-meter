@@ -11,11 +11,11 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | Milestone | State | Branch / PR | Base / head SHA | Tests and evidence | Blockers / next action |
 | --- | --- | --- | --- | --- | --- |
 | M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
-| M1 MCP freshness | in_review | [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / `f3f3aeb` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. Trial merge of #18, #19 and #20 on `main`: no conflicts, 97 tests passed | Store relay path deferred to M6 (maintainer decision, 2026-11-02). Next: merge #18, then #19 and #20 |
-| M2 Provider discovery | in_progress | `feat/provider-discovery`, stacked on `feat/mcp-freshness` | `5eacffc` / not yet pushed | `tests/run.ps1`: 100 passed (5 new). `build.ps1 -NoInstall` compiled. Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: **NOT RUN**. Rebase onto `main` after #18 |
-| M3 Execution candidates | in_progress | `feat/execution-candidates`, stacked on `feat/provider-discovery` | `3411e33` / not yet pushed | `tests/run.ps1`: 105 passed (5 new). Live Pi scan on this PC | Rebase onto `main` after #18 and #21 |
-| M4 Dispatch descriptions and capacity leases | in_progress | `feat/dispatch-leases`, stacked on `docs/delegation-plugins` | `c844bc2` / `e756197` + working tree | Spike done. `tests/run.ps1`: 112 passed (6 new). Pi and OpenCode in WSL started from Windows with AI Meter's descriptions, live | Plugins (M5) |
-| M5 Claude Code and Codex plugins | planned | `feat/coordinator-plugins` | — | — | Needs M4 |
+| M1 MCP freshness | merged | [PR #18](https://github.com/dichiara19/ai-meter/pull/18), squash-merged as `972c7f3` | `f051b41` / `5eacffc` | `tests/run.ps1`: 95 passed. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. CI `build` green | Store relay path moved to M6 |
+| M2 Provider discovery | merged | [PR #21](https://github.com/dichiara19/ai-meter/pull/21), squash-merged as `4441b54` | `649bff3` / `048550f` | Rebased tree: 102 tests passed. CI `build` green (run 41470098975). Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: **NOT RUN** |
+| M3 Execution candidates | merged | [PR #22](https://github.com/dichiara19/ai-meter/pull/22), squash-merged as `79c28c2` | `4441b54` / `2b2d967` | Rebased tree: 108 tests passed. CI `build` green (run 41471025123). Live agent scan on this PC | — |
+| M4 Dispatch descriptions and capacity leases | merged | [PR #26](https://github.com/dichiara19/ai-meter/pull/26), squash-merged as `ba8d1e3`; ADR 0002 as [PR #23](https://github.com/dichiara19/ai-meter/pull/23), `830837b` | `830837b` / `e52285d` | Rebased tree: 114 tests passed. CI `build` green (run 41475549785). Pi and OpenCode in WSL started from Windows with AI Meter's descriptions, live | — |
+| M5 Claude Code and Codex plugins | in_progress | `feat/coordinator-plugins`, from `main` | `ba8d1e3` / not yet pushed | `node --test`: 11 passed on Windows and in WSL; `tests/run.ps1` unchanged. Live: delegations from Windows and from WSL, Pi and OpenCode, read-only, `modify` and cancel; Claude Code 2.1.316 in WSL through the plugin; cost measured | A task driven by Codex's own model: **NOT RUN** (usage limit). Coordinators on native Windows and the interactive screens: **NOT RUN** |
 | M6 Stabilisation and release candidate | planned | — | — | — | Needs M1–M5 |
 
 ## Baseline (verified 2026-11-02)
@@ -64,6 +64,60 @@ Three things the PR marked as unverified are still unverified after the release,
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M5 implemented: one plugin for Claude Code and Codex.**
+  - **`plugins/ai-meter`.** One folder carries both manifests:
+    - `.claude-plugin/plugin.json` and `.mcp.json` for Claude Code;
+    - `.codex-plugin/plugin.json` and `codex-mcp.json` for Codex.
+    - The marketplaces are `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` at the repository root.
+    - Both coordinators get the same MCP server (`delegate`, `delegate_result`, `delegate_status`, `delegate_cancel`, `delegate_candidates`) and the same `delegate` skill.
+    - It uses Node's standard library only.
+    - **Why an MCP server rather than commands:** the task travels as JSON, never through a shell.
+  - **How a job runs.**
+    - Jobs run in a detached worker, recorded under `~/.aimeter/jobs`.
+    - The worker calls `list_candidates`, then `describe_dispatch` before `claim_capacity`, so no lease is taken for an agent it cannot start. `docs/MCP.md` now lists the steps in that order.
+    - It starts the program as described, writes the task to stdin and closes it.
+    - It reads Pi's and OpenCode's events, then releases the lease with the outcome, the requests, the tokens and any `429`.
+    - Cancelling stops the agent; so does a timeout.
+    - `modify` runs in a new worktree on `ai-meter/<job id>`. Nothing is committed, merged or removed.
+  - **Live, on this PC.** Every lease was released, and AI Meter's observed counters added up.
+    - **From Windows:**
+      - OpenCode on Windows, 2 requests;
+      - Pi in WSL, 2 requests;
+      - a `modify` task in a scratch repository: the fix was in the worktree, and the checkout was untouched;
+      - a cancel: the agent ended in about 1 s, with no process left.
+    - **From WSL:** OpenCode in WSL. Its Windows variant was skipped with AI Meter's reason.
+    - **Through the MCP server,** natively on Windows and from Codex's plugin cache in WSL.
+    - **Claude Code 2.1.316 in WSL** installed the plugin from the local marketplace and delegated a task headless. Codex 0.163.0 installed it and lists the server, but its model could not run because the account hit its usage limit.
+  - **Found live:**
+    - AI Meter answers only `status` while it reads its first data, so the plugin waits for it;
+    - the first changed file lost its first letter (`alc.py`), because Git's status lines were trimmed. Fixed, with a regression test.
+  - **Cost.** Single runs with Sonnet 5.5 as coordinator; details in the [plugin README](../../plugins/ai-meter/README.md#does-it-save).
+    - **Short task:** $0.217 direct, $0.301 delegated.
+    - **Medium task:** $0.370 direct, $0.255 delegated, but with a weaker answer.
+    - The prompt cache favours whichever run of a pair goes second.
+  - **Tests and CI.** 11 tests with a fake AI Meter and fake agents, on Windows and in WSL. CI runs them on Windows, and in a new `plugin-linux` job.
+  - **Gaps:**
+    - AI Meter's order ties within a pool, so the first model is alphabetical. The skill advises pinning a coding model.
+    - Leases are not renewed: one claim covers the timeout plus two minutes.
+    - AI Meter was reinstalled from `main` for the live checks; the installed copy had been older.
+
+
+- **2026-11-02, the chain is merged.**
+  - The maintainer squash-merged everything into `main`:
+    - #18 (M1) as `972c7f3`;
+    - #19 (Antigravity CLI) as `b5d547b`;
+    - #20 (copy confirmation) as `649bff3`;
+    - #21 (M2) as `4441b54`;
+    - #22 (M3) as `79c28c2`;
+    - #23 (ADR 0002) as `830837b`;
+    - #26 (M4) as `ba8d1e3`.
+  - **Rebasing the stacked PRs.** A force push of a rebased branch was refused by the session's permissions. So each stacked PR was instead:
+    1. rebased locally and tested;
+    2. then `main` was merged into its branch, with the result set to the tested tree and checked to be identical;
+    3. CI then ran on the new head.
+  - Temporary branches and worktrees were removed after checking their content was on `main`.
+  - M5 starts on `feat/coordinator-plugins` from `ba8d1e3`.
 
 - **2026-11-02, M4 implemented.**
   - **`src/Dispatch.cs`.** Verified rows: Pi in WSL; OpenCode in WSL and on Windows.

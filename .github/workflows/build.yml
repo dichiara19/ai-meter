@@ -28,6 +28,9 @@ jobs:
         shell: powershell
         run: ./tests/run.ps1
 
+      - name: Coordinator plugin tests (fake AI Meter and fake agents)
+        run: node --test plugins/ai-meter/tests/delegate.test.mjs
+
       - name: Build (C# compiler of .NET Framework 4.8, included in Windows)
         shell: powershell
         run: ./build.ps1 -NoInstall
@@ -90,6 +93,15 @@ jobs:
         with:
           name: AIMeter-msix
           path: bin/AIMeter.msix
+
+  # The plugin also runs inside WSL, where agents are stopped with SIGINT rather than taskkill.
+  plugin-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Coordinator plugin tests (fake AI Meter and fake agents)
+        run: node --test plugins/ai-meter/tests/delegate.test.mjs
 
   release:
     needs: build
