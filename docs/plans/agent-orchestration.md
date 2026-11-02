@@ -24,6 +24,7 @@ This file is a plan. Nothing here exists in code until a milestone's pull reques
   - the shared pool the model draws from.
 - OpenRouter, Experiential Labs, NVIDIA API Catalog and Gemini Developer API.
 - Delegation to a full executor, with status, result and cancellation. Delegation is offered according to the agents the user has: one adapter per agent, none required.
+- Delegation works for coordinators run natively on Windows, without WSL, as well as in WSL (maintainer requirement, 2026-11-02).
 - Claude Code and Codex as coordinators, in the foreground or background where the client supports it.
 - No promised savings without measuring the coordinator, any intermediary, the executor and the checks.
 
@@ -45,7 +46,7 @@ The first version targets Windows. It uses WSL only when WSL is already running.
 | M3 | Quota-aware candidate selection / `feat/execution-candidates` | M1, M2 | `list_candidates` with `headroom`; selection is deterministic; per-request caps filter; pools never add up; `free_only`, quota scope and `429` tested |
 | M4 | Agent spike, dispatch descriptions and capacity leases / `feat/dispatch-leases` | M3 | For at least two agents, a verified non-interactive invocation on a free model, described as data. `describe_dispatch` returns it without the task text and without a shell string. `claim_capacity` and `release_capacity` make headroom account for leases, expire on their own, and feed `observed` counters. No task text, code or key is stored |
 | M5 | Claude Code and Codex plugins / `feat/coordinator-plugins` | M4 | One real task from each coordinator, through its plugin: choose, claim, run in the background, status, result, cancel, release. Read-only by default; changes in a new worktree; measured cost of coordinator, intermediary and agent |
-| M6 | Stabilisation, UX, packaging, release candidate | M1–M5 | End-to-end tests; upgrade from 0.8.6 verified; artefacts verified, including the MCP relay in the Store package; version decided |
+| M6 | Stabilisation, UX, packaging, release candidate | M1–M5 | End-to-end tests; upgrade from 0.8.6 verified; artefacts verified, including the MCP relay and agent detection from the Store package (MSIX virtualisation of `AppData`); version decided |
 
 M1 and M2 can proceed independently after M0. A coding agent works on one milestone at a time unless it is explicitly told otherwise.
 
@@ -79,7 +80,21 @@ Each spike records the version tested and what it observed, in the status log.
     - `codex app-server` and `claude -p` are candidate adapter interfaces next to Pi's and OpenCode's.
     - These plugins delegate to another paid agent, not to free models. Whether Codex can run free models through an OpenAI-compatible provider is still to be checked.
     - A lighter route is also possible: AI Meter chooses the model and pool (`list_candidates`) and counts consumption, while the coordinators' own plugins run the task. **Chosen on 2026-11-02:** see [ADR 0002](../adr/0002-delegation-through-coordinator-plugins.md).
-- **Agents (Pi first, as it is installed here; then at least one more).**
+- **Agents (done for Pi, 2026-11-02).** [spike-agents.md](spike-agents.md) has the results.
+  - **Pi 1.4.0, verified live in WSL:**
+    - the task goes through stdin, with JSONL events, and `stopReason` tells the outcome (the exit code stays 0);
+    - one `turn_end` per request, and tokens per message;
+    - about 4.6k tokens of system prompt per request;
+    - `SIGINT` or RPC `abort` stops cleanly, but reports no tokens;
+    - a `:free` model can fall back to the user's own BYOK key.
+  - **OpenCode 1.19.5, verified live in WSL and on Windows:**
+    - the task goes through stdin, which must be closed, otherwise OpenCode waits forever;
+    - the exit code is reliable;
+    - it needs isolation variables, or it loads the user's skills and titles the session with a paid small model;
+    - on Windows it is stopped with `taskkill /T`.
+  - **Codex 0.163.0:** flags verified, but it has no free-model route here without a user-configured provider.
+  - **Packaged apps.** An agent installed from a packaged app, such as the Claude desktop app (MSIX), lands in the app's virtualised `AppData` and stays invisible to everyone else. Plugins must find agents in their real paths and never install them.
+- **Still to do:** Pi on Windows, and a gentler stop than `taskkill` on Windows.
   - Pick the structured interface available in the pinned version.
   - Check events, EOF, errors, cancellation, resume and the usage it reports.
   - Check whether it exposes per-request counts, rate-limit responses and a way to cap output or pace requests.

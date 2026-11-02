@@ -180,6 +180,12 @@ This lets a coordinator plan several tasks at once, such as how many parallel jo
 
 AI Meter runs no jobs ([ADR 0002](../adr/0002-delegation-through-coordinator-plugins.md)). A coordinator plugin runs the agent. AI Meter describes how to run it, and keeps cooperative leases on pool capacity.
 
+M4 implements this section in `src/Dispatch.cs`, `src/Leases.cs` and the MCP tools; [docs/MCP.md](../MCP.md#running-a-task-describe_dispatch-and-capacity-leases) is the reference. Differences from this draft:
+- `describe_dispatch` also takes `mode` and `from`.
+- `claim_capacity` derives the pool from service and model rather than taking it.
+- `renew_capacity` exists.
+- A rate limit without Retry-After closes the pool for 60 s.
+
 ### 3.1 `describe_dispatch`
 
 Input: a candidate from `list_candidates`, identified by `service`, `model`, `runtime` and `where`.
@@ -198,7 +204,8 @@ Output:
 }
 ```
 
-- The description comes from a data table per agent, one row per verified version range. The M4 spike fills it, and nothing is written from memory.
+- The description comes from a data table per agent, one row per verified version range. The M4 spike fills it, and nothing is written from memory. [spike-agents.md](spike-agents.md) has the first row (Pi 1.x).
+- Besides the fields above, each row says how to tell the end (Pi: `agent_settled`), where the outcome is (Pi: the last assistant `stopReason`, not the exit code), how to count requests and tokens, and how to stop the agent.
 - `arguments` is an array. The plugin starts the program without a shell and passes the task as data, through stdin or a single argument, as `task_input` says. There is no field for an arbitrary command, and the task text never enters the description.
 - `where: "wsl"` means the plugin starts the agent inside WSL, which must already be running. AI Meter never starts WSL.
 - An agent without a verified row returns `unsupported`, and the reason.

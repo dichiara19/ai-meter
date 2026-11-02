@@ -22,15 +22,15 @@ namespace AIMeter
         public const string FreeOrUnconfirmed = "free_or_unconfirmed";
 
         /// <summary>Choose the candidates for a task and explain each exclusion.</summary>
-        public static Selection Select(Snapshot snap, RuntimeScan runtimes, Requirements req, DateTime now)
+        public static Selection Select(Snapshot snap, RuntimeScan runtimes, Requirements req, DateTime now, LeaseBook leases = null)
         {
             var result = new Selection();
             foreach (var p in snap.Providers.Where(x => x.Catalogue != null && (req.Service == null || string.Equals(x.Id, req.Service, StringComparison.OrdinalIgnoreCase))))
             {
-                var room = Room(p.Id, p.Catalogue.Rates, now);
                 var access = runtimes.Access.Where(a => a.Service == p.Id).ToList();
                 foreach (var m in p.Catalogue.Models)
                 {
+                    var room = Room(p.Id, p.Catalogue.Rates, now, leases, p.Catalogue.PoolOf(m) ?? p.Id);
                     string reason = Check(m, req);
                     if (reason == null && access.Count == 0) reason = runtimes.KeyDiscoveryOff ? "key_discovery_off" : runtimes.Found.Count == 0 ? "no_runtime" : "runtime_has_no_key";
                     if (reason == null && room.Blocking != null) reason = room.Blocking;
@@ -62,7 +62,7 @@ namespace AIMeter
         /// is used up (exhausted); at most one new task without a known concurrency limit. Ratio is the remaining share
         /// of the tightest limit whose limit and remaining are both known, or null when none is.
         /// </summary>
-        public static PoolRoom Room(string service, IList<RateLimit> rates, DateTime now)
+        public static PoolRoom Room(string service, IList<RateLimit> rates, DateTime now, LeaseBook leases = null, string pool = null)
         {
             var room = new PoolRoom();
             DateTime wait = NetworkBackoff.Until(service);
@@ -78,7 +78,31 @@ namespace AIMeter
                 room.Ratio = Math.Max(0, tightest.Remaining.Value / tightest.Limit.Value);
                 room.BindingMetric = tightest.Metric;
             }
+            if (leases != null && pool != null) ApplyLeases(room, leases, pool, now);
             return room;
+        }
+
+        /// <summary>
+        /// Count the pool's active leases against its room, and close it while an agent's rate limit lasts. A pool whose
+        /// room is all leased is blocked ("leased") until its first lease expires or is released.
+        /// </summary>
+        private static void ApplyLeases(PoolRoom room, LeaseBook leases, string pool, DateTime now)
+        {
+            room.Leased = leases.Active(pool, now);
+            DateTime agentWait = leases.BackoffUntil(pool);
+            if (room.Blocking == null && agentWait > now)
+            {
+                room.Blocking = "rate_limited";
+                room.Until = agentWait;
+                room.MaxNewJobs = 0;
+            }
+            if (room.Blocking != null) return;
+            room.MaxNewJobs = Math.Max(0, room.MaxNewJobs - room.Leased);
+            if (room.MaxNewJobs == 0)
+            {
+                room.Blocking = "leased";
+                room.Until = leases.EarliestExpiry(pool, now);
+            }
         }
 
         // ------------------------------------------------------------ runtimes
@@ -110,24 +134,49 @@ namespace AIMeter
         /// the distribution's file share, so nothing is started inside WSL; on Windows, PATH and npm's global folder.
         /// Node version managers that keep programs elsewhere are not covered.
         /// </summary>
-        internal static bool Installed(RuntimeKind kind, string home, bool wsl)
+        internal static bool Installed(RuntimeKind kind, string home, bool wsl) { return ProgramPath(kind, home, wsl) != null; }
+
+        /// <summary>
+        /// The agent's program as this PC sees it (in WSL, through the distribution's file share), or null when it is not
+        /// installed in the usual folders.
+        /// </summary>
+        internal static string ProgramPath(RuntimeKind kind, string home, bool wsl)
         {
             var dirs = HomeBins.Select(b => Path.Combine(home, b)).ToList();
             if (wsl)
             {
-                var root = Directory.GetParent(home) == null ? null : Directory.GetParent(home).Parent;
-                if (root != null) dirs.AddRange(SystemBins.Select(b => Path.Combine(root.FullName, b)));
-                return dirs.Any(d => File.Exists(Path.Combine(d, kind.Program)));
+                var root = DistributionRoot(home);
+                if (root != null) dirs.AddRange(SystemBins.Select(b => Path.Combine(root, b)));
+                return dirs.Select(d => Path.Combine(d, kind.Program)).FirstOrDefault(File.Exists);
             }
             dirs.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm"));
             dirs.AddRange((Environment.GetEnvironmentVariable("PATH") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries));
             var names = new[] { ".exe", ".cmd", ".bat", ".ps1" }.Select(x => kind.Program + x).ToList();
             foreach (var d in dirs)
             {
-                try { if (names.Any(n => File.Exists(Path.Combine(d.Trim(), n)))) return true; }
+                try
+                {
+                    var found = names.Select(n => Path.Combine(d.Trim(), n)).FirstOrDefault(File.Exists);
+                    if (found != null) return found;
+                }
                 catch (ArgumentException) { }   // A malformed PATH entry.
             }
-            return false;
+            return null;
+        }
+
+        /// <summary>The distribution's root (\\wsl.localhost\Distro) for a home under it (…\home\user).</summary>
+        private static string DistributionRoot(string home)
+        {
+            var parent = Directory.GetParent(home);
+            return parent == null || parent.Parent == null ? null : parent.Parent.FullName;
+        }
+
+        /// <summary>A path under a distribution's file share as Linux sees it: \\wsl.localhost\Distro\home\me\x → /home/me/x.</summary>
+        internal static string LinuxPath(string path, string home)
+        {
+            var root = DistributionRoot(home);
+            if (root == null || !path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return null;
+            return "/" + path.Substring(root.Length).TrimStart('\\').Replace('\\', '/');
         }
 
         /// <summary>
@@ -153,17 +202,28 @@ namespace AIMeter
             foreach (var d in Definitions.All.Where(x => x.UsesKey))
                 foreach (var f in found)
                 {
-                    string key = RuntimeKey(f.Item1, d, f.Item2, f.Item3);
-                    if (key != null) scan.Access.Add(Access(d.Id, f.Item1.Id, f.Item3 ? "wsl" : "windows", key));
+                    string alias;
+                    string key = RuntimeKey(f.Item1, d, f.Item2, f.Item3, out alias);
+                    if (key == null) continue;
+                    var access = Access(d.Id, f.Item1.Id, f.Item3 ? "wsl" : "windows", key);
+                    access.Provider = alias ?? ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id).First();
+                    string program = ProgramPath(f.Item1, f.Item2, f.Item3);
+                    access.Program = program != null && f.Item3 ? LinuxPath(program, f.Item2) : program;
+                    scan.Access.Add(access);
                 }
             return scan;
         }
 
         /// <summary>The key an agent would use for a service: its own, or one from the environment it starts with.</summary>
-        private static string RuntimeKey(RuntimeKind kind, ServiceDefinition d, string home, bool wsl)
+        /// <summary>
+        /// The key an agent would use for a service: its own, or one from the environment it starts with. Alias is the
+        /// provider id the agent keeps it under, when it is in the agent's own files.
+        /// </summary>
+        private static string RuntimeKey(RuntimeKind kind, ServiceDefinition d, string home, bool wsl, out string alias)
         {
+            alias = null;
             var found = KeyFinder.SearchAll(d, home, wsl).FirstOrDefault(f => f.App == kind.App || (wsl && f.App == "profile"));
-            if (found != null) return found.Key;
+            if (found != null) { alias = found.Alias; return found.Key; }
             if (wsl) return null;
             foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
             {
@@ -195,6 +255,10 @@ namespace AIMeter
     internal sealed class RuntimeAccess
     {
         public string Service, Runtime, Where, Credential;
+        /// <summary>The provider id the agent knows the service by, such as "google" for the Gemini API.</summary>
+        public string Provider;
+        /// <summary>The agent's program where it runs: a Linux path in WSL, a Windows path on Windows; null when unknown.</summary>
+        public string Program;
     }
 
     /// <summary>A coding agent delegation can use (see Candidates.Kinds).</summary>
@@ -223,7 +287,7 @@ namespace AIMeter
     {
         public string Blocking, Metric, BindingMetric;
         public DateTime? Until;
-        public int MaxNewJobs;
+        public int MaxNewJobs, Leased;
         public double? Ratio;
         public bool CanStart { get { return Blocking == null && MaxNewJobs > 0; } }
     }

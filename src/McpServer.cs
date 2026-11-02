@@ -38,9 +38,12 @@ namespace AIMeter
         private readonly RefreshGate gate;   // Null when refreshing is not possible, as in tests of the plain reads.
         private readonly TimeSpan timeout;
         private readonly Func<RuntimeScan> runtimes;
+        private readonly LeaseBook leases;
 
-        public McpServer(Func<Snapshot> snapshot, Func<bool> titlesAllowed, RefreshGate gate = null, TimeSpan? timeout = null, Func<RuntimeScan> runtimes = null)
+        public McpServer(Func<Snapshot> snapshot, Func<bool> titlesAllowed, RefreshGate gate = null, TimeSpan? timeout = null,
+                         Func<RuntimeScan> runtimes = null, LeaseBook leases = null)
         {
+            this.leases = leases ?? new LeaseBook(null);
             this.snapshot = snapshot;
             this.titlesAllowed = titlesAllowed;
             this.gate = gate;
@@ -153,18 +156,71 @@ namespace AIMeter
                 Tool("suggest_service", "Services ordered by the room left in their tightest limit, to choose where to run the next task, " +
                      "with the number of free models each one offers. Services whose limits are unknown come after those with known room.",
                      new Dictionary<string, object> { { "refresh", refresh("their limits") }, { "max_age_seconds", maxAge("their limits") } }, true),
+                Tool("describe_dispatch", "How to start a candidate from list_candidates: the program, its arguments as a list and the " +
+                     "environment, for a coding agent and place verified with AI Meter. Start the program without a shell and write the task " +
+                     "to its stdin, then close stdin: the task never goes into the arguments. Also says how to tell the end, the outcome, " +
+                     "the requests and tokens, and how to stop it. AI Meter starts nothing.",
+                     new Dictionary<string, object>
+                     {
+                         { "service", Property("string", "The candidate's service.") },
+                         { "model", Property("string", "The candidate's model id.") },
+                         { "runtime", Property("string", "The candidate's runtime, such as pi or opencode.") },
+                         { "where", Enum("The candidate's place.", "windows", "wsl") },
+                         { "mode", Enum("read_only (default): the agent can read but not change files. modify: it can change files; run it in a new Git worktree.", Dispatch.ReadOnly, Dispatch.Modify) },
+                         { "workspace", Property("string", "The folder the task works in, as seen from where the plugin runs. A placeholder when omitted.") },
+                         { "from", Enum("Where the plugin that starts the agent runs (default windows).", "windows", "wsl") },
+                     }, false),
+                Tool("claim_capacity", "Take a slot in a candidate's pool before starting its agent, so that other plugins see it as busy. " +
+                     "Refused when the pool has no room. Renew it during long tasks and release it when the task ends; an unreleased " +
+                     "lease expires on its own. Leases bind only clients that use them.",
+                     new Dictionary<string, object>
+                     {
+                         { "service", Property("string", "The candidate's service.") },
+                         { "model", Property("string", "The candidate's model id.") },
+                         { "runtime", Property("string", "The candidate's runtime.") },
+                         { "ttl_seconds", Property("integer", "How long the lease lasts without renewal: default 1800, at most 7200.") },
+                         { "client", Property("string", "A label for whoever claims, such as claude-code or codex.") },
+                     }, false, false),
+                Tool("renew_capacity", "Extend an active lease from claim_capacity.",
+                     new Dictionary<string, object>
+                     {
+                         { "lease_id", Property("string", "The lease to extend.") },
+                         { "ttl_seconds", Property("integer", "New duration from now: default 1800, at most 7200.") },
+                     }, false, false),
+                Tool("release_capacity", "End a lease from claim_capacity with the task's outcome. A rate limit the agent met closes the pool " +
+                     "until retry_after_seconds, or for a minute. Releasing twice changes nothing.",
+                     new Dictionary<string, object>
+                     {
+                         { "lease_id", Property("string", "The lease to end.") },
+                         { "outcome", Enum("How the task ended.", "completed", "failed", "cancelled", "timed_out") },
+                         { "requests", Property("integer", "Requests the agent made to the model, when known.") },
+                         { "rate_limited", Property("integer", "Rate-limit answers (429) the agent met.") },
+                         { "retry_after_seconds", Property("integer", "The longest Retry-After the agent saw, when any.") },
+                         { "input_tokens", Property("integer", "Input tokens, when known.") },
+                         { "output_tokens", Property("integer", "Output tokens, when known.") },
+                     }, false, false),
             };
         }
 
-        /// <summary>A read-only tool; openWorld marks the tools whose refresh contacts the services.</summary>
-        private static Dictionary<string, object> Tool(string name, string description, Dictionary<string, object> properties, bool openWorld)
+        private static Dictionary<string, object> Enum(string description, params string[] values)
         {
+            return new Dictionary<string, object> { { "type", "string" }, { "enum", values.Cast<object>().ToList() }, { "description", description } };
+        }
+
+        /// <summary>
+        /// A tool; openWorld marks the tools whose refresh contacts the services. Every tool reads, except the lease tools,
+        /// which change only AI Meter's own lease book: no process, no network, nothing destructive.
+        /// </summary>
+        private static Dictionary<string, object> Tool(string name, string description, Dictionary<string, object> properties, bool openWorld, bool readOnly = true)
+        {
+            var annotations = new Dictionary<string, object> { { "readOnlyHint", readOnly }, { "openWorldHint", openWorld } };
+            if (!readOnly) annotations["destructiveHint"] = false;
             return new Dictionary<string, object>
             {
                 { "name", name },
                 { "description", description },
                 { "inputSchema", new Dictionary<string, object> { { "type", "object" }, { "properties", properties } } },
-                { "annotations", new Dictionary<string, object> { { "readOnlyHint", true }, { "openWorldHint", openWorld } } },
+                { "annotations", annotations },
             };
         }
 
@@ -183,6 +239,7 @@ namespace AIMeter
         {
             string name = Json.Str(parameters, "name");
             var args = Json.Obj(parameters, "arguments") ?? new Dictionary<string, object>();
+            if (name == "describe_dispatch" || name == "claim_capacity" || name == "renew_capacity" || name == "release_capacity") return Delegation(name, args);
             Scope scope;
             if (name == null || !Scopes.TryGetValue(name, out scope)) return ToolResult(new Dictionary<string, object> { { "error", "Unknown tool: " + name } }, true);
             bool refresh = Json.Bool(args, "refresh");
@@ -233,7 +290,7 @@ namespace AIMeter
                     {
                         Service = service, Tools = Json.Bool(args, "tools"), MinContext = (long)(Json.Num(args, "min_context") ?? 0),
                         MinOutput = (long)(Json.Num(args, "min_output_tokens") ?? 0), CostPolicy = policy,
-                    }, DateTime.Now), runtimes());
+                    }, DateTime.Now, leases), runtimes());
                     break;
                 default: result = Suggest(snap.Providers); break;
             }
@@ -416,7 +473,7 @@ namespace AIMeter
             return list;
         }
 
-        private static List<object> Free(IEnumerable<ProviderState> providers, bool toolsOnly, long minContext, long minOutput, bool unconfirmed)
+        private List<object> Free(IEnumerable<ProviderState> providers, bool toolsOnly, long minContext, long minOutput, bool unconfirmed)
         {
             var list = new List<object>();
             foreach (var p in providers.Where(x => x.Catalogue != null))
@@ -459,7 +516,7 @@ namespace AIMeter
         /// A model's limits (docs/plans/orchestration-contracts.md section 2.3): per-request caps, its pool, the pool's
         /// rate limits and the headroom left. Counters of delegated tasks ("observed") arrive with capacity leases.
         /// </summary>
-        private static Dictionary<string, object> LimitsJson(ProviderState p, FreeModel m)
+        private Dictionary<string, object> LimitsJson(ProviderState p, FreeModel m)
         {
             var rates = p.Catalogue.Rates.Select(r =>
             {
@@ -481,17 +538,9 @@ namespace AIMeter
                 { "per_request", new Dictionary<string, object> { { "context_tokens", Cap(m.Context) }, { "max_output_tokens", Cap(m.MaxOutput) } } },
                 { "pool", p.Catalogue.PoolOf(m) },
                 { "rates", rates },
-                { "headroom", Headroom(p.Id, p.Catalogue.Rates) },
+                { "observed", Observed(p.Catalogue.PoolOf(m) ?? p.Id) },
+                { "headroom", RoomJson(Candidates.Room(p.Id, p.Catalogue.Rates, DateTime.Now, leases, p.Catalogue.PoolOf(m) ?? p.Id)) },
             };
-        }
-
-        /// <summary>
-        /// Whether a task can start now on this pool and how many: blocked while the service asked AI Meter to wait or
-        /// a reported counter is used up; at most one new task when no concurrency limit is known.
-        /// </summary>
-        internal static Dictionary<string, object> Headroom(string service, IList<RateLimit> rates)
-        {
-            return RoomJson(Candidates.Room(service, rates, DateTime.Now));
         }
 
         private static Dictionary<string, object> RoomJson(PoolRoom room)
@@ -503,7 +552,7 @@ namespace AIMeter
                 if (room.Metric != null) blocking["metric"] = room.Metric;
                 if (room.Until.HasValue) blocking["until"] = Time(room.Until.Value);
             }
-            var d = new Dictionary<string, object> { { "blocking", blocking }, { "can_start_now", room.CanStart }, { "max_new_jobs_now", room.MaxNewJobs } };
+            var d = new Dictionary<string, object> { { "blocking", blocking }, { "can_start_now", room.CanStart }, { "max_new_jobs_now", room.MaxNewJobs }, { "leased", room.Leased } };
             if (room.Ratio.HasValue)
             {
                 d["remaining_share"] = Math.Round(room.Ratio.Value, 3);
@@ -512,8 +561,87 @@ namespace AIMeter
             return d;
         }
 
+        /// <summary>Today's (UTC) counters of the pool's leases: what plugins reported, so only tasks run with leases count.</summary>
+        private Dictionary<string, object> Observed(string pool)
+        {
+            var o = leases.Today(pool, DateTime.Now);
+            return new Dictionary<string, object>
+            {
+                { "in_flight", o.InFlight }, { "tasks_ended_today", o.Ended }, { "failed_today", o.Failed }, { "unknown_outcome_today", o.Unknown },
+                { "requests_today", o.Requests }, { "tasks_without_request_count", o.RequestsUnknown }, { "rate_limited_today", o.RateLimited },
+                { "last_rate_limited_at", o.LastRateLimited.HasValue ? Time(o.LastRateLimited.Value) : null },
+                { "input_tokens_today", o.InputTokens }, { "output_tokens_today", o.OutputTokens }, { "coverage", "ai_meter_leases_only" },
+            };
+        }
+
+        // ------------------------------------------------------------ delegation (ADR 0002)
+
+        /// <summary>describe_dispatch and the lease tools. They need a candidate known to the latest snapshot and scan.</summary>
+        private Dictionary<string, object> Delegation(string name, Dictionary<string, object> args)
+        {
+            Func<string, Dictionary<string, object>> error = text => ToolResult(new Dictionary<string, object> { { "error", text } }, true);
+            DateTime now = DateTime.Now;
+            if (name == "renew_capacity")
+            {
+                var until = leases.Renew(Json.Str(args, "lease_id") ?? "", (int)(Json.Num(args, "ttl_seconds") ?? 0), now);
+                if (!until.HasValue) return error("No active lease with this id: it was released or has expired.");
+                return ToolResult(new Dictionary<string, object> { { "lease_id", Json.Str(args, "lease_id") }, { "expires_at", Time(until.Value) } }, false);
+            }
+            if (name == "release_capacity")
+            {
+                string outcome = Json.Str(args, "outcome") ?? "";
+                if (!new[] { "completed", "failed", "cancelled", "timed_out" }.Contains(outcome)) return error("outcome must be completed, failed, cancelled or timed_out.");
+                double? retry = Json.Num(args, "retry_after_seconds");
+                var released = leases.Release(Json.Str(args, "lease_id") ?? "", new LeaseBook.Outcome
+                {
+                    Result = outcome, Requests = (long?)Json.Num(args, "requests"), RateLimited = (int)(Json.Num(args, "rate_limited") ?? 0),
+                    RetryAfter = retry > 0 ? TimeSpan.FromSeconds(Math.Min(retry.Value, 86400)) : (TimeSpan?)null,
+                    InputTokens = (long?)Json.Num(args, "input_tokens"), OutputTokens = (long?)Json.Num(args, "output_tokens"),
+                }, now);
+                var d = new Dictionary<string, object> { { "lease_id", Json.Str(args, "lease_id") }, { "released", released != null } };
+                if (released == null) d["note"] = "No active lease with this id: it was already released or has expired. Nothing changed.";
+                else d["pool"] = released.Pool;
+                return ToolResult(d, false);
+            }
+
+            string service = Json.Str(args, "service"), model = Json.Str(args, "model"), runtime = Json.Str(args, "runtime");
+            if (service == null || model == null || runtime == null) return error("service, model and runtime are required.");
+            var snap = snapshot();
+            var provider = snap == null ? null : snap.Providers.FirstOrDefault(p => p.Catalogue != null && p.Id == service);
+            var free = provider == null ? null : provider.Catalogue.Models.FirstOrDefault(m => m.Id == model);
+            if (free == null) return error("This model is not in the service's current model list; call list_candidates first.");
+            string where = Json.Str(args, "where");
+            var access = runtimes().Access.Where(a => a.Service == service && a.Runtime == runtime && (where == null || a.Where == where)).OrderBy(a => a.Where, StringComparer.Ordinal).FirstOrDefault();
+            if (access == null) return error("This runtime has no key of its own for this service here; call list_candidates first.");
+            string pool = provider.Catalogue.PoolOf(free) ?? provider.Id;
+
+            if (name == "claim_capacity")
+            {
+                var room = Candidates.Room(service, provider.Catalogue.Rates, now);
+                if (room.Blocking == null && leases.BackoffUntil(pool) > now) { room.Blocking = "rate_limited"; room.Until = leases.BackoffUntil(pool); room.MaxNewJobs = 0; }
+                var lease = room.Blocking != null ? null : leases.Claim(pool, service, model, runtime, Json.Str(args, "client"), (int)(Json.Num(args, "ttl_seconds") ?? 0), room.MaxNewJobs, now);
+                if (lease == null)
+                    return ToolResult(new Dictionary<string, object> { { "refused", true }, { "pool", pool }, { "headroom", RoomJson(Candidates.Room(service, provider.Catalogue.Rates, now, leases, pool)) } }, false);
+                return ToolResult(new Dictionary<string, object> { { "lease_id", lease.Id }, { "pool", pool }, { "expires_at", Time(lease.ExpiresAt) }, { "coverage", "ai_meter_leases_only" } }, false);
+            }
+
+            string distro = Settings.Current == null ? null : Settings.Current.WslDistro;
+            string home = access.Where == "wsl" ? Probe.WslHomeUp : Probe.Home;
+            string version = home == null ? null : Dispatch.Version(runtime, home, access.Where == "wsl");
+            var plan = Dispatch.Describe(access, model, Json.Str(args, "mode"), Json.Str(args, "workspace"), Json.Str(args, "from") ?? "windows", distro, version);
+            if (!plan.Supported) return ToolResult(new Dictionary<string, object> { { "supported", false }, { "reason", plan.Reason }, { "runtime", runtime }, { "where", access.Where } }, false);
+            return ToolResult(new Dictionary<string, object>
+            {
+                { "supported", true }, { "runtime", plan.Runtime }, { "where", plan.Where }, { "version", plan.Version }, { "version_verified", plan.VersionVerified },
+                { "mode", plan.Mode }, { "pool", pool }, { "program", plan.Program }, { "arguments", plan.Arguments.Cast<object>().ToList() },
+                { "environment", plan.Environment.ToDictionary(kv => kv.Key, kv => (object)kv.Value) }, { "working_directory", plan.WorkingDirectory },
+                { "task_input", "stdin" }, { "output", plan.Output.ToDictionary(kv => kv.Key, kv => (object)kv.Value) }, { "stop", plan.Stop },
+                { "notes", plan.Notes.Cast<object>().ToList() },
+            }, false);
+        }
+
         /// <summary>list_candidates: the ordered candidates, each pool's room once, the exclusions and the runtimes found.</summary>
-        private static Dictionary<string, object> CandidatesJson(Selection s, RuntimeScan scan)
+        private Dictionary<string, object> CandidatesJson(Selection s, RuntimeScan scan)
         {
             var candidates = s.Chosen.Select(c => (object)new Dictionary<string, object>
             {
