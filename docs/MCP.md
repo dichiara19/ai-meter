@@ -13,7 +13,7 @@ Open **Settings → AI apps**. AI Meter lists the supported apps it finds on thi
 | Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` | `mcpServers` |
 | Claude Code | `~/.claude.json` (user scope) | `mcpServers`, `type: stdio` |
 | Codex (CLI, IDE extension and app) | `~/.codex/config.toml` | `[mcp_servers.ai-meter]` |
-| Gemini CLI | `~/.gemini/settings.json` | `mcpServers` |
+| Antigravity CLI (`agy`) | `~/.gemini/config/mcp_config.json` | `mcpServers`; an empty file counts as `{}` |
 | OpenCode | `~/.config/opencode/opencode.json` | `mcp`, `type: local` |
 | Pi | `~/.pi/agent/mcp.json` | `mcpServers`; requires `pi install npm:pi-mcp-adapter` |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers` |
@@ -28,9 +28,11 @@ For any other app that can start a local MCP server, **Copy configuration** give
 
 ChatGPT desktop is not listed. Reports disagree on whether it starts local servers: when it does, use **Copy configuration**.
 
+Antigravity CLI is listed when `~/.gemini/antigravity-cli` exists. Gemini CLI has been discontinued and is no longer listed; a `~/.gemini` folder on its own does not count. In headless runs (`agy -p`), agy asks no questions and rejects tools it has no rule for, so AI Meter's tools need an allow rule under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`, or in `--settings` for one run. In interactive sessions you can approve the calls when agy asks.
+
 ## From the command line
 
-Claude Code, Codex and Gemini CLI can add AI Meter with their own `mcp add` command. Under **From the command line** in **Settings → AI apps**, the **Windows** and **WSL** buttons copy the command with your paths filled in. Paste it into the matching terminal, then restart the CLI.
+Claude Code, Codex and Antigravity CLI can add AI Meter with their own `mcp add` command. Under **From the command line** in **Settings → AI apps**, the **Windows** and **WSL** buttons copy the command with your paths filled in. Paste it into the matching terminal, then restart the CLI.
 
 AI Meter writes the relay at every start, so the path in the command exists as soon as AI Meter has run once. In the examples below, replace `<you>` with your Windows user name.
 
@@ -39,7 +41,7 @@ AI Meter writes the relay at every start, so the path in the command exists as s
 ```powershell
 claude mcp add --scope user ai-meter '--' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 codex mcp add ai-meter '--' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
-gemini mcp add --scope user ai-meter 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' '--' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
+agy mcp add ai-meter 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' '--' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 ```
 
 The quotes around `'--'` matter. When a CLI is installed with npm, PowerShell runs its `.ps1` shim and drops a bare `--`. The CLI would then read `-NoProfile` as one of its own options.
@@ -49,15 +51,15 @@ The quotes around `'--'` matter. When a CLI is installed with npm, PowerShell ru
 ```bash
 claude mcp add --scope user ai-meter -- /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 codex mcp add ai-meter -- /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
-gemini mcp add --scope user ai-meter /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -- -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
+agy mcp add ai-meter /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -- -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 ```
 
 Each command needs the right argument order:
 - **Claude Code and Codex** take the whole server command after `--`.
-- **Gemini CLI** takes the program before `--` and its arguments after it.
-- `--scope user` makes the server available in every project. Without it, Claude Code adds it to the current project only, and Gemini CLI adds it to `.gemini/settings.json` in the current folder.
+- **Antigravity CLI** takes the program before `--` and its arguments after it. Its options go before the name `ai-meter`.
+- `--scope user` makes the server available in every project. Without it, Claude Code adds it to the current project only. Antigravity CLI has no scope: its servers apply everywhere.
 
-Check the connection with `claude mcp list`, `codex mcp get ai-meter` or `gemini mcp list`. Remove it with `claude mcp remove --scope user ai-meter`, `codex mcp remove ai-meter` or `gemini mcp remove --scope user ai-meter`.
+Check the connection with `claude mcp list`, `codex mcp get ai-meter` or `agy mcp list`. Remove it with `claude mcp remove --scope user ai-meter`, `codex mcp remove ai-meter` or `agy mcp remove ai-meter`.
 
 Other apps:
 - **Visual Studio Code** has its own command. From `cmd`, run `code --add-mcp "{\"name\":\"ai-meter\",\"type\":\"stdio\",\"command\":\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\",\"args\":[\"-NoProfile\",\"-NonInteractive\",\"-ExecutionPolicy\",\"Bypass\",\"-File\",\"C:\\Users\\<you>\\AppData\\Roaming\\AIMeter\\mcp.ps1\"]}"`. The switch in Settings is simpler.
