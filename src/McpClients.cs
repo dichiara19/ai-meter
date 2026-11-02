@@ -19,7 +19,7 @@ namespace AIMeter
         /// <summary>How a client stores its MCP servers.</summary>
         internal enum Format
         {
-            McpServers,   // { "mcpServers": { name: { command, args } } }: Claude, Cursor, Gemini CLI, Pi's MCP adapter.
+            McpServers,   // { "mcpServers": { name: { command, args } } }: Claude, Cursor, Antigravity CLI, Pi's MCP adapter.
             VsCode,       // { "servers": { name: { type, command, args } } }
             OpenCode,     // { "mcp": { name: { type: "local", command: [..], enabled } } }
             CodexToml,    // [mcp_servers.name] command = "..", args = [..]
@@ -68,8 +68,10 @@ namespace AIMeter
                                       ConfigPath = Path.Combine(home, ".claude.json"), Marker = Path.Combine(home, ".claude.json") };
             yield return new Client { Id = "codex", Name = "Codex", Where = where, Format = Format.CodexToml,
                                       ConfigPath = Path.Combine(home, @".codex\config.toml"), Marker = Path.Combine(home, ".codex") };
-            yield return new Client { Id = "gemini", Name = "Gemini CLI", Where = where, Format = Format.McpServers,
-                                      ConfigPath = Path.Combine(home, @".gemini\settings.json"), Marker = Path.Combine(home, ".gemini") };
+            // Antigravity CLI (agy) keeps its own data in .gemini\antigravity-cli and its MCP servers in a file it may create
+            // empty, read as {}. The bare .gemini folder is not a marker: the discontinued Gemini CLI created it too.
+            yield return new Client { Id = "antigravity-cli", Name = "Antigravity CLI", Where = where, Format = Format.McpServers,
+                                      ConfigPath = Path.Combine(home, @".gemini\config\mcp_config.json"), Marker = Path.Combine(home, @".gemini\antigravity-cli") };
             string openCode = Path.Combine(home, @".config\opencode");
             yield return new Client { Id = "opencode", Name = "OpenCode", Where = where, Format = Format.OpenCode,
                                       ConfigPath = File.Exists(Path.Combine(openCode, "opencode.jsonc")) && !File.Exists(Path.Combine(openCode, "opencode.json"))
@@ -142,12 +144,12 @@ namespace AIMeter
         {
             new[] { "claude-code", "Claude Code" },
             new[] { "codex", "Codex" },
-            new[] { "gemini", "Gemini CLI" },
+            new[] { "antigravity-cli", "Antigravity CLI" },
         };
 
         /// <summary>
         /// The agent's own "mcp add" command, for Windows PowerShell or for a WSL (bash) shell.
-        /// Claude Code and Codex take the server command after "--"; Gemini CLI takes it before, with its
+        /// Claude Code and Codex take the server command after "--"; Antigravity CLI takes it before, with its
         /// dash-prefixed arguments after "--". In PowerShell the separator is quoted: PowerShell drops a bare "--"
         /// when the agent is an npm-installed .ps1 shim, and the agent would then read -NoProfile as its own option.
         /// </summary>
@@ -165,7 +167,7 @@ namespace AIMeter
             {
                 case "claude-code": return "claude mcp add --scope user " + EntryName + " " + separator + " " + powerShell + " " + flags;
                 case "codex": return "codex mcp add " + EntryName + " " + separator + " " + powerShell + " " + flags;
-                case "gemini": return "gemini mcp add --scope user " + EntryName + " " + powerShell + " " + separator + " " + flags;
+                case "antigravity-cli": return "agy mcp add " + EntryName + " " + powerShell + " " + separator + " " + flags;
                 default: throw new ArgumentException("No command-line installation for " + clientId, "clientId");
             }
         }
