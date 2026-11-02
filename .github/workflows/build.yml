@@ -141,7 +141,7 @@ jobs:
       # vX.Y.Z is stable and becomes Latest, the release the apps' update check reads;
       # vX.Y.Z-beta.N and vX.Y.Z-rc.N are pre-releases and never become Latest.
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ !contains(github.ref_name, '-') }}
