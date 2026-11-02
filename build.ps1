@@ -4,15 +4,17 @@
 #   -Mode exe     install the compiled executable (needs a signed executable if Smart App Control is on)
 #   -Mode script  install the sources with the AIMeter.ps1 launcher (default: works with Smart App Control)
 #   -Package      also build the MSIX package for the Microsoft Store (bin\AIMeter.msix; needs the Windows SDK)
-#                 package identity from Partner Center: -IdentityName, -Publisher, -PublisherName
-#                 (or the environment variables STORE_IDENTITY_NAME, STORE_PUBLISHER, STORE_PUBLISHER_NAME);
+#                 package identity from Partner Center: -IdentityName, -Publisher, -PublisherName, -DisplayName
+#                 (or the environment variables STORE_IDENTITY_NAME, STORE_PUBLISHER, STORE_PUBLISHER_NAME,
+#                 STORE_DISPLAY_NAME: the app name reserved in Partner Center, which the package must carry);
 #                 without them the identity is a placeholder, fine for local tests and refused by CI on release tags
 param(
     [switch]$NoInstall, [ValidateSet('script', 'exe')][string]$Mode = 'script',
     [switch]$Package,
     [string]$IdentityName = $(if ($env:STORE_IDENTITY_NAME) { $env:STORE_IDENTITY_NAME } else { 'dichiara19.AIMeter' }),
     [string]$Publisher = $(if ($env:STORE_PUBLISHER) { $env:STORE_PUBLISHER } else { 'CN=dichiara19' }),
-    [string]$PublisherName = $(if ($env:STORE_PUBLISHER_NAME) { $env:STORE_PUBLISHER_NAME } else { 'dichiara19' })
+    [string]$PublisherName = $(if ($env:STORE_PUBLISHER_NAME) { $env:STORE_PUBLISHER_NAME } else { 'dichiara19' }),
+    [string]$DisplayName = $(if ($env:STORE_DISPLAY_NAME) { $env:STORE_DISPLAY_NAME } else { 'AI Meter' })
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -162,7 +164,7 @@ if ($Package) {
          IgnorableNamespaces="uap uap3 desktop rescap virtualization">
   <Identity Name="$(& $esc $IdentityName)" Publisher="$(& $esc $Publisher)" Version="$version" ProcessorArchitecture="neutral"/>
   <Properties>
-    <DisplayName>AI Meter</DisplayName>
+    <DisplayName>$(& $esc $DisplayName)</DisplayName>
     <PublisherDisplayName>$(& $esc $PublisherName)</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <!-- Writes to these AppData folders reach the real ones: the Claude Desktop and VS Code MCP configurations must be
@@ -184,7 +186,7 @@ if ($Package) {
   </Resources>
   <Applications>
     <Application Id="App" Executable="AIMeter.exe" EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements DisplayName="AI Meter" Description="Sessions and usage limits of your AI services"
+      <uap:VisualElements DisplayName="$(& $esc $DisplayName)" Description="Sessions and usage limits of your AI services"
                           BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png"/>
       </uap:VisualElements>

@@ -5,14 +5,15 @@ The Store signs the MSIX package with a Microsoft certificate, so the installed 
 ## One-time setup
 
 1. Create a free individual developer account in [Partner Center](https://partner.microsoft.com/dashboard/registration) (identity check with an ID document and a selfie).
-2. **Apps and games → New product → MSIX or PWA app**, reserve the name **AI Meter**.
-3. Open **Product management → Product identity** and copy the three values into the repository variables (*Settings → Secrets and variables → Actions → Variables*):
+2. **Apps and games → New product → MSIX or PWA app**, and reserve the app's name. "AI Meter" is taken by another developer's app, so the product is **AI Meter - Windows**.
+3. Open **Product management → Product identity** and copy its values into the repository variables (*Settings → Secrets and variables → Actions → Variables*), with the reserved name:
 
    | Variable | Partner Center field |
    |---|---|
    | `STORE_IDENTITY_NAME` | Package/Identity/Name |
    | `STORE_PUBLISHER` | Package/Identity/Publisher (`CN=…`) |
    | `STORE_PUBLISHER_NAME` | Package/Properties/PublisherDisplayName |
+   | `STORE_DISPLAY_NAME` | The reserved app name, `AI Meter - Windows`: the Store accepts only a package whose display name is a reserved name |
 
    Without them `build.ps1` uses placeholder values that the Store rejects. They are fine for local and pull-request builds, but on a `v*` tag the workflow's MSIX step fails and names the missing variables.
 
