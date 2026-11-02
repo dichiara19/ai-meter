@@ -79,6 +79,7 @@ Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now,
 | **Compact overlay** | A tiny always-on-top pill (off by default) with two micro buttons: collapse to a live ring icon, or close. Never steals focus, hides itself during full-screen games, videos and presentations, shows details on hover. |
 | **Settings** | Built like Windows 11 Settings: connected services, what to show, where, start with Windows, theme, refresh rate, live resource usage. |
 | **AI apps (MCP)** | Claude Desktop, Claude Code, Codex, Antigravity CLI, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's MCP server, which changes nothing except its own `leases.json` when coding agents lease capacity. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
+| **Delegation (preview)** | A plugin for Claude Code and Codex hands self-contained tasks to a coding agent you already have (Pi or OpenCode) on a free model that AI Meter finds has room. Read-only by default; changes go to a new Git worktree. [Details](plugins/ai-meter/README.md). |
 | **Usage history** | Local quota cycles, spending, session tokens, models and tools, daily totals and consumption signals. Optional feedback records whether the result was worth the consumption. Open from the notification-area menu or Settings → Usage history. |
 
 For each service: remaining share of the **5-hour** and **weekly** limits with reset times, plus the active sessions with title, model and status.
@@ -198,6 +199,7 @@ src/HistoryWindow.cs   native history dashboard
 src/HistoryVisuals.cs  settings-style cards, charts and explicit data states
 src/StringsHistory.cs  history translations
 providers/*.json       built-in service definitions
+plugins/ai-meter/      delegation plugin for Claude Code and Codex (Node, separate from the app)
 agents/*.json          built-in coding agent definitions: folders, keys and how delegation starts them
 src/AgentDefinitions.cs loads agents/*.json and %APPDATA%\AIMeter\agents
 tools/render-media.ps1 regenerates the README images (docs/media) from the real UI with demo data
@@ -256,7 +258,7 @@ Network connections are limited to reading your own usage:
 - **Definitions you add**: a request to the address named in the file.
 - **Local models**: requests to `127.0.0.1` only, which never leave the PC.
 - **Update check** (on by default, Settings → About → *Check for updates*): in the zip and script builds, at most once a day, one anonymous request to `api.github.com` for the latest release of AI Meter (`/repos/dichiara19/ai-meter/releases/latest`, or the list of recent releases if you include pre-releases). It sends no cookies, account, identifier or version, only the `User-Agent: ai-meter` header that GitHub requires, and like any request it reveals your IP address to GitHub ([GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)). If a newer version exists it shows a notice; it never downloads or installs anything, and offline or rate-limited checks fail silently. The Microsoft Store version never contacts GitHub: with the same switch on, it asks the Microsoft Store through Windows whether an update is waiting, and the Store installs updates itself.
-- **Delegation (MCP)**: coding-agent plugins can reserve room on a free model's pool through AI Meter. AI Meter keeps these leases in `%APPDATA%\AIMeter\leases.json`: pool, model, agent, times and the counts the plugin reports (requests, rate limits, tokens), for 30 days. It never stores task text, code or keys, and it starts no agent itself.
+- **Delegation (MCP)**: coding-agent plugins can reserve room on a free model's pool through AI Meter. AI Meter keeps these leases in `%APPDATA%\AIMeter\leases.json`: pool, model, agent, times and the counts the plugin reports (requests, rate limits, tokens), for 30 days. It never stores task text, code or keys, and it starts no agent itself. The [delegation plugin](plugins/ai-meter/README.md#privacy) keeps each task's text and the agent's output in `~/.aimeter/jobs` on your PC for seven days.
 - **AI apps (MCP)**: apps you connect in Settings → AI apps read AI Meter's latest data through a named pipe that only your Windows user can open. An app can ask for newer data. AI Meter then reads your usage again from the same services listed above, at most once a minute per service. Nothing else leaves the PC because of it, but what an app reads can reach that app's model provider as part of your conversation. Keys, tokens and account identities are never shared; session titles only if you turn on *Share session titles*.
 
 With these off, AI Meter makes no network connections at all.

@@ -185,7 +185,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 | `rate_limited` | The service answered "too many requests"; `until` is when AI Meter may ask again |
 | `exhausted` | A counter the service reports is used up; `until` is its reset |
 
-AI Meter sees only the rate limits of its own reads and the counters services report. Rate limits an agent hits during a task are counted once AI Meter runs the task itself.
+AI Meter sees only the rate limits of its own reads and the counters services report. Rate limits an agent hits during a task are counted when its plugin releases the task's lease.
 
 **`warnings`** appears on a candidate (and in `describe_dispatch`) when the plugin must watch for something AI Meter cannot see:
 
@@ -216,11 +216,13 @@ Checked on 2026-11-02 against public lists:
 
 AI Meter starts nothing. A coordinator plugin runs the agent ([ADR 0002](adr/0002-delegation-through-coordinator-plugins.md)), following these steps:
 1. Choose with `list_candidates`.
-2. `claim_capacity` with the candidate's `service`, `model` and `runtime`.
-3. `describe_dispatch` for the same candidate.
+2. `describe_dispatch` for the candidate. It reserves nothing, so a plugin can describe first and claim only for an agent it can start.
+3. `claim_capacity` with the candidate's `service`, `model` and `runtime`.
 4. Start `program` with `arguments` and `environment`, without a shell. Write the task to stdin, then close it.
 5. Read the output as `output` describes. `renew_capacity` during long tasks.
 6. `release_capacity` with the outcome.
+
+The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code and Codex follows these steps.
 
 **`describe_dispatch`** takes the candidate (`service`, `model`, `runtime`, and `where` and `distro` to pick its place), `mode` (`read_only` by default, or `modify`), `workspace`, and `from`, which is where the plugin runs (`windows` by default, or `wsl`).
 - It describes only agents and places with a verified dispatch: Pi in WSL, and OpenCode in WSL and on Windows. Anything else answers `supported: false` with the reason.

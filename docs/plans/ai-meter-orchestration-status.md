@@ -11,12 +11,12 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | Milestone | State | Branch / PR | Base / head SHA | Tests and evidence | Blockers / next action |
 | --- | --- | --- | --- | --- | --- |
 | M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
-| M1 MCP freshness | in_review | [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / `f3f3aeb` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. Trial merge of #18, #19 and #20 on `main`: no conflicts, 97 tests passed | Store relay path deferred to M6 (maintainer decision, 2026-11-02). Next: merge #18, then #19 and #20 |
-| M2 Provider discovery | in_progress | `feat/provider-discovery`, stacked on `feat/mcp-freshness` | `5eacffc` / not yet pushed | `tests/run.ps1`: 100 passed (5 new). `build.ps1 -NoInstall` compiled. Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: **NOT RUN**. Rebase onto `main` after #18 |
-| M3 Execution candidates | in_progress | `feat/execution-candidates`, stacked on `feat/provider-discovery` | `3411e33` / not yet pushed | `tests/run.ps1`: 105 passed (5 new). Live Pi scan on this PC | Rebase onto `main` after #18 and #21 |
-| M4 Dispatch descriptions and capacity leases | in_progress | `feat/dispatch-leases`, stacked on `docs/delegation-plugins` | `c844bc2` / `e756197` + working tree | Spike done. `tests/run.ps1`: 112 passed (6 new). Pi and OpenCode in WSL started from Windows with AI Meter's descriptions, live | Plugins (M5) |
-| M5 Claude Code and Codex plugins | planned | `feat/coordinator-plugins` | — | — | Needs M4 |
-| M6 Stabilisation and release candidate | planned | — | — | — | Needs M1–M5 |
+| M1 MCP freshness | merged | [PR #18](https://github.com/dichiara19/ai-meter/pull/18), squash-merged as `972c7f3` | `f051b41` / `5eacffc` | `tests/run.ps1`: 95 passed. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. CI `build` green | Store relay path moved to M6 |
+| M2 Provider discovery | merged | [PR #21](https://github.com/dichiara19/ai-meter/pull/21), squash-merged as `4441b54` | `649bff3` / `048550f` | Rebased tree: 102 tests passed. CI `build` green (run 41470098975). Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: done 2026-11-02 (see the log). Neither catalogue states tool support, so neither gives candidates yet |
+| M3 Execution candidates | merged | [PR #22](https://github.com/dichiara19/ai-meter/pull/22), squash-merged as `79c28c2` | `4441b54` / `2b2d967` | Rebased tree: 108 tests passed. CI `build` green (run 41471025123). Live agent scan on the test PC | — |
+| M4 Dispatch descriptions and capacity leases | merged | [PR #26](https://github.com/dichiara19/ai-meter/pull/26), squash-merged as `ba8d1e3`; ADR 0002 as [PR #23](https://github.com/dichiara19/ai-meter/pull/23), `830837b` | `830837b` / `e52285d` | Rebased tree: 114 tests passed. CI `build` green (run 41475549785). Pi and OpenCode in WSL started from Windows with AI Meter's descriptions, live | — |
+| M5 Claude Code and Codex plugins | in_review | [PR #27](https://github.com/dichiara19/ai-meter/pull/27), `feat/coordinator-plugins` | `ba8d1e3` / see PR | `node --test`: 18 passed on Windows and in WSL; `tests/run.ps1` 114 passed. Live: Windows and WSL, Pi and OpenCode, read-only, `modify`, cancel; Claude Code 2.1.316 in WSL through the plugin; Pi against an AI Meter built from #30 (distribution, warnings, prices); cost measured | A task driven by Codex's own model, coordinators on native Windows and the interactive screens: **NOT RUN**. Merge after #29 and #30 (conflict in `docs/MCP.md`, steps order) |
+| M6 Stabilisation and release candidate | planned | — | — | — | Needs M1–M5, #28, #29, #30 and #25. Version `0.10.0-rc.1`, then `0.10.0` for the first Store submission |
 
 ## Baseline (verified 2026-11-02)
 
@@ -65,6 +65,127 @@ Three things the PR marked as unverified are still unverified after the release,
 
 ## Log
 
+- **2026-11-02, best-effort candidates, and a first task on NVIDIA.**
+  - **The change.** NVIDIA and Gemini gave no candidates, because their lists state neither tools nor prices. With the maintainer, they were made a category of their own:
+    - [#39](https://github.com/dichiara19/ai-meter/pull/39), stacked on #30, reads the agents' own model lists into `best_effort`, only with consent;
+    - `33ee74a` here adds `allow_best_effort` to the plugin, with the skill asking the user first.
+  - **Pi's list is a good proxy for tool support.**
+    - All 21 of its NVIDIA models have `tool_call` on models.dev.
+    - 377 of its 386 OpenRouter models have tools on OpenRouter. Of the other 9, 8 are image models Pi marks as `image`; the ninth is the `openrouter/fusion` router.
+  - **Live candidates:**
+    - NVIDIA: 20 best effort;
+    - Gemini: 2 best effort (Gemma 4), and 21 excluded as `agent_lists_price`, because Pi prices them at the paid-tier rate.
+  - **First task, approved by the maintainer.** Read-only, through the plugin, on `deepseek-ai/deepseek-v4.1-flash` with Pi in WSL.
+    - It completed with a correct answer: 2 requests, 12,176 input and 176 output tokens, price 0. The lease was released and `observed` counted it.
+    - **It took 6 min 24 s for two requests.** NVIDIA's hosted models can queue: Pi's own list sets `NVCF-POLL-SECONDS: 3600` for them. Unstated latency is one of the limits best effort warns about. The plugin's 20-minute default timeout covered it.
+
+
+- **2026-11-02, M2 checked live with real NVIDIA and Gemini keys.**
+  - **Setup.** The maintainer added both keys to Pi in WSL (`~/.pi/agent/auth.json`, under `nvidia` and `google`), and turned NVIDIA on in Settings. The AI Meter build was from #30.
+  - **Pi.** `pi auth check` answered `ready` for both. Pi lists 21 NVIDIA and 24 Google models.
+  - **Catalogues, read live** (`refresh: true`):
+    - **NVIDIA:** 69 models, all `free.status: unknown`, pool `nvidia:account`, and no context window, because the OpenAI-format list states none.
+    - **Gemini:** 40 models, `unknown` price, context windows and per-model pools.
+  - **Keys found in Pi.** `describe_dispatch` described Pi in `Ubuntu-24.04` with `--provider nvidia` (`deepseek-ai/deepseek-v4.1-flash`) and `--provider google` (`gemini-2.5-flash`). 20 of Pi's 21 NVIDIA models are in the catalogue.
+  - **No candidates yet.**
+    - With `free_only`, every model is `price_not_confirmed`, as designed.
+    - With `free_or_unconfirmed`, every model is `tools_unknown`, because neither list states tool support (NVIDIA's states no context either).
+    - Delegation asks for tools, so neither service can be delegated to until AI Meter learns these capabilities. The agents know them: Pi lists context and reasoning per model.
+  - **Not run:** a model request on either service, which could use the account's quota or credits.
+
+
+- **2026-11-02, the review of `main` absorbed into M5; inputs for M6.**
+  - **The review.** Four read-only reviews of `main` at `ba8d1e3` (`docs/plans/review-2026-11-02.md`) were answered by three PRs, all cut from `ba8d1e3` with CI green:
+    - [#29](https://github.com/dichiara19/ai-meter/pull/29): review fixes, such as lease days and times, one runtime scan, and Claude Code, Codex and Antigravity found on Windows;
+    - [#28](https://github.com/dichiara19/ai-meter/pull/28): the Store blockers;
+    - [#30](https://github.com/dichiara19/ai-meter/pull/30): the agent table as data, stacked on #29.
+  - **What #30 changes for the plugin, now handled:**
+    - **`distro`:** read from each candidate, passed back to `describe_dispatch`, and accepted as a pin.
+    - **`describe_dispatch` errors:** an error skips that candidate with AI Meter's message, instead of failing the job. "Still reading the first data" is waited for.
+    - **Readers:** a runtime the plugin has no event reader for is skipped before AI Meter is asked.
+    - **`warnings`** reach the report.
+    - **`output.cost`:** the first request priced above zero stops the agent, and the task fails with `paid_request`.
+    - **`runtimes.unsupported`** is shown by `delegate_candidates`, and in the report when nothing can run.
+    - **Wording:** the README now follows AI Meter's agent definitions rather than a fixed list.
+  - **Live, with AI Meter built from #30.**
+    - `list_candidates` gave Pi in `Ubuntu-24.04` with `openrouter_byok_fallback`. OpenCode in WSL showed as `program_not_found`, and Codex, Claude Code and Antigravity CLI as `no_dispatch`.
+    - **A real BYOK fallback.** A `:free` Gemma request was rate-limited, then retried by OpenRouter on a provider key linked to the account (BYOK), whose provider refused it with 402. Pi priced it at 0. The plugin now reports `byok_fallback` when OpenRouter's error says `"is_byok":true`; a fallback that succeeds stays invisible.
+    - A task on `cohere/north-mini-code:free` completed, priced at 0, and no lease was left.
+  - **Clean-up.** At the maintainer's request, everything the work left was removed:
+    - OpenCode in WSL (the program, and the files of 2026-11-02, the key included), keeping the OpenCode files that predated this work;
+    - OpenCode's folders in the Windows profile;
+    - the plugin from Claude Code and Codex in WSL;
+    - the job folders and test leftovers.
+    - The maintainer uninstalls OpenCode's npm package on Windows, which this session cannot reach (MSIX virtualisation).
+  - **Answered:** with Pi and OpenCode both set up, AI Meter's order puts OpenCode first, alphabetically, and Windows before WSL. A coordinator picks Pi only by pinning `runtime`. A preference rule is still open.
+  - **M6 inputs from the maintainer.**
+    - **Merge order:** #27, #28 and #24 in any order; #29 before #30; #25 before any `-rc` tag.
+    - **Versions:**
+      - `0.10.0-rc.1` first, with `AssemblyVersion 0.10.0.0` and `AssemblyInformationalVersion "0.10.0-rc.1"` under #25's check; the MSIX version stays numeric;
+      - then `0.10.0` for the first Store submission: only stable goes to the Store;
+      - `1.0.0` only after a test on a PC without WSL and with a non-Italian locale.
+    - **Still open:**
+      - the first MSIX install (nine checks in #28);
+      - live NVIDIA and Gemini reads with real keys;
+      - consent for the Cursor token, environment-variable keys and Codex app-server (review C.4);
+      - the Gemini CLI MCP entry orphaned by #19 (C.7);
+      - a `/code-review ultra` pass.
+
+
+- **2026-11-02, M5 implemented: one plugin for Claude Code and Codex.**
+  - **`plugins/ai-meter`.** One folder carries both manifests:
+    - `.claude-plugin/plugin.json` and `.mcp.json` for Claude Code;
+    - `.codex-plugin/plugin.json` and `codex-mcp.json` for Codex.
+    - The marketplaces are `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` at the repository root.
+    - Both coordinators get the same MCP server (`delegate`, `delegate_result`, `delegate_status`, `delegate_cancel`, `delegate_candidates`) and the same `delegate` skill.
+    - It uses Node's standard library only.
+    - **Why an MCP server rather than commands:** the task travels as JSON, never through a shell.
+  - **How a job runs.**
+    - Jobs run in a detached worker, recorded under `~/.aimeter/jobs`.
+    - The worker calls `list_candidates`, then `describe_dispatch` before `claim_capacity`, so no lease is taken for an agent it cannot start. `docs/MCP.md` now lists the steps in that order.
+    - It starts the program as described, writes the task to stdin and closes it.
+    - It reads Pi's and OpenCode's events, then releases the lease with the outcome, the requests, the tokens and any `429`.
+    - Cancelling stops the agent; so does a timeout.
+    - `modify` runs in a new worktree on `ai-meter/<job id>`. Nothing is committed, merged or removed.
+  - **Live, on the test PC.** Every lease was released, and AI Meter's observed counters added up.
+    - **From Windows:**
+      - OpenCode on Windows, 2 requests;
+      - Pi in WSL, 2 requests;
+      - a `modify` task in a scratch repository: the fix was in the worktree, and the checkout was untouched;
+      - a cancel: the agent ended in about 1 s, with no process left.
+    - **From WSL:** OpenCode in WSL. Its Windows variant was skipped with AI Meter's reason.
+    - **Through the MCP server,** natively on Windows and from Codex's plugin cache in WSL.
+    - **Claude Code 2.1.316 in WSL** installed the plugin from the local marketplace and delegated a task headless. Codex 0.163.0 installed it and lists the server, but its model could not run because the account hit its usage limit.
+  - **Found live:**
+    - AI Meter answers only `status` while it reads its first data, so the plugin waits for it;
+    - the first changed file lost its first letter (`alc.py`), because Git's status lines were trimmed. Fixed, with a regression test.
+  - **Cost.** Single runs with Sonnet 5.5 as coordinator; details in the [plugin README](../../plugins/ai-meter/README.md#does-it-save).
+    - **Short task:** $0.217 direct, $0.301 delegated.
+    - **Medium task:** $0.370 direct, $0.255 delegated, but with a weaker answer.
+    - The prompt cache favours whichever run of a pair goes second.
+  - **Tests and CI.** 11 tests with a fake AI Meter and fake agents, on Windows and in WSL. CI runs them on Windows, and in a new `plugin-linux` job.
+  - **Gaps:**
+    - AI Meter's order ties within a pool, so the first model is alphabetical. The skill advises pinning a coding model.
+    - Leases are not renewed: one claim covers the timeout plus two minutes.
+    - AI Meter was reinstalled from `main` for the live checks; the installed copy had been older.
+
+
+- **2026-11-02, the chain is merged.**
+  - The maintainer squash-merged everything into `main`:
+    - #18 (M1) as `972c7f3`;
+    - #19 (Antigravity CLI) as `b5d547b`;
+    - #20 (copy confirmation) as `649bff3`;
+    - #21 (M2) as `4441b54`;
+    - #22 (M3) as `79c28c2`;
+    - #23 (ADR 0002) as `830837b`;
+    - #26 (M4) as `ba8d1e3`.
+  - **Rebasing the stacked PRs.** A force push of a rebased branch was refused by the session's permissions. So each stacked PR was instead:
+    1. rebased locally and tested;
+    2. then `main` was merged into its branch, with the result set to the tested tree and checked to be identical;
+    3. CI then ran on the new head.
+  - Temporary branches and worktrees were removed after checking their content was on `main`.
+  - M5 starts on `feat/coordinator-plugins` from `ba8d1e3`.
+
 - **2026-11-02, M4 implemented.**
   - **`src/Dispatch.cs`.** Verified rows: Pi in WSL; OpenCode in WSL and on Windows.
     - Programs are found by detection; versions are read from npm's `package.json`, without running anything.
@@ -107,7 +228,7 @@ Three things the PR marked as unverified are still unverified after the release,
     - One `turn_end` per request. The read task made 3 requests and used about 4.8k tokens, about 4.6k of them system prompt.
     - `SIGINT` and `SIGTERM` stop it at once with no final event, exit codes 130 and 143, and leave no process behind.
     - RPC `abort` answers in 0.2 s with `aborted`. Tokens are 0 in both cases.
-    - The first try on `google/gemma-4-31b-it:free` fell from a `429` to the user's BYOK Google key, which answered `402` with credits depleted. So a `:free` model can be billed to the user's own provider.
+    - The first try on `google/gemma-4-31b-it:free` fell from a `429` to a provider key linked to the account (BYOK), whose provider refused it with `402`. So a `:free` model can be billed to the user's own provider.
     - `pi auth check --json` reports readiness without the key.
   - **Codex 0.163.0.** Its `codex exec` flags are verified (stdin, `--json`, `-s`, `-C`, `--ephemeral`, `-c`, `--oss`). No free-model run, because no key is exported for it and AI Meter passes none.
   - **OpenCode.** Its documented flags are recorded; it is not installed here.
@@ -143,8 +264,8 @@ Three things the PR marked as unverified are still unverified after the release,
     - deterministic order regardless of input order;
     - Pi taking only its own keys, and credential ids;
     - the MCP answer, which never contains a key.
-  - **Live on this PC.** Pi is set up in WSL with its own keys for OpenRouter and Experiential Labs. It has none for NVIDIA or Gemini.
-  - **Not run:** a live `list_candidates` call through the relay, because OpenRouter and Experiential Labs are turned off in this PC's settings, so they have no catalogue.
+  - **Live on the test PC.** Pi is set up in WSL with its own keys for two services with free models, none for NVIDIA or Gemini.
+  - **Not run:** a live `list_candidates` call through the relay, because those two services are turned off in the test PC's settings, so they have no catalogue.
   - **Deferred:** declaring a key free-tier in Settings (a `configured` free status), and a paid cost policy.
 
 - **2026-11-02, M2 in progress.**

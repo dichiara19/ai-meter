@@ -49,7 +49,7 @@ Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypas
 - **Never refresh, store or send another app's tokens** anywhere but to that service. Never read browser cookies.
 - **Saved API keys** are encrypted with Windows Data Protection.
 
-**Delegating tasks** (planned, see [ADR 0001](docs/adr/0001-optional-agent-orchestration.md) and [ADR 0002](docs/adr/0002-delegation-through-coordinator-plugins.md))
+**Delegating tasks** (preview, see [ADR 0001](docs/adr/0001-optional-agent-orchestration.md) and [ADR 0002](docs/adr/0002-delegation-through-coordinator-plugins.md))
 
 Delegation does not loosen the rules above. AI Meter chooses where a task runs and keeps capacity leases. Coordinator plugins in `plugins/` run the coding agent the user already has, such as Pi or OpenCode. Work on it must keep these limits:
 - **AI Meter executes nothing.** It starts no agent, and it never installs one.
@@ -58,6 +58,7 @@ Delegation does not loosen the rules above. AI Meter chooses where a task runs a
 - **What is stored.** Leases hold only pool, model, agent, times and outcome counters: never task text, code, logs or keys. Nothing from delegation goes into the usage history.
 - **Code.** The core stays C# 5 with no NuGet or Node. The plugins are separate, use what their coordinator's plugins use, and are not built into the app.
 - **Plugin defaults.** Tasks are read-only. A task that changes a repository runs in a new worktree and is never merged automatically.
+- **Plugin tests.** `node --test plugins/ai-meter/tests/delegate.test.mjs` runs the plugin against a fake AI Meter and fake agents, on Windows and Linux in CI. The plugin uses only Node's standard library.
 
 The roadmap and its status are in [docs/plans](docs/plans/agent-orchestration.md).
 
