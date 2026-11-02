@@ -24,6 +24,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Release tags: vX.Y.Z (stable), vX.Y.Z-beta.N or vX.Y.Z-rc.N (pre-releases). The numeric part must be the
+      # assembly version and the whole tag the informational version, so a tag cannot ship a binary that reports
+      # another version (the update check compares it).
+      - name: Check the tag against the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: powershell
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:TAG -notmatch '^v(\d+\.\d+\.\d+)(-(beta|rc)\.[1-9]\d*)?$') {
+              throw "Tag '$env:TAG' is not vX.Y.Z, vX.Y.Z-beta.N or vX.Y.Z-rc.N (see docs/RELEASING.md)."
+          }
+          $numeric = $Matches[1]
+          $info = Get-Content src\AssemblyInfo.cs -Raw
+          $assembly = [regex]::Match($info, 'AssemblyVersion\("(\d+\.\d+\.\d+)\.0"\)').Groups[1].Value
+          $file = [regex]::Match($info, 'AssemblyFileVersion\("(\d+\.\d+\.\d+)\.0"\)').Groups[1].Value
+          $informational = [regex]::Match($info, 'AssemblyInformationalVersion\("([^"]*)"\)').Groups[1].Value
+          if ($assembly -ne $numeric -or $file -ne $numeric) {
+              throw "Tag $env:TAG needs AssemblyVersion and AssemblyFileVersion $numeric.0 in src/AssemblyInfo.cs (found '$assembly.0' and '$file.0')."
+          }
+          if ($informational -ne $env:TAG.Substring(1)) {
+              throw "Tag $env:TAG needs AssemblyInformationalVersion `"$($env:TAG.Substring(1))`" in src/AssemblyInfo.cs (found `"$informational`")."
+          }
+          Write-Host "Tag $env:TAG matches src/AssemblyInfo.cs."
+
       - name: Regression tests (isolated storage and loopback fixtures)
         shell: powershell
         run: ./tests/run.ps1
@@ -104,9 +129,13 @@ jobs:
         with:
           name: AIMeter
 
+      # vX.Y.Z is stable and becomes Latest, the release the apps' update check reads;
+      # vX.Y.Z-beta.N and vX.Y.Z-rc.N are pre-releases and never become Latest.
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
           files: |
             AIMeter.zip
             AIMeter-script.zip
@@ -115,3 +144,37 @@ jobs:
             docs/media/consumption-dark.png
             docs/media/consumption-light.png
           body_path: RELEASE_NOTES.md
+
+  # Microsoft Store submission with Microsoft's Store Developer CLI (msstore), for stable tags only. It stays off
+  # until the repository variable STORE_PRODUCT_ID and the four Partner Center API secrets are set (docs/STORE.md),
+  # and it can only update an app whose first submission was made by hand in Partner Center.
+  store:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && vars.STORE_PRODUCT_ID != '' && vars.STORE_IDENTITY_NAME != ''
+    runs-on: windows-latest
+    # Add required reviewers to this environment to approve each Store submission by hand.
+    environment: microsoft-store
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: AIMeter-msix
+
+      - name: Set up the Microsoft Store Developer CLI
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+
+      # Uploads the package to a new submission based on the last published one and commits it for certification.
+      - name: Submit the package to Partner Center
+        shell: pwsh
+        env:
+          TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+          SELLER_ID: ${{ secrets.SELLER_ID }}
+          CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+          PRODUCT_ID: ${{ vars.STORE_PRODUCT_ID }}
+        run: |
+          msstore reconfigure --tenantId $env:TENANT_ID --sellerId $env:SELLER_ID --clientId $env:CLIENT_ID --clientSecret $env:CLIENT_SECRET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msstore publish "$PWD/AIMeter.msix" -id $env:PRODUCT_ID
+          exit $LASTEXITCODE
