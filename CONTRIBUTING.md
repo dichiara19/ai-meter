@@ -49,6 +49,17 @@ Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypas
 - **Never refresh, store or send another app's tokens** anywhere but to that service. Never read browser cookies.
 - **Saved API keys** are encrypted with Windows Data Protection.
 
+**Running tasks** (planned, see [ADR 0001](docs/adr/0001-optional-agent-orchestration.md))
+
+Delegating tasks to a local runtime such as Pi is a separate, optional responsibility, and it does not loosen the rules above. Work on it must keep these limits:
+- It is off by default, and it needs its own switch plus a workspace folder the user authorised. Permission to find keys covers monitoring only.
+- AI Meter never installs a runtime. It never sends a key to a runtime or to any host other than that key's own service. The runtime's model requests use the runtime's own sign-in.
+- MCP tools never return keys, tokens or account identities. Job tools appear only while running tasks is turned on.
+- Task text, logs and patches stay in their own local store, never in the usage history.
+- The core stays C# 5 with no NuGet or Node. A runtime runs as a separate process.
+
+The roadmap and its status are in [docs/plans](docs/plans/agent-orchestration.md).
+
 **User interface**
 - Follow Windows 11 Fluent design, in both themes.
 - Attach screenshots in light and dark mode to pull requests that change the UI. `--demo` helps.
