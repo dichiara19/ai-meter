@@ -76,8 +76,10 @@ namespace AIMeter
 
             Assert(server.Handle("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}") == "", "A notification received an answer.");
             var tools = (IList)Json.Obj(Reply(server, "{\"jsonrpc\":\"2.0\",\"id\":\"t\",\"method\":\"tools/list\"}"), "result")["tools"];
-            Assert(tools.Count == 7, "Unexpected tool count.");
-            Assert(tools.OfType<Dictionary<string, object>>().All(t => Json.Bool(Json.Obj(t, "annotations"), "readOnlyHint")), "A tool is not marked read-only.");
+            Assert(tools.Count == 11, "Unexpected tool count.");
+            var writers = new[] { "claim_capacity", "renew_capacity", "release_capacity" };
+            Assert(tools.OfType<Dictionary<string, object>>().All(t => Json.Bool(Json.Obj(t, "annotations"), "readOnlyHint") != writers.Contains(Json.Str(t, "name"))),
+                "Only the lease tools may change state.");
 
             var missing = Json.Obj(Reply(server, "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\"}"), "error");
             Assert(Json.Num(missing, "code") == -32601, "An unknown method was not refused.");

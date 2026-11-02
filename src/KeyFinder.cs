@@ -15,8 +15,11 @@ namespace AIMeter
     /// </summary>
     internal static class KeyFinder
     {
-        /// <summary>A discovered key: Source is the display text; App ("OpenCode", "Pi", "Crush" or "profile") and Wsl say where.</summary>
-        internal sealed class Found { public string Key, Source, App; public bool Wsl; }
+        /// <summary>
+        /// A discovered key: Source is the display text; App ("OpenCode", "Pi", "Crush" or "profile") and Wsl say where;
+        /// Alias is the provider id the app keeps it under (null for a profile export).
+        /// </summary>
+        internal sealed class Found { public string Key, Source, App, Alias; public bool Wsl; }
 
         /// <summary>App name, home-relative path and JSON value path, with {id} standing for a service alias.</summary>
         private static readonly string[][] Sources =
@@ -80,7 +83,7 @@ namespace AIMeter
                 foreach (var id in ids)
                 {
                     string v = Resolve(JPath.Str(JPath.Get(doc, s[2].Replace("{id}", id))), home, wsl);
-                    if (v != null) { yield return new Found { Key = v, Source = s[0] + where, App = s[0], Wsl = wsl }; break; }
+                    if (v != null) { yield return new Found { Key = v, Source = s[0] + where, App = s[0], Alias = id, Wsl = wsl }; break; }
                 }
             }
             // Read exports from WSL or Windows Git Bash shell profiles.

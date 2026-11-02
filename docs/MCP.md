@@ -87,6 +87,8 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
 | `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi, OpenCode or Crush) can call with its own key, and whose limits have room, in a fixed order; each pool's room; and why every other model is left out. See below |
+| `describe_dispatch` | How to start a candidate: program, argument list and environment for a verified agent and place. The task goes on stdin, never in the arguments. See below |
+| `claim_capacity`, `renew_capacity`, `release_capacity` | Cooperative capacity leases on a candidate's pool. These are the only tools that change anything: AI Meter's own lease book. See below |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
 
 All tools except `list_local_models` and `suggest_service` accept an optional `service` (`claude`, `openai`, `copilot`, `openrouter`…).
@@ -172,6 +174,32 @@ Each model from `list_free_models` says how its price is known and what limits a
 | `exhausted` | A counter the service reports is used up; `until` is its reset |
 
 AI Meter sees only the rate limits of its own reads and the counters services report. Rate limits an agent hits during a task are counted once AI Meter runs the task itself.
+
+### Running a task: `describe_dispatch` and capacity leases
+
+AI Meter starts nothing. A coordinator plugin runs the agent ([ADR 0002](adr/0002-delegation-through-coordinator-plugins.md)), following these steps:
+1. Choose with `list_candidates`.
+2. `claim_capacity` with the candidate's `service`, `model` and `runtime`.
+3. `describe_dispatch` for the same candidate.
+4. Start `program` with `arguments` and `environment`, without a shell. Write the task to stdin, then close it.
+5. Read the output as `output` describes. `renew_capacity` during long tasks.
+6. `release_capacity` with the outcome.
+
+**`describe_dispatch`** takes the candidate, `mode` (`read_only` by default, or `modify`), `workspace`, and `from`, which is where the plugin runs (`windows` by default, or `wsl`).
+- It describes only agents and places verified live: Pi in WSL, and OpenCode in WSL and on Windows. Anything else answers `supported: false` with the reason.
+- `version_verified` and `notes` flag an agent version outside the verified range.
+- **On Windows**, OpenCode's native program is started directly, never its `.cmd` or `.ps1`.
+- **In WSL, from Windows**, it is `wsl.exe -e env PATH=… <agent>`. `wsl.exe --` is never used, because it would hand the arguments to a Linux shell.
+- **OpenCode is isolated** from the user's skills and project configuration, and its title model is set to the same free model. Otherwise it would call a paid one.
+- **`output`** says how to tell the end, the outcome (Pi's exit code stays 0 on errors), the requests, the tokens and the rate limits.
+- **`stop`** says how to stop the agent: `taskkill /T /F` on Windows, which also ends an agent started in WSL.
+
+**Leases.**
+- `claim_capacity` refuses when the pool has no room. The answer includes the pool's `headroom`, with `blocking.reason`: `exhausted`, `rate_limited` or `leased`.
+- A lease lasts `ttl_seconds` (default 1800, at most 7200) unless renewed. Unreleased leases expire with an unknown outcome.
+- `release_capacity` takes `outcome`, `requests`, `rate_limited`, `retry_after_seconds` and the tokens. A rate limit closes the pool until `retry_after_seconds`, or for a minute.
+- Active leases count in every `headroom` (`leased`). Released outcomes fill `observed` in `list_free_models`, with `coverage: "ai_meter_leases_only"`: tasks run without leases are not counted.
+- AI Meter keeps the leases in `%APPDATA%\AIMeter\leases.json`. It stores only pool, service, model, agent, client label, times and outcome counters, for 30 days. Never task text, code, logs or keys.
 
 ## Fresh data
 

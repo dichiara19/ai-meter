@@ -159,7 +159,7 @@ namespace AIMeter
             var runtimeKey = typeof(Candidates).GetMethod("RuntimeKey", BindingFlags.Static | BindingFlags.NonPublic);
             var pi = Candidates.Kinds.Single(k => k.Id == "pi");
             var openCode = Candidates.Kinds.Single(k => k.Id == "opencode");
-            Func<RuntimeKind, string, object> piKeyIn = (kind, home) => runtimeKey.Invoke(null, new object[] { kind, d, home, true });
+            Func<RuntimeKind, string, object> piKeyIn = (kind, home) => runtimeKey.Invoke(null, new object[] { kind, d, home, true, null });
             // Both apps keep a key: every key is listed with its app, in the order Find prefers.
             var both = Home(@".local\share\opencode\auth.json", "{ \"openrouter\": { \"type\": \"api\", \"key\": \"sk-or-v1-opencode-0123456789\" } }",
                             @".pi\agent\auth.json", "{ \"openrouter\": { \"type\": \"api_key\", \"key\": \"sk-or-v1-pi-0123456789\" } }");

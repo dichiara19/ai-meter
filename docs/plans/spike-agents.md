@@ -142,6 +142,27 @@ A gentler stop (`GenerateConsoleCtrlEvent`) was not tried.
 
 **The PATH cannot be relied on.** Neither the Claude app's terminal nor a PowerShell window opened before the install found `opencode`. Plugins locate the program explicitly.
 
+## Starting agents in WSL from Windows (verified live with AI Meter's descriptions)
+
+`describe_dispatch` was built from these results, then checked by starting what it describes. The quoting followed Windows command-line rules, as Node's `spawn` applies them.
+
+- **`wsl.exe --` is wrong.** It hands the command line to the default Linux shell, which re-reads it. A login-shell wrapper (`bash -lc 'exec "$0" "$@"' pi …`) reached bash as an empty program (`/bin/bash: : No such file or directory`).
+- **`wsl.exe -e` runs a program without a shell.** The description therefore uses:
+  ```
+  wsl.exe -d <distro> --cd <folder> -e env PATH=<agent folder>:/usr/local/sbin:… [VARIABLE=value …] <full Linux path of the agent> <arguments>
+  ```
+  - The agent's full path, found by detection, makes a login shell unnecessary.
+  - `env` sets the PATH, so the agent's interpreter (`/usr/bin/node` here) is found, along with the agent's variables.
+  - Node version managers that keep `node` elsewhere are not covered.
+- **Pi, a read task.**
+  - The folder `C:\Users\…` became `/mnt/c/Users/…`.
+  - The task contained `$HOME`, backquotes, quotes, `&`, `|` and `;`. It reached Pi unchanged, as Pi's own `message_start` event showed.
+  - 3 requests, and the right answer.
+- **OpenCode, a read task.** The JSON in `OPENCODE_CONFIG_CONTENT` survived `wsl.exe`.
+  - `--dir` with the Windows folder failed inside WSL ("Failed to change directory"). Since `--cd` already sets the folder, the description passes `--dir .` in this case.
+  - Then: right answer, about 10,400 tokens.
+- **Stopping.** `taskkill /PID <wsl.exe> /T /F` also ended Pi inside WSL. Pi's process is named just `pi`. It was gone 3 s later.
+
 ## Consequences for M4 and M5
 
 - `describe_dispatch` needs per agent:
