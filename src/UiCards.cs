@@ -152,7 +152,7 @@ namespace AIMeter
             var limits = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
             if (p.Usage != null && p.Usage.Windows.Count > 0)
                 foreach (var w in p.Usage.Windows.Where(x => !x.Hidden && !RowHidden(p.Id, x.Key)).Take(6)) limits.Children.Add(UsageRow(w, p.Usage, brand));
-            else if (!p.NeedsLogin)
+            else if (!p.NeedsLogin && p.Catalogue == null)   // A service with only a model list has no limits to wait for.
                 limits.Children.Add(new TextBlock { Text = L.T("No limit data yet"), FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Foreground = Theme.B("Text3") });
             stack.Children.Add(limits);
 
@@ -273,11 +273,17 @@ namespace AIMeter
         /// </summary>
         private static void AddFreeModels(StackPanel stack, ProviderState p, bool open, Action toggle)
         {
-            if (p.Usage == null || p.Usage.FreeModels == null || RowHidden(p.Id, "*free")) return;
-            var fm = p.Usage.FreeModels;
+            if (p.Catalogue == null || RowHidden(p.Id, "*free")) return;
+            // Only models known to cost nothing are called free. A list without prices, such as NVIDIA's or Gemini's,
+            // is shown as models whose price the service does not state.
+            var fm = p.Catalogue.Models.Where(m => m.Free == null || m.Free.Confirmed).ToList();
+            bool unpriced = fm.Count == 0;
+            if (unpriced) fm = p.Catalogue.Models;
+            if (fm.Count == 0) return;
             double indent = toggle != null ? 18 : 0;
             var box = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
-            string count = L.N(fm.Count, "{0} free model", "{0} free models");
+            string count = unpriced ? L.N(fm.Count, "{0} model, price not stated", "{0} models, price not stated")
+                                    : L.N(fm.Count, "{0} free model", "{0} free models");
             if (toggle != null) box.Children.Add(FoldRow(count, open, toggle, new Thickness(0)));
             else box.Children.Add(Text(count, 11.5, "Text3"));
             var shown = open ? fm.Take(FreeModelsShown).ToList() : fm.Where(m => m.Expires.HasValue).Take(3).ToList();

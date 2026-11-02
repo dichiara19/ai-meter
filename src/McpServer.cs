@@ -113,12 +113,17 @@ namespace AIMeter
                      "with agent, status, model and the provider the session uses.",
                      new Dictionary<string, object> { { "service", service }, { "busy_only", Property("boolean", "Only sessions that are working now.") }, { "refresh", localRefresh } }, false),
                 Tool("list_free_models", "Models offered at no cost by OpenRouter and other services the user turned on, with model id, " +
-                     "context window, tool and reasoning support and the last free day when announced. Use the id as the model name.",
+                     "context window, output limit, tool and reasoning support and the last free day when announced. Each model has " +
+                     "free (how its price is known) and limits: per-request caps, the pool it shares with other models, rate limits " +
+                     "with their source, and headroom (whether a task can start now and how many). Models in the same pool share their " +
+                     "limits: never add them up. Unknown values are null. Use the id as the model name.",
                      new Dictionary<string, object>
                      {
                          { "service", service },
-                         { "tools", Property("boolean", "Only models that support tool calls.") },
-                         { "min_context", Property("integer", "Smallest context window, in tokens.") },
+                         { "tools", Property("boolean", "Only models known to support tool calls.") },
+                         { "min_context", Property("integer", "Smallest context window, in tokens. Models with an unknown window are left out.") },
+                         { "min_output_tokens", Property("integer", "Smallest reply size, in tokens. Models with an unknown output limit are left out.") },
+                         { "include_unconfirmed", Property("boolean", "Also list models whose price the service does not state, such as NVIDIA and Gemini models, with free.status unknown.") },
                          { "refresh", refresh("their model lists") },
                          { "max_age_seconds", maxAge("their model lists") },
                      }, true),
@@ -196,7 +201,10 @@ namespace AIMeter
             {
                 case "get_limits": result = Limits(providers.Where(p => p.Models == null)); break;
                 case "list_sessions": result = Sessions(providers, Json.Bool(args, "busy_only")); break;
-                case "list_free_models": result = Free(providers, Json.Bool(args, "tools"), (long)(Json.Num(args, "min_context") ?? 0)); break;
+                case "list_free_models":
+                    result = Free(providers, Json.Bool(args, "tools"), (long)(Json.Num(args, "min_context") ?? 0),
+                        (long)(Json.Num(args, "min_output_tokens") ?? 0), Json.Bool(args, "include_unconfirmed"));
+                    break;
                 case "get_spend": result = Spend(providers); break;
                 case "list_local_models": result = LocalModels(snap.Providers); break;
                 default: result = Suggest(snap.Providers); break;
@@ -226,7 +234,7 @@ namespace AIMeter
         /// <summary>Whether a service offers a free-model list: one has been read, or its definition names one.</summary>
         private static bool HasCatalogue(ProviderState p)
         {
-            if (p.Usage != null && (p.Usage.FreeModels != null || p.Usage.FreeModelsAt.HasValue)) return true;
+            if (p.Catalogue != null) return true;
             var d = Definitions.Get(p.Id);
             return d != null && Json.Obj(d.Raw, "freeModels") != null;
         }
@@ -234,8 +242,8 @@ namespace AIMeter
         /// <summary>When the data a scope relies on was read from the service; null when it never was.</summary>
         private static DateTime? ReadAt(ProviderState p, Scope scope)
         {
-            if (p.Usage == null) return null;
-            return scope == Scope.Catalogue ? p.Usage.FreeModelsAt : p.Usage.At;
+            if (scope == Scope.Catalogue) return p.Catalogue == null ? (DateTime?)null : p.Catalogue.ReadAt;
+            return p.Usage == null ? (DateTime?)null : p.Usage.At;
         }
 
         private static double Age(ProviderState p, Scope scope)
@@ -377,19 +385,98 @@ namespace AIMeter
             return list;
         }
 
-        private static List<object> Free(IEnumerable<ProviderState> providers, bool toolsOnly, long minContext)
+        private static List<object> Free(IEnumerable<ProviderState> providers, bool toolsOnly, long minContext, long minOutput, bool unconfirmed)
         {
             var list = new List<object>();
-            foreach (var p in providers.Where(x => x.Usage != null && x.Usage.FreeModels != null))
-                foreach (var m in p.Usage.FreeModels.Where(f => (!toolsOnly || f.Tools) && f.Context >= minContext))
+            foreach (var p in providers.Where(x => x.Catalogue != null))
+                foreach (var m in p.Catalogue.Models.Where(f => (unconfirmed || f.Free == null || f.Free.Confirmed) && (!toolsOnly || f.Tools)
+                                                                 && f.Context >= minContext && f.MaxOutput >= minOutput))
                 {
-                    var d = new Dictionary<string, object> { { "service", p.Id }, { "id", m.Id }, { "name", m.Name }, { "tools", m.Tools }, { "reasoning", m.Reasoning } };
+                    var d = new Dictionary<string, object> { { "service", p.Id }, { "id", m.Id }, { "name", m.Name } };
+                    d["tools"] = m.FeaturesUnknown && !m.Tools ? null : (object)m.Tools;
+                    d["reasoning"] = m.FeaturesUnknown && !m.Reasoning ? null : (object)m.Reasoning;
                     if (m.Context > 0) d["context_tokens"] = m.Context;
+                    if (m.MaxOutput > 0) d["max_output_tokens"] = m.MaxOutput;
                     if (!string.IsNullOrEmpty(m.Inputs)) d["inputs"] = m.Inputs;
                     if (m.Expires.HasValue) d["free_until"] = m.Expires.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    d["free"] = FreeJson(m.Free);
+                    d["limits"] = LimitsJson(p, m);
                     list.Add(d);
                 }
             return list;
+        }
+
+        private static Dictionary<string, object> FreeJson(FreeStatus f)
+        {
+            if (f == null) return new Dictionary<string, object> { { "status", "unknown" } };
+            var d = new Dictionary<string, object> { { "status", f.Status } };
+            if (f.Kind != null) d["kind"] = f.Kind;
+            if (f.Source != null) d["source"] = f.Source;
+            if (f.Reference != null) d["reference"] = f.Reference;
+            if (f.CheckedAt.HasValue) d["checked_at"] = f.CheckedAt.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (f.Note != null) d["note"] = f.Note;
+            return d;
+        }
+
+        /// <summary>A per-request cap: the catalogue value, or null with source "unknown".</summary>
+        private static Dictionary<string, object> Cap(long tokens)
+        {
+            return new Dictionary<string, object> { { "value", tokens > 0 ? (object)tokens : null }, { "source", tokens > 0 ? "catalogue" : "unknown" } };
+        }
+
+        /// <summary>
+        /// A model's limits (docs/plans/orchestration-contracts.md section 2.3): per-request caps, its pool, the pool's
+        /// rate limits and the headroom left. Counters of the jobs AI Meter runs ("observed") arrive with the job runner.
+        /// </summary>
+        private static Dictionary<string, object> LimitsJson(ProviderState p, FreeModel m)
+        {
+            var rates = p.Catalogue.Rates.Select(r =>
+            {
+                var d = new Dictionary<string, object>
+                {
+                    { "metric", r.Metric }, { "limit", r.Limit }, { "used", r.Used }, { "remaining", r.Remaining },
+                    { "scope", r.Scope }, { "per_model", r.PerModel }, { "source", r.Source },
+                };
+                if (r.ResetsAt.HasValue) d["resets_at"] = Time(r.ResetsAt.Value);
+                if (r.ResetZone != null) d["reset_zone"] = r.ResetZone;
+                if (r.Coverage != null) d["coverage"] = r.Coverage;
+                if (r.Reference != null) d["reference"] = r.Reference;
+                if (r.CheckedAt.HasValue) d["checked_at"] = r.CheckedAt.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                if (r.Note != null) d["note"] = r.Note;
+                return (object)d;
+            }).ToList();
+            return new Dictionary<string, object>
+            {
+                { "per_request", new Dictionary<string, object> { { "context_tokens", Cap(m.Context) }, { "max_output_tokens", Cap(m.MaxOutput) } } },
+                { "pool", p.Catalogue.PoolOf(m) },
+                { "rates", rates },
+                { "headroom", Headroom(p.Id, p.Catalogue.Rates) },
+            };
+        }
+
+        /// <summary>
+        /// Whether a task can start now on this pool and how many: blocked while the service asked AI Meter to wait or
+        /// a reported counter is used up; at most one new task when no concurrency limit is known.
+        /// </summary>
+        internal static Dictionary<string, object> Headroom(string service, IList<RateLimit> rates)
+        {
+            var d = new Dictionary<string, object>();
+            DateTime wait = NetworkBackoff.Until(service);
+            var exhausted = rates.FirstOrDefault(r => r.Remaining.HasValue && r.Remaining.Value <= 0);
+            if (wait > DateTime.Now) d["blocking"] = new Dictionary<string, object> { { "reason", "rate_limited" }, { "until", Time(wait) } };
+            else if (exhausted != null)
+            {
+                var b = new Dictionary<string, object> { { "reason", "exhausted" }, { "metric", exhausted.Metric } };
+                if (exhausted.ResetsAt.HasValue) b["until"] = Time(exhausted.ResetsAt.Value);
+                d["blocking"] = b;
+            }
+            else d["blocking"] = null;
+            bool can = d["blocking"] == null;
+            var concurrency = rates.FirstOrDefault(r => r.Metric == "concurrent_requests" && r.Limit.HasValue);
+            int max = !can ? 0 : concurrency == null ? 1 : (int)Math.Max(0, concurrency.Limit.Value - (concurrency.Used ?? 0));
+            d["can_start_now"] = can && max > 0;
+            d["max_new_jobs_now"] = max;
+            return d;
         }
 
         private static List<object> Spend(IEnumerable<ProviderState> providers)
@@ -435,10 +522,10 @@ namespace AIMeter
         private static List<object> Suggest(IEnumerable<ProviderState> providers)
         {
             var rows = new List<Tuple<double?, bool, string, Dictionary<string, object>>>();
-            foreach (var p in providers.Where(x => x.Models == null && x.Usage != null && !x.NeedsLogin))
+            foreach (var p in providers.Where(x => x.Models == null && (x.Usage != null || x.Catalogue != null) && !x.NeedsLogin))
             {
-                var tight = Ui.Tightest(p.Usage);
-                int free = p.Usage.FreeModels == null ? 0 : p.Usage.FreeModels.Count;
+                var tight = p.Usage == null ? null : Ui.Tightest(p.Usage);
+                int free = p.Catalogue == null ? 0 : p.Catalogue.Models.Count(m => m.Free == null || m.Free.Confirmed);
                 if (tight == null && free == 0) continue;
                 var d = Service(p);
                 double? room = tight == null ? (double?)null : p.Usage.Room(tight);
@@ -454,7 +541,7 @@ namespace AIMeter
                     d["remaining_percent"] = null;
                     d["quota"] = "unknown";
                 }
-                bool stale = p.Usage.Source == "cache";
+                bool stale = p.Usage != null && p.Usage.Source == "cache";
                 if (stale) d["stale"] = true;
                 if (free > 0) d["free_models"] = free;
                 rows.Add(Tuple.Create(room, stale, p.Id, d));

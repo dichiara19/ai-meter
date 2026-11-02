@@ -46,7 +46,7 @@ Claude, ChatGPT/Codex and GitHub Copilot need custom sign-in flows and stay in c
 | `plan` | Path of the plan name in the answer, shown as a badge. |
 | `limits` | The bars, see below. |
 | `notes` | Extra lines under the bars, see below. |
-| `freeModels` | A request (`url`, `headers`, `interval` in minutes, default 360; `{token}` is filled as in `request`) for a model list in the OpenRouter format (`data[].pricing`, `expiration_date`, `context_length`). Text models with an explicit zero prompt and completion price are listed in the card (an empty `pricing` means unknown, not free), soonest to expire first. Read only while the usage request succeeds. |
+| `freeModels` | A request (`url`, `headers`, `interval` in minutes, default 360; `{token}` is filled as in `request`) for the service's model list, see below. With a `request`, the list is read only while that request succeeds; without one, it is read whenever the key it names is available, so a service without a usage endpoint can still list its models. |
 | `i18n` | Translations of your texts: `{ "it": { "English text": "Testo italiano" } }`. Languages: `it`, `es`, `fr`, `de`, `pt`. |
 
 ### `auth`
@@ -64,6 +64,15 @@ All types also accept `env`: variables tried first. With `type: "key"`, `ids` li
 AI Meter never refreshes another app's sign-in: if a token has expired, the user opens that app and it renews it.
 
 In `url`, `headers` and `body` you can use `{token}`, `{jwt.claim}` (a claim of the token), `{env:NAME}`, with the filters `|urlencode` and `|afterLast:X` (the text after the last character `X`).
+
+### `freeModels`
+
+| Field | Meaning |
+|---|---|
+| `format` | `openrouter` (default): `data[].pricing`, `expiration_date`, `context_length`, `top_provider.max_completion_tokens`. Only text models with an explicit zero prompt and completion price are kept; an empty `pricing` means unknown, not free. `openai`: `data[].id` only, as NVIDIA's list. `gemini`: `models[]` with `inputTokenLimit`, `outputTokenLimit` and `supportedGenerationMethods`. In the last two, embedding, ranking, safety, speech and image models are left out by name. |
+| `free` | For lists without prices: `status` (`unknown` unless the service documents it), `kind`, `reference`, `checked` (date) and a `note` for agents saying why. |
+| `pool` | Name of the counter the limits draw from, such as `openrouter:free`. `{model}` stands for each model id when every model has its own. |
+| `limits` | Rate limits of the free models. Each one has a `metric` (`requests_per_minute`, `requests_per_day`, `tokens_per_minute`, `input_tokens_per_minute`, `tokens_per_day`, `concurrent_requests`), a `scope` (`account`, `project`, `model`), `perModel`, and a `source` (`documented`, `provider_reported` or `unknown`) with `reference`, `checked` and `note`. `limit`, `used` and `remaining` are numbers stated in the file, or paths into the usage answer for `provider_reported`. `period: "day"` with `resetZone` (`UTC` by default, or `America/Los_Angeles`) gives the next reset. A limit that exists but has no known value keeps its metric with `source: "unknown"`: never write a guess. |
 
 ### Paths
 

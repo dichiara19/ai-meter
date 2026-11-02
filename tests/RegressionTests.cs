@@ -59,6 +59,7 @@ namespace AIMeter
             HistoryRegressionTests.Register(Test);
             ConsumptionTests.Register(Test);
             McpTests.Register(Test);
+            ProviderDiscoveryTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 
@@ -652,7 +653,7 @@ namespace AIMeter
                 model("b/open:free", "0", "0", null), model("a/ending:free", "0", "0", later), model("c/today:free", "0", "0", soon),
                 model("d/expired:free", "0", "0", DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd")),
                 model("e/paid", "0.000001", "0.000002", null), model("openrouter/free", "0", "0", null), audio, unpriced } } };
-            var list = FreeModels.Parse(doc);
+            var list = FreeModels.Parse(doc, null);
             Assert(list != null && list.Count == 3, "Wrong number of free models.");
             Assert(list[0].Id == "c/today:free" && list[1].Id == "a/ending:free" && list[2].Id == "b/open:free", "Free models are not ordered by expiry.");
             Assert(list[0].Tools && !list[0].Reasoning && list[0].Inputs == "text, image", "Free model features were not read.");

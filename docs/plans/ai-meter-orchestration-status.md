@@ -12,7 +12,7 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | --- | --- | --- | --- | --- | --- |
 | M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
 | M1 MCP freshness | in_review | [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / `f3f3aeb` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. Trial merge of #18, #19 and #20 on `main`: no conflicts, 97 tests passed | Store relay path deferred to M6 (maintainer decision, 2026-11-02). Next: merge #18, then #19 and #20 |
-| M2 Provider discovery | planned | `feat/provider-discovery` | — | — | Needs the M1 freshness contract |
+| M2 Provider discovery | in_progress | `feat/provider-discovery`, stacked on `feat/mcp-freshness` | `5eacffc` / not yet pushed | `tests/run.ps1`: 100 passed (5 new). `build.ps1 -NoInstall` compiled. Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: **NOT RUN**. Rebase onto `main` after #18 |
 | M3 Execution candidates | planned | `feat/execution-candidates` | — | — | Needs M1 and M2 |
 | M4 Pi spike and runner MVP | planned | `feat/agent-jobs` | — | — | Spike first. Real routing needs M3 |
 | M5 Client delegation | planned | `feat/client-delegation` | — | — | Needs M4 |
@@ -64,6 +64,33 @@ Three things the PR marked as unverified are still unverified after the release,
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M2 in progress.**
+  - **Research.** A research agent read the official documentation and made keyless calls, with each fact sourced. What it found:
+    - NVIDIA's model list is public, gives ids only and is the whole catalogue, so it is not proof of access. NVIDIA documents no limits and no usage endpoint; the commonly quoted 40 RPM is not official.
+    - Gemini's list needs the key in `x-goog-api-key` and gives input and output token limits. Limits apply per project and per model, and the free-tier table is no longer published.
+    - OpenRouter documents 20 RPM for free models, and its key endpoint reports the daily free requests.
+    - Experiential Labs documents 10 RPM and 250k TPM per model, plus 1M tokens a day shared, resetting at 00:00 UTC.
+  - **Catalogue.** It moved from `Usage` to `ProviderState.Catalogue`, so a service without a usage endpoint can list its models. Code point 3 in the baseline table is resolved.
+  - **Models.**
+    - New list formats: `openai` (NVIDIA) and `gemini`.
+    - `FreeModel` gained its output limit, a `FreeStatus` (`confirmed_free` only from a stated zero price; NVIDIA and Gemini stay `unknown`) and a `FeaturesUnknown` flag.
+  - **Limits.** `RateLimit` and the catalogue's pool come from the definition. Values are documented numbers or paths into the usage answer (`provider_reported`). Daily resets follow their time zone, with daylight saving, through `Zones`.
+  - **MCP.** `list_free_models` returns `free`, `limits` (`per_request`, `pool`, `rates`, `headroom`) and the new filters `min_output_tokens` and `include_unconfirmed`.
+  - **Panel.** A list without prices is shown as "models, price not stated", never as free; the strings are translated into five languages.
+  - **Definitions.** New: `providers/nvidia.json` (aliases `nvidia` and `nvidia-nim`) and `providers/gemini.json` (aliases `google` and `gemini`). `openrouter.json` and `experientiallabs.json` gained `pool` and `limits`.
+  - **Tests.** Key discovery had no tests before; it now has fixtures for:
+    - Pi aliases;
+    - OpenCode `{env:}` resolved from the profile;
+    - variables in the profile;
+    - `!command` values, malformed JSON and placeholders, all ignored.
+
+    There are also tests for the NVIDIA and Gemini parsers, the definition limits, daylight-saving resets in Los Angeles, and the MCP output and headroom.
+  - **Live parser check on the real public lists.** NVIDIA: 69 chat models out of 85. OpenRouter: 14 free models with their output limits.
+  - **NOT RUN:** reading NVIDIA and Gemini with real keys (they need the services turned on in the user's settings), and a live `429`.
+  - **Moved to M3:**
+    - several keys for one service and their provenance (`CredentialReference`), code point 7;
+    - JSONC configuration files, which are still not read; the tests show they are skipped safely.
 
 - **2026-11-02, M1 ready for review.**
   - The maintainer deferred the Store package relay check to M6, with packaging, and asked to continue towards the complete system.

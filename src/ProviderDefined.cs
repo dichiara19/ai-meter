@@ -20,12 +20,12 @@ namespace AIMeter
     {
         private readonly ServiceDefinition D;
         private Usage live;
+        private object usageDoc;   // The last usage answer, for free-model limits the service reports in it.
         private string plan;
         private DateTime fetchedAt = DateTime.MinValue;
         private string problem;   // Authentication notice shown when access is missing or expired.
         private string credentialScope, spendScope;
-        private List<FreeModel> freeModels;
-        private DateTime? freeModelsAt;
+        private Catalogue catalogue;
         private DateTime freeNextFetch = DateTime.MinValue;
         private const double FreeModelsRetryMinutes = 15;
 
@@ -52,7 +52,8 @@ namespace AIMeter
                 fetchedAt = DateTime.Now;
                 Fetch(req);
             }
-            FetchFreeModels(p);
+            FetchFreeModels(p, req != null);
+            st.Catalogue = WithRates(catalogue, DateTime.Now);
             st.Plan = plan;
             if (live != null) st.Usage = Decorate((DateTime.Now - live.At).TotalMinutes > interval + 2 ? live.AsCache() : live, p, DateTime.Now);
             if (problem != null && live == null)
@@ -150,8 +151,6 @@ namespace AIMeter
             var result = u.With(extra);
             result.SpendNote = note;
             result.TodayModels = models.Count > 0 ? models : null;
-            result.FreeModels = freeModels != null && freeModels.Count > 0 ? freeModels : null;
-            result.FreeModelsAt = freeModelsAt;
             return result;
         }
 
@@ -299,6 +298,7 @@ namespace AIMeter
                 plan = JPath.Str(JPath.Get(doc, Json.Str(D.Raw, "plan")));
                 if (Json.Str(D.Raw, "plan") == null) plan = null;
                 live = Map(doc, D.Raw);
+                usageDoc = live != null ? doc : null;
                 if (live != null) live.Identity = credentialScope;
                 problem = live == null ? "The service answered without usage data" : null;
                 spend = ReadSpend(doc);
@@ -396,24 +396,104 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Read the service's model list ("freeModels": a request, default every 6 hours), only while the
-        /// service is on and its usage request succeeds. The request may use {token}, as lists such as
-        /// Experiential Labs' need the key. A failed request keeps the previous list and is retried after
+        /// Read the service's model list ("freeModels": a request, default every 6 hours, and its "format"). A service
+        /// with a usage request reads the list only while that request succeeds, so a rejected key reads nothing more.
+        /// A service without one, whose limits are not readable, reads the list on its own whenever the key it names is
+        /// available; that list is then what tells the user the key works. The request may use {token}, as lists such
+        /// as Experiential Labs' need the key. A failed request keeps the previous list and is retried after
         /// FreeModelsRetryMinutes instead of the full interval.
         /// </summary>
-        private void FetchFreeModels(Probe p)
+        private void FetchFreeModels(Probe p, bool hasUsage)
         {
             var req = Json.Obj(D.Raw, "freeModels");
             if (req == null) return;
-            if (live == null) { freeModels = null; freeModelsAt = null; return; }
+            if (hasUsage && live == null) { catalogue = null; return; }
+            string token = Json.Serialize(req).Contains("{token}") ? Token() : "";
+            if (token == null)
+            {
+                catalogue = null;
+                if (!hasUsage) problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "Add your API key in Settings to see your usage" : "Sign in to see your usage");
+                return;
+            }
             double interval = Json.Num(req, "interval") ?? 360;
             if (!p.AllowNetwork || DateTime.Now < freeNextFetch || !NetworkBackoff.Ready(D.Id)) return;
             List<FreeModel> list = null;
-            try { list = FreeModels.Parse(Json.ParseAny(Send(req, Token() ?? ""))); }
-            catch (WebException e) { NetworkBackoff.Note(D.Id, e); }
+            try { list = FreeModels.Parse(Json.ParseAny(Send(req, token)), Json.Str(req, "format"), DefinedFreeStatus(req)); }
+            catch (WebException e)
+            {
+                NetworkBackoff.Note(D.Id, e);
+                if (!hasUsage && Refused(e))
+                {
+                    problem = Json.Str(D.Auth, "notice") ?? "The API key was not accepted: check it in Settings";
+                    catalogue = null;
+                }
+            }
             catch (IOException) { }
-            if (list != null) { freeModels = list; freeModelsAt = DateTime.Now; }
+            if (list != null)
+            {
+                catalogue = new Catalogue { Models = list, ReadAt = DateTime.Now };
+                if (!hasUsage) problem = null;
+            }
             freeNextFetch = DateTime.Now.AddMinutes(list != null ? interval : Math.Min(interval, FreeModelsRetryMinutes));
+        }
+
+        /// <summary>
+        /// What the definition's "free" block says about lists without prices: the status, with its kind, source,
+        /// reference, check date and note. Null without a block, which leaves such models unknown.
+        /// </summary>
+        private static FreeStatus DefinedFreeStatus(Dictionary<string, object> req)
+        {
+            var f = Json.Obj(req, "free");
+            if (f == null) return null;
+            return new FreeStatus
+            {
+                Status = Json.Str(f, "status") ?? "unknown", Kind = Json.Str(f, "kind"), Source = Json.Str(f, "source") ?? "documented",
+                Reference = Json.Str(f, "reference"), CheckedAt = Json.FromIso(Json.Str(f, "checked")), Note = Json.Str(f, "note"),
+            };
+        }
+
+        /// <summary>
+        /// The catalogue with its pool and the free models' rate limits ("freeModels.pool" and "freeModels.limits").
+        /// A limit is a number stated in the definition (documented) or a path into the last usage answer
+        /// (provider_reported); a reported limit without a current answer has unknown values. "period": "day" gives the
+        /// next midnight in "resetZone" (default UTC), whose daylight-saving rules apply.
+        /// </summary>
+        private Catalogue WithRates(Catalogue read, DateTime now)
+        {
+            if (read == null) return null;
+            var spec = Json.Obj(D.Raw, "freeModels");
+            var result = new Catalogue { Models = read.Models, ReadAt = read.ReadAt, Pool = Json.Str(spec, "pool") };
+            object doc = live != null ? usageDoc : null;
+            foreach (var l in Items(spec, "limits"))
+            {
+                var r = new RateLimit
+                {
+                    Metric = Json.Str(l, "metric"), Scope = Json.Str(l, "scope") ?? "account", PerModel = Json.Bool(l, "perModel"),
+                    Source = Json.Str(l, "source") ?? "documented", Reference = Json.Str(l, "reference"), Note = Json.Str(l, "note"),
+                    CheckedAt = Json.FromIso(Json.Str(l, "checked")), ResetZone = Json.Str(l, "resetZone"),
+                };
+                r.Limit = LimitValue(l, "limit", doc);
+                r.Used = LimitValue(l, "used", doc);
+                r.Remaining = LimitValue(l, "remaining", doc);
+                if (r.Remaining == null && r.Limit.HasValue && r.Used.HasValue) r.Remaining = Math.Max(0, r.Limit.Value - r.Used.Value);
+                if (Json.Str(l, "period") == "day")
+                {
+                    if (r.ResetZone == null) r.ResetZone = "UTC";
+                    r.ResetsAt = Zones.NextMidnight(now, r.ResetZone);
+                }
+                result.Rates.Add(r);
+            }
+            return result;
+        }
+
+        /// <summary>A number stated in the definition, or the number at a path of the usage answer; null when unknown.</summary>
+        private static double? LimitValue(Dictionary<string, object> l, string key, object doc)
+        {
+            object v;
+            if (!l.TryGetValue(key, out v) || v == null) return null;
+            var path = v as string;
+            if (path == null) return JPath.Num(v);
+            return doc == null ? null : JPath.Num(JPath.Get(doc, path));
         }
 
         /// <summary>Send the configured request and return its response body.</summary>

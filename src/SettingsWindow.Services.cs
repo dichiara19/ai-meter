@@ -103,17 +103,18 @@ namespace AIMeter
 
             // Let users choose which limits, spending summaries and models appear in a service card.
             var prov = LastState(s.Id);
-            if (prov == null || prov.Usage == null || prov.Models != null) return;
+            if (prov == null || (prov.Usage == null && prov.Catalogue == null) || prov.Models != null) return;
             var vis = new List<FrameworkElement>();
-            foreach (var w in prov.Usage.Windows.Where(x => !x.Hidden))
+            var usage = prov.Usage ?? new Usage();
+            foreach (var w in usage.Windows.Where(x => !x.Hidden))
                 vis.Add(Row(null, Ui.LabelOf(w), null, RowToggle(s.Id, w.Key)));
             var def = Definitions.Get(s.Id);
             bool credits = def != null && Json.Obj(def.Raw, "spend") != null;
-            if (prov.Usage.SpendNote != null || credits)
+            if (usage.SpendNote != null || credits)
                 vis.Add(Row(null, L.T("Spend today, this week and this month"), null, RowToggle(s.Id, "*spend")));
-            if (prov.Usage.TodayModels != null || credits)
+            if (usage.TodayModels != null || credits)
                 vis.Add(Row(null, L.T("Models used today"), L.T("From OpenCode and Pi, with the cost they computed."), RowToggle(s.Id, "*models")));
-            if (prov.Usage.FreeModels != null || (def != null && Json.Obj(def.Raw, "freeModels") != null))
+            if (prov.Catalogue != null || (def != null && Json.Obj(def.Raw, "freeModels") != null))
                 vis.Add(Row(null, L.T("Free models"), L.T("From the service's public model list, with the date each one stops being free when announced."), RowToggle(s.Id, "*free")));
             if (vis.Count == 0) return;
             Section(L.T("In the panel"));

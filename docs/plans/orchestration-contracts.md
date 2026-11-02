@@ -59,6 +59,8 @@ M1 implements this section. The reference is [docs/MCP.md, *Fresh data*](../MCP.
 
 ### 2.3 Limits of free models
 
+M2 implements this section in `list_free_models`; [docs/MCP.md](../MCP.md#free-models-and-their-limits) is the reference. Two parts are still to come: the `observed` counters, which need AI Meter's own jobs (M4), and `list_candidates` (M3).
+
 A coordinator can split work sensibly only if it knows, for each free model, what one request may contain and how much the model can still take. Free tiers are mostly made of limits, so these limits are part of the contract from M2 on. They do not wait for the runner.
 
 Today (0.8.6) `list_free_models` returns the context window, tool and reasoning support, and the last free day. It returns no output cap and no rate limit.

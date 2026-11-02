@@ -83,7 +83,7 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 |---|---|
 | `get_limits` | Each service's limits: percentage used and remaining, reset time, forecast run-out time, pace per hour, money limits |
 | `list_sessions` | Running sessions of AI apps and coding agents: agent, status, model, provider; `busy_only` keeps only working ones |
-| `list_free_models` | Free models with id, context window, tool and reasoning support and last free day; filters `tools` and `min_context` |
+| `list_free_models` | Free models with id, context window, output limit, tool and reasoning support, last free day, how the price is known (`free`) and their limits (`limits`, see below); filters `tools`, `min_context`, `min_output_tokens` and `include_unconfirmed` |
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
@@ -93,6 +93,45 @@ All tools except `list_local_models` and `suggest_service` accept an optional `s
 `suggest_service` lists services with known room first. A service that offers free models but has no readable limit comes after them, with `remaining_percent: null` and `quota: "unknown"`. Its room is unknown, not 100%. A service whose reading is out of date is marked `stale` and ranked after fresh ones with the same room.
 
 Each result is returned twice: as `structuredContent`, and as the same JSON in a text block for clients that read only text. Times are local ISO 8601 and percentages range from 0 to 100.
+
+### Free models and their limits
+
+Each model from `list_free_models` says how its price is known and what limits a task on it meets. An agent can use this to decide how many tasks to start and where.
+
+```json
+"free": { "status": "confirmed_free", "kind": "zero_price", "source": "catalogue" },
+"limits": {
+  "per_request": { "context_tokens": { "value": 262144, "source": "catalogue" }, "max_output_tokens": { "value": 32768, "source": "catalogue" } },
+  "pool": "openrouter:free",
+  "rates": [
+    { "metric": "requests_per_minute", "limit": 20, "used": null, "remaining": null, "scope": "account", "per_model": false,
+      "source": "documented", "reference": "https://openrouter.ai/docs/api-reference/limits", "checked_at": "2026-11-02" },
+    { "metric": "requests_per_day", "limit": 50, "used": 12, "remaining": 38, "scope": "account", "per_model": false,
+      "source": "provider_reported", "coverage": "all_clients", "resets_at": "2026-11-03T01:00:00+01:00", "reset_zone": "UTC" }
+  ],
+  "headroom": { "blocking": null, "can_start_now": true, "max_new_jobs_now": 1 }
+}
+```
+
+- **`free.status`.**
+  - `confirmed_free`: the service's list states a zero price.
+  - `unknown`: the service lists no prices, as with NVIDIA and Gemini. Whether such a model is free depends on the account or project, which the key cannot read. These models are listed only with `include_unconfirmed: true`, and `free.note` explains why.
+- **`per_request`.** The context window and the reply size the service states for one request. Unknown values are `null`, and filters leave those models out.
+- **`pool`.** The counter the limits draw from. Models with the same pool share it, so never add their limits up. `{model}` pools, such as Gemini's, are per model.
+- **`rates`.** Each limit says where it comes from:
+
+  | `source` | Meaning |
+  |---|---|
+  | `provider_reported` | Read from the service for this account, including what other apps used (`coverage: all_clients`) |
+  | `documented` | Published by the service, with `reference` and `checked_at` |
+  | `unknown` | The limit exists, but no number is available. It is never guessed |
+
+  Daily limits give `resets_at` and their `reset_zone`, with daylight saving. Gemini's day ends at midnight Pacific time.
+- **`headroom`.**
+  - `blocking` names what stops a task now: the service asked AI Meter to wait (`rate_limited`), or a reported counter is used up (`exhausted`, with `until`).
+  - Without a known concurrency limit, `max_new_jobs_now` is at most 1.
+  - AI Meter decides how many tasks start. It does not pace the requests a running agent makes.
+  - Counters of AI Meter's own tasks arrive with the task runner.
 
 ## Fresh data
 
