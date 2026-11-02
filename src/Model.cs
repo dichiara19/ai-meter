@@ -118,15 +118,10 @@ namespace AIMeter
         public Func<string> SpendNote;
         /// <summary>Today's models used through this service, as reported by OpenCode and Pi.</summary>
         public List<ModelCost> TodayModels;
-        /// <summary>Models the service offers at no cost, soonest to expire first.</summary>
-        public List<FreeModel> FreeModels;
-        /// <summary>When the free-model list was read; it has its own interval, longer than the usage request's.</summary>
-        public DateTime? FreeModelsAt;
-
         /// <summary>Copy usage with additional windows, preserving the original provider response.</summary>
         public Usage With(IEnumerable<UsageWindow> extra)
         {
-            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels, FreeModelsAt = FreeModelsAt };
+            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
             u.Windows.AddRange(Windows);
             u.Windows.AddRange(extra);
             return u;
@@ -153,7 +148,7 @@ namespace AIMeter
         /// <summary>Return the same data marked as cached.</summary>
         public Usage AsCache()
         {
-            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels, FreeModelsAt = FreeModelsAt };
+            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
         }
     }
 
@@ -176,6 +171,11 @@ namespace AIMeter
         public bool Running;
         public List<Session> Sessions = new List<Session>();
         public Usage Usage;
+        /// <summary>
+        /// Free models the service offers. Read on its own, longer timer and kept apart from Usage, so a service
+        /// without a readable usage endpoint can still list its free models. Null when it offers no list or none was read.
+        /// </summary>
+        public Catalogue Catalogue;
         public string Notice;     // Connection status message, when needed.
         public bool NeedsLogin;
         public bool CanSignIn;    // Whether the notice offers a sign-in action managed by AI Meter.
@@ -229,8 +229,8 @@ namespace AIMeter
                         sb.Append(w.RunsOutAt.HasValue ? w.RunsOutAt.Value.Ticks / TimeSpan.TicksPerMinute / 5 : 0);
                     }
                     if (p.Usage.TodayModels != null) foreach (var m in p.Usage.TodayModels) sb.Append(m.Model).Append((int)(m.Cost * 100)).Append(m.Tokens >> 10);
-                    if (p.Usage.FreeModels != null) foreach (var m in p.Usage.FreeModels) sb.Append(m.Id).Append(m.Expires);
                 }
+                if (p.Catalogue != null) foreach (var m in p.Catalogue.Models) sb.Append(m.Id).Append(m.Expires);
                 foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
                 if (p.Models != null) sb.Append(p.GpuUsed >> 28);
                 if (p.Models != null)

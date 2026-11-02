@@ -1,0 +1,34 @@
+{
+  "id": "gemini",
+  "name": "Gemini API",
+  "monogram": "G",
+  "description": "Models your Gemini API key can use, with their token limits. Google does not let a key read its quota.",
+  "color": { "light": "#1A73E8", "dark": "#8AB4F8" },
+  "detect": { "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"] },
+  "auth": { "type": "key", "ids": ["google", "gemini"], "env": ["GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"], "page": "https://aistudio.google.com/apikey" },
+  "freeModels": {
+    "url": "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+    "headers": { "x-goog-api-key": "{token}" },
+    "format": "gemini",
+    "interval": 360,
+    "free": {
+      "status": "unknown",
+      "reference": "https://ai.google.dev/gemini-api/docs/rate-limits",
+      "checked": "2026-11-02",
+      "note": "Whether a model is free depends on the Google Cloud project of the key (free tier or billing), which the key cannot read. Limits apply per project and per model."
+    },
+    "pool": "gemini:{model}",
+    "limits": [
+      { "metric": "requests_per_minute", "scope": "project", "perModel": true, "source": "unknown", "reference": "https://ai.google.dev/gemini-api/docs/rate-limits", "checked": "2026-11-02" },
+      { "metric": "input_tokens_per_minute", "scope": "project", "perModel": true, "source": "unknown", "reference": "https://ai.google.dev/gemini-api/docs/rate-limits", "checked": "2026-11-02" },
+      { "metric": "requests_per_day", "scope": "project", "perModel": true, "period": "day", "resetZone": "America/Los_Angeles", "source": "unknown", "reference": "https://ai.google.dev/gemini-api/docs/rate-limits", "checked": "2026-11-02" }
+    ]
+  },
+  "i18n": {
+    "it": { "Models your Gemini API key can use, with their token limits. Google does not let a key read its quota.": "Modelli che la tua chiave API Gemini può usare, con i loro limiti di token. Google non permette a una chiave di leggere la propria quota." },
+    "es": { "Models your Gemini API key can use, with their token limits. Google does not let a key read its quota.": "Modelos que tu clave API de Gemini puede usar, con sus límites de tokens. Google no permite que una clave lea su cuota." },
+    "fr": { "Models your Gemini API key can use, with their token limits. Google does not let a key read its quota.": "Modèles que votre clé API Gemini peut utiliser, avec leurs limites de jetons. Google ne permet pas à une clé de lire son quota." },
+    "de": { "Models your Gemini API key can use, with their token limits. Google does not let a key read its quota.": "Modelle, die dein Gemini-API-Schlüssel nutzen kann, mit ihren Token-Limits. Google lässt einen Schlüssel sein Kontingent nicht lesen." },
+    "pt": { "Models your Gemini API key can use, with their token limits. Google does not let a key read its quota.": "Modelos que a sua chave de API Gemini pode usar, com os seus limites de tokens. A Google não permite que uma chave leia a sua quota." }
+  }
+}

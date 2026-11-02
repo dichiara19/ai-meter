@@ -9,7 +9,16 @@
   "auth": { "type": "key", "ids": ["explabs", "experientiallabs", "experiential-labs"], "env": ["EXPLABS_API_KEY"], "page": "https://platform.experientiallabs.ai" },
   "request": { "url": "https://api.experientiallabs.ai/api/v1/credits", "headers": { "Authorization": "Bearer {token}" }, "interval": 15 },
   "spend": { "total": "data.total_usage", "currency": "USD" },
-  "freeModels": { "url": "https://api.experientiallabs.ai/api/v1/models", "headers": { "Authorization": "Bearer {token}" }, "interval": 360 },
+  "freeModels": {
+    "url": "https://api.experientiallabs.ai/api/v1/models", "headers": { "Authorization": "Bearer {token}" }, "interval": 360,
+    "pool": "experientiallabs:free",
+    "limits": [
+      { "metric": "requests_per_minute", "limit": 10, "scope": "model", "perModel": true, "source": "documented", "reference": "https://platform.experientiallabs.ai/llms.txt", "checked": "2026-11-02" },
+      { "metric": "tokens_per_minute", "limit": 250000, "scope": "model", "perModel": true, "source": "documented", "reference": "https://platform.experientiallabs.ai/llms.txt", "checked": "2026-11-02" },
+      { "metric": "tokens_per_day", "limit": 1000000, "scope": "account", "period": "day", "resetZone": "UTC", "source": "documented", "reference": "https://platform.experientiallabs.ai/llms.txt", "checked": "2026-11-02",
+        "note": "Shared by all free models; the free tier needs a verified card." }
+    ]
+  },
   "limits": [
     { "label": "Credits", "short": "$", "when": "data.total_credits", "used": "data.total_usage", "limit": "data.total_credits", "currency": "USD" },
     { "label": "Spent", "unless": "data.total_credits", "balance": "data.total_usage", "currency": "USD" }

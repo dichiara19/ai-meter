@@ -83,10 +83,14 @@ namespace AIMeter
             claude.Sessions.Add(new Session { Kind = "Chat", Status = "app" });
             var router = new ProviderState { Id = "openrouter", Name = "OpenRouter", Usage = new Usage { Source = "live", At = DateTime.Now } };
             router.Usage.Windows.Add(new UsageWindow { Label = "Free requests today", Short = UsageWindow.ShortDay, Used = 10 });
-            router.Usage.FreeModels = new List<FreeModel>
+            router.Catalogue = new Catalogue
             {
-                new FreeModel { Id = "a/small:free", Name = "Small", Context = 32000 },
-                new FreeModel { Id = "b/large:free", Name = "Large", Context = 256000, Tools = true, Expires = DateTime.Today.AddDays(3) },
+                ReadAt = DateTime.Now.AddHours(-1),
+                Models = new List<FreeModel>
+                {
+                    new FreeModel { Id = "a/small:free", Name = "Small", Context = 32000 },
+                    new FreeModel { Id = "b/large:free", Name = "Large", Context = 256000, MaxOutput = 8192, Tools = true, Expires = DateTime.Today.AddDays(3) },
+                },
             };
             router.Usage.TodayModels = new List<ModelCost> { new ModelCost { Model = "b/large:free", Cost = 0, Tokens = 1200, Replies = 3 } };
             router.Sessions.Add(new Session { Kind = "Pi · WSL", Title = "Batch job", Status = "idle", Provider = "openrouter" });
@@ -146,6 +150,7 @@ namespace AIMeter
 
             var free = ((IList)CallTool(server, "list_free_models", "{\"tools\":true,\"min_context\":100000}")["models"]).OfType<Dictionary<string, object>>().Single();
             Assert(Json.Str(free, "id") == "b/large:free" && Json.Str(free, "free_until") != null, "The free model filter is wrong.");
+            Assert(Json.Num(free, "max_output_tokens") == 8192, "The output limit is missing.");
 
             var spend = ((IList)CallTool(server, "get_spend", "{}")["services"]).OfType<Dictionary<string, object>>().Single();
             Assert(Json.Str(spend, "service") == "openrouter", "Spending lists a service without spending.");
@@ -200,7 +205,7 @@ namespace AIMeter
             var worker = new FakeWorker(() =>
             {
                 var s = Fixture();
-                s.Providers[1].Usage.FreeModelsAt = DateTime.Now;
+                s.Providers[1].Catalogue.ReadAt = DateTime.Now;
                 return s;
             });
             var snap = OldClaude();
@@ -282,8 +287,9 @@ namespace AIMeter
             var snap = Fixture();
             var stale = new ProviderState { Id = "aaa", Name = "Stale", Usage = new Usage { Source = "cache", At = DateTime.Now.AddHours(-1) } };
             stale.Usage.Windows.Add(new UsageWindow { Label = "Day", Short = UsageWindow.ShortDay, Used = 10 });
-            var unknown = new ProviderState { Id = "nvidia", Name = "NVIDIA", Usage = new Usage { Source = "live", At = DateTime.Now } };
-            unknown.Usage.FreeModels = new List<FreeModel> { new FreeModel { Id = "n/free", Name = "Free" } };
+            // A service with a model list but no readable usage at all.
+            var unknown = new ProviderState { Id = "nvidia", Name = "NVIDIA" };
+            unknown.Catalogue = new Catalogue { ReadAt = DateTime.Now, Models = new List<FreeModel> { new FreeModel { Id = "n/free", Name = "Free" } } };
             snap.Providers.Add(unknown);
             snap.Providers.Add(stale);
             var rows = ((IList)CallTool(new McpServer(() => snap, () => false), "suggest_service", "{}")["services"]).OfType<Dictionary<string, object>>().ToList();
