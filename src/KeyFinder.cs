@@ -8,7 +8,8 @@ using System.Text.RegularExpressions;
 namespace AIMeter
 {
     /// <summary>
-    /// Discover existing API keys in OpenCode, Pi, Crush and shell profiles on Windows and running WSL.
+    /// Discover existing API keys in the coding agents of agents/*.json (OpenCode, Pi, Crush and any agent a definition
+    /// gives key sources) and shell profiles on Windows and running WSL.
     /// Provider definitions declare the service aliases used by those apps in auth.ids.
     /// Resolve environment references using auth.env and exports from the same home directory.
     /// Never execute command values; discovered credentials are used only for their configured service.
@@ -16,21 +17,17 @@ namespace AIMeter
     internal static class KeyFinder
     {
         /// <summary>
-        /// A discovered key: Source is the display text, which names WSL when the key is there; App ("OpenCode", "Pi",
-        /// "Crush" or "profile") says where; Alias is the provider id the app keeps it under (null for a profile export).
+        /// A discovered key: Source is the display text, which names WSL when the key is there; App (the agent's name,
+        /// such as "OpenCode", or "profile") says where; Alias is the provider id the app keeps it under (null for a
+        /// profile export).
         /// </summary>
         internal sealed class Found { public string Key, Source, App, Alias; }
 
-        /// <summary>App name, home-relative path and JSON value path, with {id} standing for a service alias.</summary>
-        private static readonly string[][] Sources =
+        /// <summary>App name, home-relative path and JSON value path, with {id} standing for a service alias, in agent order.</summary>
+        private static IEnumerable<string[]> Sources
         {
-            new[] { "OpenCode", @".local\share\opencode\auth.json", "{id}.key" },
-            new[] { "OpenCode", @".config\opencode\opencode.json", "provider.{id}.options.apiKey" },
-            new[] { "Pi", @".pi\agent\auth.json", "{id}.key" },
-            new[] { "Pi", @".pi\agent\models.json", "providers.{id}.apiKey" },
-            new[] { "Crush", @".config\crush\crush.json", "providers.{id}.api_key" },
-            new[] { "Crush", @".local\share\crush\crush.json", "providers.{id}.api_key" },
-        };
+            get { return Agents.All.SelectMany(a => a.Keys.Select(k => new[] { a.Name, k.File, k.Path })); }
+        }
 
         private static readonly string[] Profiles = { ".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile", ".zshenv", @".config\fish\config.fish" };
 

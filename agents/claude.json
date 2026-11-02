@@ -1,0 +1,7 @@
+{
+  "id": "claude",
+  "name": "Claude Code",
+  "programs": { "windows": ["claude"], "wsl": ["claude"] },
+  "folders": [".claude"],
+  "package": "@anthropic-ai/claude-code"
+}

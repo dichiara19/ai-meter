@@ -1,0 +1,6 @@
+{
+  "id": "cursor",
+  "name": "Cursor Agent",
+  "programs": { "windows": ["cursor-agent"], "wsl": ["cursor-agent"] },
+  "folders": [".cursor"]
+}

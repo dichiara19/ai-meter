@@ -53,7 +53,7 @@ The plugins already solve the coordinator side of each of these.
    - A worktree is not a sandbox: the agent's own permissions apply, and the plugin's documentation says so.
 7. **ADR 0001 decisions 3, 4 and 8 stay in force.**
    - No key is handed to an agent, and only agents' own keys make a candidate.
-   - No particular agent is required, and nothing is installed by a read.
+   - No particular agent is required: delegation uses whichever supported agents are set up. "Supported" means an agent in AI Meter's data table (`agents/*.json`) with a dispatch verified for its place, today Pi in WSL and OpenCode in WSL and on Windows. Other agents found are reported as unsupported, with the reason, never guessed. Nothing is installed by a read.
    - No saving is claimed without measurement.
 
 ## Consequences

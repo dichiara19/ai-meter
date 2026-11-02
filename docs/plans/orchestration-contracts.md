@@ -159,7 +159,9 @@ With no known concurrency limit, `max_new_jobs_now` is at most 1.
 M3 implements this section in `src/Candidates.cs` and `list_candidates`; [docs/MCP.md](../MCP.md#choosing-where-to-run-a-task-list_candidates) is the reference. The differences from this draft:
 - The cost policies are `free_only` and `free_or_unconfirmed`. A paid policy waits until model lists carry prices for paid models.
 - `CredentialReference` is the `credential` id with its runtime and place. The source app is not returned, since only each agent's own keys count.
-- Runtimes are a table of supported agents (Pi, OpenCode, Crush), not a single one: no particular agent is required.
+- Runtimes are a data table of agents (`agents/*.json`, plus the user's `%APPDATA%\AIMeter\agents`), not a single one. Only agents with a verified dispatch for their place are candidates (Pi in WSL, OpenCode in WSL and on Windows); none of them is required. Agents found without one (Codex, Claude Code, Gemini CLI, Antigravity CLI, Cursor Agent, Crush, Pi on Windows) are listed in `runtimes.unsupported` with a reason, so a plugin can tell the user why. The table's shape is in [docs/MCP.md](../MCP.md#agent-definitions).
+- Every running WSL distribution is scanned, each candidate carrying its `distro`; the Linux home is the one holding any agent's folder.
+- `warnings` flags candidates a plugin must watch: `openrouter_byok_fallback` today.
 - Reservations and the `observed` counters come with capacity leases (M4, §3).
 
 **`list_candidates` (M3, read tool).** It takes the task's `requirements` and a `cost_policy`. It returns the ordered candidates, each with its `limits` and `headroom`, plus the reason each excluded candidate was dropped.
@@ -188,7 +190,7 @@ M4 implements this section in `src/Dispatch.cs`, `src/Leases.cs` and the MCP too
 
 ### 3.1 `describe_dispatch`
 
-Input: a candidate from `list_candidates`, identified by `service`, `model`, `runtime` and `where`.
+Input: a candidate from `list_candidates`, identified by `service`, `model`, `runtime`, `where` and, in WSL, `distro`.
 
 Output:
 
@@ -204,11 +206,13 @@ Output:
 }
 ```
 
-- The description comes from a data table per agent, one row per verified version range. The M4 spike fills it, and nothing is written from memory. [spike-agents.md](spike-agents.md) has the first row (Pi 1.x).
-- Besides the fields above, each row says how to tell the end (Pi: `agent_settled`), where the outcome is (Pi: the last assistant `stopReason`, not the exit code), how to count requests and tokens, and how to stop the agent.
+- The description comes from a data table per agent (`agents/*.json`, see [docs/MCP.md](../MCP.md#agent-definitions)): per verified place, a version range, and the argument template per mode with `{provider}`, `{model}` and `{workspace}`, plus the environment. The M4 spike filled the built-in rows, and nothing is written from memory. [spike-agents.md](spike-agents.md) has the evidence (Pi 1.x, OpenCode 1.x).
+- Besides the fields above, each row says how to tell the end (Pi: `agent_settled`), where the outcome is (Pi: the last assistant `stopReason`, not the exit code), how to count requests and tokens, where each request's price appears (`output.cost`: Pi's `usage.cost.total`, OpenCode's `step_finish.part.cost`), and how to stop the agent. Agents price requests from their own model list, so a price above zero means a paid request, but zero does not rule out a BYOK fallback billed by the provider.
+- `warnings` (such as `openrouter_byok_fallback`) repeats the candidate's warnings.
 - `arguments` is an array. The plugin starts the program without a shell and passes the task as data, through stdin or a single argument, as `task_input` says. There is no field for an arbitrary command, and the task text never enters the description.
 - `where: "wsl"` means the plugin starts the agent inside WSL, which must already be running. AI Meter never starts WSL.
-- An agent without a verified row returns `unsupported`, and the reason.
+- An agent without a verified row returns `unsupported`, and the reason. Before that, distinct errors name an unknown runtime, AI Meter still reading its first data, an agent not set up here, key discovery turned off, and an agent without its own key for the service.
+- An agent npm installed in WSL needs `node`: its folder goes next to the agent's in the generated PATH (nvm, fnm and asdf included), and without one the answer is `unsupported`. On Windows only a native `.exe` is described, never a `.cmd` or `.ps1` wrapper.
 
 ### 3.2 Leases
 

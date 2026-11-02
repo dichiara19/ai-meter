@@ -174,7 +174,9 @@ namespace AIMeter
             var profile = Home(".bashrc", "export OPENROUTER_API_KEY=sk-or-v1-profile-0123456789\n");
             Assert((string)piKeyIn(pi, profile) == "sk-or-v1-profile-0123456789" && (string)piKeyIn(openCode, profile) == "sk-or-v1-profile-0123456789",
                 "A WSL profile export every agent inherits was not counted.");
-            Assert(Candidates.Kinds.Select(k => k.Id).SequenceEqual(new[] { "pi", "opencode", "crush" }), "The supported agents changed without updating this test.");
+            Assert(Candidates.Kinds.Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi", "crush", "antigravity", "claude", "codex", "cursor", "gemini" }),
+                "The known agents changed without updating this test.");
+            Assert(Candidates.Kinds.Where(k => k.Dispatch != null).Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi" }), "The agents delegation runs changed without updating this test.");
 
             // A configuration folder can outlive its agent: the program must be installed too (checked without starting WSL).
             string root = Path.Combine(Settings.Folder, "distro-" + Guid.NewGuid().ToString("N"));

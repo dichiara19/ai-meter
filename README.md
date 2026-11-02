@@ -194,6 +194,8 @@ src/HistoryWindow.cs   native history dashboard
 src/HistoryVisuals.cs  settings-style cards, charts and explicit data states
 src/StringsHistory.cs  history translations
 providers/*.json       built-in service definitions
+agents/*.json          built-in coding agent definitions: folders, keys and how delegation starts them
+src/AgentDefinitions.cs loads agents/*.json and %APPDATA%\AIMeter\agents
 tools/render-media.ps1 regenerates the README images (docs/media) from the real UI with demo data
 src/Settings.cs        preferences and start with Windows
 src/PackageStartup.cs  start with Windows in the Microsoft Store package (StartupTask)

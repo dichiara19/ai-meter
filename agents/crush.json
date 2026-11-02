@@ -1,0 +1,11 @@
+{
+  "id": "crush",
+  "name": "Crush",
+  "order": 30,
+  "programs": { "windows": ["crush"], "wsl": ["crush"] },
+  "folders": [".config/crush", ".local/share/crush"],
+  "keys": [
+    { "file": ".config/crush/crush.json", "path": "providers.{id}.api_key" },
+    { "file": ".local/share/crush/crush.json", "path": "providers.{id}.api_key" }
+  ]
+}

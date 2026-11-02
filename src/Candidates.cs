@@ -3,13 +3,15 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 
 namespace AIMeter
 {
     /// <summary>
     /// Execution candidates (docs/plans/orchestration-contracts.md sections 2.1 and 2.4): the free models a task can run
     /// on now, through a coding agent on this PC that already holds its own key for the service, and why every other
-    /// model cannot. No particular agent is required: delegation uses whichever supported agents the user has.
+    /// model cannot. Delegation uses whichever supported agents the user has: those of agents/*.json with a verified
+    /// dispatch for the place they are in. Other agents it finds are reported as unsupported, with the reason.
     /// Nothing here starts a process or reserves capacity: coordinator plugins run the agents (ADR 0002), and capacity
     /// leases reserve room.
     ///
@@ -111,57 +113,144 @@ namespace AIMeter
         private static readonly string Salt = Guid.NewGuid().ToString("N");
 
         /// <summary>
-        /// Coding agents that can run a delegated task on a free model with their own keys: the folders that show they
-        /// are set up in a home, and the program that shows they are still installed (a folder can outlive its agent).
-        /// App names the agent in KeyFinder's sources. Adding an agent here makes delegation consider it; running tasks
-        /// through it also needs its dispatch description.
+        /// The coding agents AI Meter knows (agents/*.json and %APPDATA%\AIMeter\agents): the folders that show they are
+        /// set up in a home, the program that shows they are still installed (a folder can outlive its agent), where
+        /// they keep keys and, for those delegation supports, how a plugin starts them.
         /// </summary>
-        internal static readonly RuntimeKind[] Kinds =
+        internal static IList<RuntimeKind> Kinds { get { return Agents.All; } }
+
+        /// <summary>
+        /// Where package managers and Node version managers put agents' programs, relative to a home; "*" stands for
+        /// each installed version, newest first.
+        /// </summary>
+        private static readonly string[] HomeBins =
         {
-            new RuntimeKind { Id = "pi", Name = "Pi", App = "Pi", Program = "pi", Folders = new[] { @".pi\agent" } },
-            new RuntimeKind { Id = "opencode", Name = "OpenCode", App = "OpenCode", Program = "opencode", Folders = new[] { @".local\share\opencode", @".config\opencode" } },
-            new RuntimeKind { Id = "crush", Name = "Crush", App = "Crush", Program = "crush", Folders = new[] { @".config\crush", @".local\share\crush" } },
+            @".npm-global\bin", @".local\bin", @".opencode\bin", @".bun\bin", @"go\bin", @".volta\bin", @".local\share\pnpm",
+            @".nvm\versions\node\*\bin", @".local\share\fnm\node-versions\*\installation\bin", @".fnm\node-versions\*\installation\bin",
+            @".asdf\installs\nodejs\*\bin", @".asdf\shims",
         };
 
-        /// <summary>Where package managers put agents' programs, relative to a home.</summary>
-        private static readonly string[] HomeBins = { @".npm-global\bin", @".local\bin", @".opencode\bin", @".bun\bin", @"go\bin", @".volta\bin", @".local\share\pnpm" };
+        /// <summary>Where npm keeps global packages in WSL, relative to a home, for the folders of HomeBins.</summary>
+        private static readonly string[] HomeModules =
+        {
+            @".npm-global\lib\node_modules", @".local\lib\node_modules", @".nvm\versions\node\*\lib\node_modules",
+            @".local\share\fnm\node-versions\*\installation\lib\node_modules", @".fnm\node-versions\*\installation\lib\node_modules",
+            @".asdf\installs\nodejs\*\lib\node_modules",
+        };
 
-        /// <summary>Linux system folders for programs, relative to the distribution's root.</summary>
+        /// <summary>Linux system folders for programs and global npm packages, relative to the distribution's root.</summary>
         private static readonly string[] SystemBins = { @"usr\local\bin", @"usr\bin", @"home\linuxbrew\.linuxbrew\bin" };
+        private static readonly string[] SystemModules = { @"usr\local\lib\node_modules", @"usr\lib\node_modules" };
 
         /// <summary>
         /// Whether the agent's program is installed for this home. In WSL the usual Linux folders are checked through
         /// the distribution's file share, so nothing is started inside WSL; on Windows, PATH and npm's global folder.
-        /// Node version managers that keep programs elsewhere are not covered.
         /// </summary>
         internal static bool Installed(RuntimeKind kind, string home, bool wsl) { return ProgramPath(kind, home, wsl) != null; }
 
         /// <summary>
         /// The agent's program as this PC sees it (in WSL, through the distribution's file share), or null when it is not
-        /// installed in the usual folders.
+        /// installed in the usual folders. dirs are the folders to search, from SearchDirs.
         /// </summary>
-        internal static string ProgramPath(RuntimeKind kind, string home, bool wsl)
+        internal static string ProgramPath(RuntimeKind kind, string home, bool wsl, IList<string> dirs = null)
         {
-            var dirs = HomeBins.Select(b => Path.Combine(home, b)).ToList();
+            var names = kind.ProgramsIn(wsl ? "wsl" : "windows");
+            // On Windows a native program first, then the wrappers npm writes.
+            var files = wsl ? names : names.SelectMany(n => new[] { ".exe", ".cmd", ".bat", ".ps1" }.Select(x => n + x)).ToArray();
+            foreach (var d in dirs ?? SearchDirs(home, wsl))
+                foreach (var f in files)
+                {
+                    try { if (File.Exists(Path.Combine(d, f))) return Path.Combine(d, f); }
+                    catch (ArgumentException) { }   // A malformed PATH entry.
+                }
+            return null;
+        }
+
+        /// <summary>The existing folders where a home's programs are, in the order they are searched.</summary>
+        internal static List<string> SearchDirs(string home, bool wsl)
+        {
+            var dirs = HomeBins.SelectMany(b => Expand(home, b)).ToList();
             if (wsl)
             {
                 var root = DistributionRoot(home);
                 if (root != null) dirs.AddRange(SystemBins.Select(b => Path.Combine(root, b)));
-                return dirs.Select(d => Path.Combine(d, kind.Program)).FirstOrDefault(File.Exists);
             }
-            dirs.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm"));
-            dirs.AddRange((Environment.GetEnvironmentVariable("PATH") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries));
-            var names = new[] { ".exe", ".cmd", ".bat", ".ps1" }.Select(x => kind.Program + x).ToList();
-            foreach (var d in dirs)
+            else
+            {
+                dirs.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm"));
+                dirs.AddRange((Environment.GetEnvironmentVariable("PATH") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Select(d => d.Trim()));
+            }
+            return dirs.Where(d =>
+            {
+                try { return Directory.Exists(d); }
+                catch (ArgumentException) { return false; }
+            }).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        /// <summary>A home-relative pattern as paths, each "*" standing for every folder there, newest version first.</summary>
+        internal static IEnumerable<string> Expand(string home, string pattern)
+        {
+            IEnumerable<string> paths = new[] { home };
+            foreach (var part in pattern.Split('\\'))
+            {
+                string name = part;
+                paths = name == "*" ? paths.SelectMany(p => Probe.SafeDirs(p).OrderByDescending(VersionKey, StringComparer.Ordinal)) : paths.Select(p => Path.Combine(p, name));
+            }
+            return paths;
+        }
+
+        /// <summary>A folder name's numbers padded so that ordinal order is version order: v9.0.0 before v22.1.0.</summary>
+        private static string VersionKey(string path)
+        {
+            return string.Join(".", Regex.Matches(Path.GetFileName(path), @"\d+").Cast<Match>().Select(m => m.Value.PadLeft(10, '0')));
+        }
+
+        /// <summary>
+        /// The folder of the agent's npm package, or null when npm did not install it: next to its program first, then
+        /// npm's global folders (in WSL, also those of Node version managers).
+        /// </summary>
+        internal static string PackageFolder(RuntimeKind kind, string home, bool wsl, string program)
+        {
+            if (kind.Package == null) return null;
+            var roots = new List<string>();
+            if (program != null) roots.Add(Path.Combine(Path.GetDirectoryName(program), wsl ? @"..\lib\node_modules" : "node_modules"));
+            if (wsl)
+            {
+                roots.AddRange(HomeModules.SelectMany(m => Expand(home, m)));
+                var root = DistributionRoot(home);
+                if (root != null) roots.AddRange(SystemModules.Select(m => Path.Combine(root, m)));
+            }
+            else roots.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"npm\node_modules"));
+            foreach (var r in roots)
             {
                 try
                 {
-                    var found = names.Select(n => Path.Combine(d.Trim(), n)).FirstOrDefault(File.Exists);
-                    if (found != null) return found;
+                    string folder = Path.GetFullPath(Path.Combine(r, kind.Package.Replace('/', '\\')));
+                    if (File.Exists(Path.Combine(folder, "package.json"))) return folder;
                 }
-                catch (ArgumentException) { }   // A malformed PATH entry.
+                catch (ArgumentException) { }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
             }
             return null;
+        }
+
+        /// <summary>The installed version from the package's package.json, read without running anything; null when unknown.</summary>
+        internal static string PackageVersion(string folder)
+        {
+            return folder == null ? null : Json.Str(Json.ParseFile(Path.Combine(folder, "package.json")), "version");
+        }
+
+        /// <summary>
+        /// On Windows, the native program to start: the one found if it is an .exe, else one of the definition's
+        /// executables inside its npm package (npm puts only .cmd and .ps1 wrappers, which need a shell, on the PATH).
+        /// </summary>
+        internal static string NativeProgram(RuntimeKind kind, string program, string package)
+        {
+            if (program == null || program.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return program;
+            var place = kind.PlaceFor("windows");
+            if (place == null || package == null) return program;
+            return place.Executables.Select(e => Path.Combine(package, e)).FirstOrDefault(File.Exists) ?? program;
         }
 
         /// <summary>The distribution's root (\\wsl.localhost\Distro) for a home under it (…\home\user).</summary>
@@ -180,38 +269,84 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Which supported agents are set up (on Windows, and in WSL while WSL runs) and which services each can call
-        /// with its own key: one kept in that agent's files, or in the environment it starts with (this process's
-        /// variables on Windows, shell-profile exports in WSL). Keys AI Meter keeps never count: it does not hand them
-        /// to an agent. Follows the FindKeys setting, as reading these files is key discovery.
+        /// Which agents are set up on Windows and in every running WSL distribution: those delegation can run, with the
+        /// services each can call with its own key (one kept in that agent's files, or in the environment it starts with:
+        /// this process's variables on Windows, shell-profile exports in WSL), and those it cannot, with the reason. Keys
+        /// AI Meter keeps never count: it does not hand them to an agent. Follows the FindKeys setting, as reading these
+        /// files is key discovery.
         /// </summary>
         public static RuntimeScan ScanRuntimes()
         {
+            return Scan(Probe.Home, Probe.WslPlacesUp, Kinds, Settings.Current != null && Settings.Current.FindKeys);
+        }
+
+        /// <summary>ScanRuntimes over the given homes: windowsHome (null to skip Windows) and running distributions.</summary>
+        internal static RuntimeScan Scan(string windowsHome, IEnumerable<WslPlace> wsl, IList<RuntimeKind> kinds, bool findKeys)
+        {
             var scan = new RuntimeScan();
-            var homes = new List<Tuple<string, bool>> { Tuple.Create(Probe.Home, false) };
-            string wsl = Probe.WslHomeUp;
-            if (wsl != null) homes.Add(Tuple.Create(wsl, true));
-            var found = new List<Tuple<RuntimeKind, string, bool>>();
-            foreach (var kind in Kinds)
-                foreach (var h in homes.Where(h => kind.Folders.Any(f => Directory.Exists(Path.Combine(h.Item1, f))) && Installed(kind, h.Item1, h.Item2)))
+            var homes = new List<WslPlace>();   // Distro null: the Windows home.
+            if (windowsHome != null) homes.Add(new WslPlace { Home = windowsHome });
+            homes.AddRange(wsl);
+            var dirs = homes.ToDictionary(h => h, h => SearchDirs(h.Home, h.Distro != null));
+            var found = new List<Tuple<RuntimeKind, WslPlace, string>>();
+            foreach (var kind in kinds)
+                foreach (var h in homes)
                 {
-                    found.Add(Tuple.Create(kind, h.Item1, h.Item2));
-                    scan.Found.Add(new RuntimePlace { Runtime = kind.Id, Where = h.Item2 ? "wsl" : "windows" });
+                    bool inWsl = h.Distro != null;
+                    string where = inWsl ? "wsl" : "windows";
+                    bool setUp = kind.Folders.Any(f => Directory.Exists(Path.Combine(h.Home, f)));
+                    string program = ProgramPath(kind, h.Home, inWsl, dirs[h]);
+                    if (!setUp && program == null) continue;
+                    string reason = Unsupported(kind, where, setUp, program);
+                    if (reason != null)
+                    {
+                        scan.Unsupported.Add(new UnsupportedRuntime { Runtime = kind.Id, Name = kind.Name, Where = where, Distro = h.Distro, Reason = reason });
+                        continue;
+                    }
+                    found.Add(Tuple.Create(kind, h, program));
+                    scan.Found.Add(new RuntimePlace { Runtime = kind.Id, Where = where, Distro = h.Distro });
                 }
-            if (Settings.Current == null || !Settings.Current.FindKeys) { scan.KeyDiscoveryOff = true; return scan; }
+            if (!findKeys) { scan.KeyDiscoveryOff = true; return scan; }
             foreach (var d in Definitions.All.Where(x => x.UsesKey))
                 foreach (var f in found)
                 {
+                    bool inWsl = f.Item2.Distro != null;
                     string alias;
-                    string key = RuntimeKey(f.Item1, d, f.Item2, f.Item3, out alias);
+                    string key = RuntimeKey(f.Item1, d, f.Item2.Home, inWsl, out alias);
                     if (key == null) continue;
-                    var access = Access(d.Id, f.Item1.Id, f.Item3 ? "wsl" : "windows", key);
+                    var access = Access(d.Id, f.Item1.Id, inWsl ? "wsl" : "windows", key);
                     access.Provider = alias ?? ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id).First();
-                    string program = ProgramPath(f.Item1, f.Item2, f.Item3);
-                    access.Program = program != null && f.Item3 ? LinuxPath(program, f.Item2) : program;
+                    access.Distro = f.Item2.Distro;
+                    string package = PackageFolder(f.Item1, f.Item2.Home, inWsl, f.Item3);
+                    access.Version = PackageVersion(package);
+                    if (inWsl)
+                    {
+                        access.Program = LinuxPath(f.Item3, f.Item2.Home);
+                        // An agent npm installed is a Node script: its PATH needs a node, perhaps in a version manager's folder.
+                        access.NeedsNode = package != null;
+                        string node = NodeFolder(f.Item3, dirs[f.Item2]);
+                        access.NodeFolder = node == null ? null : LinuxPath(node, f.Item2.Home);
+                    }
+                    else access.Program = NativeProgram(f.Item1, f.Item3, package);
                     scan.Access.Add(access);
                 }
             return scan;
+        }
+
+        /// <summary>The folder of the node an agent's program would run with: its own folder first, then the search folders.</summary>
+        internal static string NodeFolder(string program, IEnumerable<string> dirs)
+        {
+            return new[] { Path.GetDirectoryName(program) }.Concat(dirs).FirstOrDefault(d => File.Exists(Path.Combine(d, "node")));
+        }
+
+        /// <summary>Why delegation cannot use an agent found in a place, as a reason code; null when it can.</summary>
+        private static string Unsupported(RuntimeKind kind, string where, bool setUp, string program)
+        {
+            if (kind.Dispatch == null) return "no_dispatch";
+            if (kind.PlaceFor(where) == null) return "place_not_verified";
+            if (program == null) return "program_not_found";
+            if (!setUp) return "not_set_up";
+            return null;
         }
 
         /// <summary>
@@ -221,7 +356,7 @@ namespace AIMeter
         private static string RuntimeKey(RuntimeKind kind, ServiceDefinition d, string home, bool wsl, out string alias)
         {
             alias = null;
-            var found = KeyFinder.SearchAll(d, home, wsl).FirstOrDefault(f => f.App == kind.App || (wsl && f.App == "profile"));
+            var found = KeyFinder.SearchAll(d, home, wsl).FirstOrDefault(f => f.App == kind.Name || (wsl && f.App == "profile"));
             if (found != null) { alias = found.Alias; return found.Key; }
             if (wsl) return null;
             foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
@@ -258,19 +393,29 @@ namespace AIMeter
         public string Provider;
         /// <summary>The agent's program where it runs: a Linux path in WSL, a Windows path on Windows; null when unknown.</summary>
         public string Program;
+        /// <summary>The WSL distribution the agent is in; null on Windows.</summary>
+        public string Distro;
+        /// <summary>The installed version from its npm package; null when unknown.</summary>
+        public string Version;
+        /// <summary>In WSL: whether the program is a Node script (npm installed it), and the Linux folder of node, or null.</summary>
+        public bool NeedsNode;
+        public string NodeFolder;
     }
 
-    /// <summary>A coding agent delegation can use (see Candidates.Kinds).</summary>
-    internal sealed class RuntimeKind
-    {
-        public string Id, Name, App, Program;
-        public string[] Folders;
-    }
-
-    /// <summary>An agent set up in one place: "windows", or "wsl".</summary>
+    /// <summary>An agent set up in one place: "windows", or "wsl" with its distribution.</summary>
     internal sealed class RuntimePlace
     {
-        public string Runtime, Where;
+        public string Runtime, Where, Distro;
+    }
+
+    /// <summary>
+    /// An agent found in a place that delegation cannot use there. Reason: no_dispatch (delegation does not support the
+    /// agent), place_not_verified (not in this place), program_not_found (a settings folder, no program) or not_set_up
+    /// (a program, no settings folder).
+    /// </summary>
+    internal sealed class UnsupportedRuntime
+    {
+        public string Runtime, Name, Where, Distro, Reason;
     }
 
     /// <summary>Where agents are set up and what they can call.</summary>
@@ -278,6 +423,7 @@ namespace AIMeter
     {
         public readonly List<RuntimePlace> Found = new List<RuntimePlace>();
         public readonly List<RuntimeAccess> Access = new List<RuntimeAccess>();
+        public readonly List<UnsupportedRuntime> Unsupported = new List<UnsupportedRuntime>();
         public bool KeyDiscoveryOff;
     }
 

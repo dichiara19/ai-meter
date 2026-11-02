@@ -138,10 +138,11 @@ namespace AIMeter
                 Tool("list_local_models", "Models loaded by local servers such as Ollama, LM Studio and llama.cpp, on Windows and WSL, " +
                      "with memory, context and activity.", new Dictionary<string, object> { { "refresh", localRefresh } }, false),
                 Tool("list_candidates", "Where a task can run now for free: free models that meet the task's needs, that a coding agent " +
-                     "on this PC (Pi, OpenCode or Crush, whichever are set up) can already call with its own key, and whose limits have room. Ordered by the room left in each " +
+                     "on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can already call with its own key, and whose limits have room. Ordered by the room left in each " +
                      "model's pool, most first, then models whose room is unknown; the same request gives the same order. pools gives " +
                      "how many new tasks each pool can take now: models in one pool share it. excluded says why every other model " +
-                     "cannot be used. Nothing is started or reserved.",
+                     "cannot be used; runtimes.unsupported lists the agents found that delegation cannot use, with the reason. " +
+                     "warnings flags candidates a plugin must watch, such as openrouter_byok_fallback. Nothing is started or reserved.",
                      new Dictionary<string, object>
                      {
                          { "service", service },
@@ -159,13 +160,14 @@ namespace AIMeter
                 Tool("describe_dispatch", "How to start a candidate from list_candidates: the program, its arguments as a list and the " +
                      "environment, for a coding agent and place verified with AI Meter. Start the program without a shell and write the task " +
                      "to its stdin, then close stdin: the task never goes into the arguments. Also says how to tell the end, the outcome, " +
-                     "the requests and tokens, and how to stop it. AI Meter starts nothing.",
+                     "the requests, tokens and per-request cost, and how to stop it. AI Meter starts nothing.",
                      new Dictionary<string, object>
                      {
                          { "service", Property("string", "The candidate's service.") },
                          { "model", Property("string", "The candidate's model id.") },
                          { "runtime", Property("string", "The candidate's runtime, such as pi or opencode.") },
                          { "where", Enum("The candidate's place.", "windows", "wsl") },
+                         { "distro", Property("string", "The candidate's WSL distribution, when it has one.") },
                          { "mode", Enum("read_only (default): the agent can read but not change files. modify: it can change files; run it in a new Git worktree.", Dispatch.ReadOnly, Dispatch.Modify) },
                          { "workspace", Property("string", "The folder the task works in, as seen from where the plugin runs. A placeholder when omitted.") },
                          { "from", Enum("Where the plugin that starts the agent runs (default windows).", "windows", "wsl") },
@@ -607,13 +609,25 @@ namespace AIMeter
 
             string service = Json.Str(args, "service"), model = Json.Str(args, "model"), runtime = Json.Str(args, "runtime");
             if (service == null || model == null || runtime == null) return error("service, model and runtime are required.");
+            var agent = Agents.Get(runtime);
+            if (agent == null)
+                return error("Unknown runtime \"" + runtime + "\": AI Meter knows " + string.Join(", ", Agents.All.Select(a => a.Id)) + ". Call list_candidates for the runtimes found here.");
             var snap = snapshot();
-            var provider = snap == null ? null : snap.Providers.FirstOrDefault(p => p.Catalogue != null && p.Id == service);
+            if (snap == null) return error("AI Meter is still reading the first data; try again in a few seconds.");
+            var provider = snap.Providers.FirstOrDefault(p => p.Catalogue != null && p.Id == service);
             var free = provider == null ? null : provider.Catalogue.Models.FirstOrDefault(m => m.Id == model);
             if (free == null) return error("This model is not in the service's current model list; call list_candidates first.");
-            string where = Json.Str(args, "where");
-            var access = runtimes().Access.Where(a => a.Service == service && a.Runtime == runtime && (where == null || a.Where == where)).OrderBy(a => a.Where, StringComparer.Ordinal).FirstOrDefault();
-            if (access == null) return error("This runtime has no key of its own for this service here; call list_candidates first.");
+            if (agent.Dispatch == null) return error(agent.Name + " is not supported for delegation yet: no way to start it has been verified.");
+            string where = Json.Str(args, "where"), distro = Json.Str(args, "distro");
+            var scan = runtimes();
+            Func<string, string, bool> here = (w, d) => (where == null || w == where) && (distro == null || d == distro);
+            if (!scan.Found.Any(f => f.Runtime == runtime && here(f.Where, f.Distro)))
+                return error("No usable " + agent.Name + " is set up here" + (where == "wsl" ? " in WSL" : where == "windows" ? " on Windows" : "") +
+                             " (WSL counts only while it runs); list_candidates gives the runtimes found, and runtimes.unsupported why others cannot be used.");
+            if (scan.KeyDiscoveryOff) return error("Key discovery is off in AI Meter's settings, so it cannot tell which keys " + agent.Name + " holds.");
+            var access = scan.Access.Where(a => a.Service == service && a.Runtime == runtime && here(a.Where, a.Distro))
+                .OrderBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).FirstOrDefault();
+            if (access == null) return error(agent.Name + " has no key of its own for " + service + " here; call list_candidates first.");
             string pool = provider.Catalogue.PoolOf(free) ?? provider.Id;
 
             if (name == "claim_capacity")
@@ -626,29 +640,36 @@ namespace AIMeter
                 return ToolResult(new Dictionary<string, object> { { "lease_id", lease.Id }, { "pool", pool }, { "expires_at", Time(lease.ExpiresAtUtc.ToLocalTime()) }, { "coverage", "ai_meter_leases_only" } }, false);
             }
 
-            string distro = Settings.Current == null ? null : Settings.Current.WslDistro;
-            string home = access.Where == "wsl" ? Probe.WslHomeUp : Probe.Home;
-            string version = home == null ? null : Dispatch.Version(runtime, home, access.Where == "wsl");
-            var plan = Dispatch.Describe(access, model, Json.Str(args, "mode"), Json.Str(args, "workspace"), Json.Str(args, "from") ?? "windows", distro, version);
+            var plan = Dispatch.Describe(access, model, Json.Str(args, "mode"), Json.Str(args, "workspace"), Json.Str(args, "from") ?? "windows",
+                access.Distro ?? (Settings.Current == null ? null : Settings.Current.WslDistro), access.Version);
             if (!plan.Supported) return ToolResult(new Dictionary<string, object> { { "supported", false }, { "reason", plan.Reason }, { "runtime", runtime }, { "where", access.Where } }, false);
-            return ToolResult(new Dictionary<string, object>
+            var described = new Dictionary<string, object>
             {
                 { "supported", true }, { "runtime", plan.Runtime }, { "where", plan.Where }, { "version", plan.Version }, { "version_verified", plan.VersionVerified },
                 { "mode", plan.Mode }, { "pool", pool }, { "program", plan.Program }, { "arguments", plan.Arguments.Cast<object>().ToList() },
                 { "environment", plan.Environment.ToDictionary(kv => kv.Key, kv => (object)kv.Value) }, { "working_directory", plan.WorkingDirectory },
                 { "task_input", "stdin" }, { "output", plan.Output.ToDictionary(kv => kv.Key, kv => (object)kv.Value) }, { "stop", plan.Stop },
                 { "notes", plan.Notes.Cast<object>().ToList() },
-            }, false);
+            };
+            if (access.Distro != null) described["distro"] = access.Distro;
+            if (plan.Warnings.Count > 0) described["warnings"] = plan.Warnings.Cast<object>().ToList();
+            return ToolResult(described, false);
         }
 
         /// <summary>list_candidates: the ordered candidates, each pool's room once, the exclusions and the runtimes found.</summary>
         private Dictionary<string, object> CandidatesJson(Selection s, RuntimeScan scan)
         {
-            var candidates = s.Chosen.Select(c => (object)new Dictionary<string, object>
+            var candidates = s.Chosen.Select(c =>
             {
-                { "service", c.Provider.Id }, { "model", c.Model.Id }, { "name", c.Model.Name },
-                { "runtime", new Dictionary<string, object> { { "name", c.Access.Runtime }, { "where", c.Access.Where } } },
-                { "credential", c.Access.Credential }, { "pool", c.Pool }, { "free", FreeJson(c.Model.Free) }, { "limits", LimitsJson(c.Provider, c.Model) },
+                var d = new Dictionary<string, object>
+                {
+                    { "service", c.Provider.Id }, { "model", c.Model.Id }, { "name", c.Model.Name },
+                    { "runtime", Place(c.Access.Runtime, c.Access.Where, c.Access.Distro) },
+                    { "credential", c.Access.Credential }, { "pool", c.Pool }, { "free", FreeJson(c.Model.Free) }, { "limits", LimitsJson(c.Provider, c.Model) },
+                };
+                var warnings = Dispatch.Warnings(c.Provider.Id);
+                if (warnings.Count > 0) d["warnings"] = warnings.Cast<object>().ToList();
+                return (object)d;
             }).ToList();
             var pools = s.Chosen.GroupBy(c => c.Pool).Select(g =>
             {
@@ -669,10 +690,39 @@ namespace AIMeter
                 { "candidates", candidates }, { "pools", pools }, { "excluded", excluded },
                 { "runtimes", new Dictionary<string, object>
                     {
-                        { "found", scan.Found.Select(r => (object)new Dictionary<string, object> { { "name", r.Runtime }, { "where", r.Where } }).ToList() },
+                        { "found", scan.Found.Select(r => (object)Place(r.Runtime, r.Where, r.Distro)).ToList() },
+                        { "unsupported", scan.Unsupported.Select(u =>
+                            {
+                                var d = Place(u.Runtime, u.Where, u.Distro);
+                                d["display_name"] = u.Name;
+                                d["reason"] = u.Reason;
+                                d["detail"] = UnsupportedDetail(u);
+                                return (object)d;
+                            }).ToList() },
                         { "key_discovery", !scan.KeyDiscoveryOff },
                     } },
             };
+        }
+
+        /// <summary>A runtime and its place: name and where, with the distribution in WSL.</summary>
+        private static Dictionary<string, object> Place(string runtime, string where, string distro)
+        {
+            var d = new Dictionary<string, object> { { "name", runtime }, { "where", where } };
+            if (distro != null) d["distro"] = distro;
+            return d;
+        }
+
+        /// <summary>A sentence a plugin can show for an unsupported agent.</summary>
+        private static string UnsupportedDetail(UnsupportedRuntime u)
+        {
+            string place = u.Where == "wsl" ? "in WSL" + (u.Distro != null ? " (" + u.Distro + ")" : "") : "on Windows";
+            switch (u.Reason)
+            {
+                case "no_dispatch": return u.Name + " was found " + place + ", but delegation does not support it yet.";
+                case "place_not_verified": return u.Name + " was found " + place + ", but delegation has not been verified there yet.";
+                case "program_not_found": return u.Name + "'s settings are " + place + ", but its program was not found in the usual folders.";
+                default: return u.Name + " is installed " + place + ", but has no settings folder yet: run it once to set it up.";
+            }
         }
 
         private static List<object> Spend(IEnumerable<ProviderState> providers)
