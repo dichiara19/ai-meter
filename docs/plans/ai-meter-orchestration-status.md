@@ -65,4 +65,10 @@ Three things the PR marked as unverified are still unverified after the release,
 
 ## Log
 
+- **2026-11-02, M0 (scope addition).** The maintainer asked for free-model limits to be part of the contract from the start.
+  - Added contracts §2.3: per-request caps, rates, concurrency, shared pools, sources, coverage and headroom.
+  - Added the `list_candidates` read tool to M3.
+  - Extended the M2 and M3 exit criteria and the test plan.
+  - Baseline: in 0.8.6 `FreeModel` has only the context window, tool and reasoning support, and expiry (`FreeModels.cs:10-16`). It has no output cap and no rate limits.
+
 - **2026-11-02, M0.** Reconciled the baseline above. Re-checked the code facts. Wrote ADR 0001, the plan and the draft contracts. Updated CONTRIBUTING and SECURITY. Ran `powershell -NoProfile -Sta -ExecutionPolicy Bypass -File tests/run.ps1` on `b39d449`: 89 passed, exit code 0. The M0 branch changes documentation only. Build and packaging were not run, because no code changed.

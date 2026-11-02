@@ -17,6 +17,11 @@ This file is a plan. Nothing here exists in code until a milestone's pull reques
 
 - Live readings on request, with an explicit forced refresh.
 - Reuse of keys that are already configured, respecting the existing *find keys* setting.
+- For every free model, the limits a coordinator needs to assign work, each with its source and freshness:
+  - per-request caps: context, output and input;
+  - request and token rates per minute and per day;
+  - concurrency;
+  - the shared pool the model draws from.
 - OpenRouter, Experiential Labs, NVIDIA API Catalog and Gemini Developer API.
 - Delegation to a full executor, Pi first, with status, result and cancellation.
 - Claude Code and Codex as coordinators, in the foreground or background where the client supports it.
@@ -36,8 +41,8 @@ The first version targets Windows. It uses WSL only when WSL is already running.
 | --- | --- | --- | --- |
 | M0 | Baseline, ADR, contracts, epic issue / `docs/agent-orchestration-plan` | — | SHAs and versions recorded; boundaries updated in CONTRIBUTING and SECURITY; MVP scope decided |
 | M1 | MCP freshness / `feat/mcp-freshness` | M0 | Real clients verified on Windows and WSL; refresh bypasses the right caches; timeout and concurrency tested; Settings → AI apps and the Store relay path verified |
-| M2 | NVIDIA and Gemini discovery and catalogues / `feat/provider-discovery` | M0, M1 contract | Keys found with fixtures; catalogues independent of quotas; unknown stays unknown |
-| M3 | Quota-aware candidate selection / `feat/execution-candidates` | M1, M2 | Deterministic selection; `free_only`, quota scope and `429` tested |
+| M2 | NVIDIA and Gemini discovery, catalogues and free-model limits / `feat/provider-discovery` | M0, M1 contract | Keys found with fixtures; catalogues independent of quotas; `list_free_models` returns `limits` and `pool` for every free model of every supported provider, with source and `checked_at`; documented limits live in the provider JSON; unknown stays unknown |
+| M3 | Quota-aware candidate selection / `feat/execution-candidates` | M1, M2 | `list_candidates` with `headroom`; selection is deterministic; per-request caps filter; pools never add up; `free_only`, quota scope and `429` tested |
 | M4 | Pi spike, then runner MVP / `feat/agent-jobs` | M0; M3 for real routing | A job can be started, watched and cancelled; isolation and restart verified |
 | M5 | Claude Code and Codex adapters / `feat/client-delegation` | M4 | One real task from each client, in the foreground or background where supported, with result and cancellation |
 | M6 | Stabilisation, UX, packaging, release candidate | M1–M5 | End-to-end tests; upgrade from 0.8.6 verified; artefacts verified; version decided |
@@ -65,6 +70,7 @@ Each spike records the version tested and what it observed, in the status log.
 - **Pi.**
   - Pick the structured interface available in the pinned version.
   - Check events, EOF, errors, cancellation, resume and the usage it reports.
+  - Check whether it exposes per-request counts, rate-limit responses and a way to cap output or pace requests.
   - Do not rely on remembered flags.
 - **Claude Code.**
   - Review `openai/codex-plugin-cc` at a pinned SHA before copying its contract.
@@ -84,6 +90,7 @@ Each spike records the version tested and what it observed, in the status log.
 | Credentials | *Find keys* off; Windows and WSL; WSL not running; aliases and variables; malformed JSON and JSONC; custom directories; several keys. No secret in any response or log |
 | Catalogues | Missing price is not zero, expired model, unknown context or tools, missing quota, paid tier, expired sign-in |
 | Quotas | UTC and Pacific resets across daylight saving, shared project quotas, `429` and `Retry-After`, concurrent reservations, usage from other clients |
+| Free-model limits | Output cap below the task's need; context fits but output does not; two models in one pool; unknown concurrency gives at most one job; documented limit older than its `checked_at` policy; observed counters never shown as account-wide; headroom after reservations |
 | Runner | Paths with spaces, tasks containing shell characters, idempotency, timeout, crash, process-tree cancellation, restart, huge output, file isolation |
 | Integration | Real Pi with a tool-capable model; Claude Code and Codex; Windows, and WSL already running; no duplicate jobs |
 | Compatibility | Existing MCP reads, previous settings and history, startup, script/EXE/MSIX packages, themes and translations |
