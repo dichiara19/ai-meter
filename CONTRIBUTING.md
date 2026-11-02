@@ -49,14 +49,15 @@ Run the regression tests with `powershell -NoProfile -Sta -ExecutionPolicy Bypas
 - **Never refresh, store or send another app's tokens** anywhere but to that service. Never read browser cookies.
 - **Saved API keys** are encrypted with Windows Data Protection.
 
-**Running tasks** (planned, see [ADR 0001](docs/adr/0001-optional-agent-orchestration.md))
+**Delegating tasks** (planned, see [ADR 0001](docs/adr/0001-optional-agent-orchestration.md) and [ADR 0002](docs/adr/0002-delegation-through-coordinator-plugins.md))
 
-Delegating tasks to a local runtime such as Pi is a separate, optional responsibility, and it does not loosen the rules above. Work on it must keep these limits:
-- It is off by default, and it needs its own switch plus a workspace folder the user authorised. Permission to find keys covers monitoring only.
-- AI Meter never installs a runtime. It never sends a key to a runtime or to any host other than that key's own service. The runtime's model requests use the runtime's own sign-in.
-- MCP tools never return keys, tokens or account identities. Job tools appear only while running tasks is turned on.
-- Task text, logs and patches stay in their own local store, never in the usage history.
-- The core stays C# 5 with no NuGet or Node. A runtime runs as a separate process.
+Delegation does not loosen the rules above. AI Meter chooses where a task runs and keeps capacity leases. Coordinator plugins in `plugins/` run the coding agent the user already has, such as Pi or OpenCode. Work on it must keep these limits:
+- **AI Meter executes nothing.** It starts no agent, and it never installs one.
+- **Keys.** It never sends a key to an agent, or to any host other than that key's own service. An agent's model requests use the agent's own sign-in. Permission to find keys covers monitoring only.
+- **What MCP returns.** MCP tools never return keys, tokens or account identities. Dispatch descriptions never contain the task text or a shell string.
+- **What is stored.** Leases hold only pool, model, agent, times and outcome counters: never task text, code, logs or keys. Nothing from delegation goes into the usage history.
+- **Code.** The core stays C# 5 with no NuGet or Node. The plugins are separate, use what their coordinator's plugins use, and are not built into the app.
+- **Plugin defaults.** Tasks are read-only. A task that changes a repository runs in a new worktree and is never merged automatically.
 
 The roadmap and its status are in [docs/plans](docs/plans/agent-orchestration.md).
 

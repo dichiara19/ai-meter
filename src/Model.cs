@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Web.Script.Serialization;
 
@@ -118,13 +119,10 @@ namespace AIMeter
         public Func<string> SpendNote;
         /// <summary>Today's models used through this service, as reported by OpenCode and Pi.</summary>
         public List<ModelCost> TodayModels;
-        /// <summary>Models the service offers at no cost, soonest to expire first.</summary>
-        public List<FreeModel> FreeModels;
-
         /// <summary>Copy usage with additional windows, preserving the original provider response.</summary>
         public Usage With(IEnumerable<UsageWindow> extra)
         {
-            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels };
+            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
             u.Windows.AddRange(Windows);
             u.Windows.AddRange(extra);
             return u;
@@ -151,7 +149,7 @@ namespace AIMeter
         /// <summary>Return the same data marked as cached.</summary>
         public Usage AsCache()
         {
-            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels, FreeModels = FreeModels };
+            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
         }
     }
 
@@ -174,6 +172,11 @@ namespace AIMeter
         public bool Running;
         public List<Session> Sessions = new List<Session>();
         public Usage Usage;
+        /// <summary>
+        /// Free models the service offers. Read on its own, longer timer and kept apart from Usage, so a service
+        /// without a readable usage endpoint can still list its free models. Null when it offers no list or none was read.
+        /// </summary>
+        public Catalogue Catalogue;
         public string Notice;     // Connection status message, when needed.
         public bool NeedsLogin;
         public bool CanSignIn;    // Whether the notice offers a sign-in action managed by AI Meter.
@@ -227,8 +230,8 @@ namespace AIMeter
                         sb.Append(w.RunsOutAt.HasValue ? w.RunsOutAt.Value.Ticks / TimeSpan.TicksPerMinute / 5 : 0);
                     }
                     if (p.Usage.TodayModels != null) foreach (var m in p.Usage.TodayModels) sb.Append(m.Model).Append((int)(m.Cost * 100)).Append(m.Tokens >> 10);
-                    if (p.Usage.FreeModels != null) foreach (var m in p.Usage.FreeModels) sb.Append(m.Id).Append(m.Expires);
                 }
+                if (p.Catalogue != null) foreach (var m in p.Catalogue.Models) sb.Append(m.Id).Append(m.Expires);
                 foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
                 if (p.Models != null) sb.Append(p.GpuUsed >> 28);
                 if (p.Models != null)
@@ -308,6 +311,27 @@ namespace AIMeter
         }
 
         public static DateTime? FromUnix(double? s) { return s == null ? null : FromUnixMs(s * 1000); }
+
+        /// <summary>The objects in the array at key; empty when it is missing or not an array.</summary>
+        public static IEnumerable<Dictionary<string, object>> Items(Dictionary<string, object> d, string key)
+        {
+            object v;
+            var list = d != null && d.TryGetValue(key, out v) ? v as System.Collections.IList : null;
+            return list == null ? new Dictionary<string, object>[0] : list.OfType<Dictionary<string, object>>().ToArray();
+        }
+
+        /// <summary>
+        /// "2026-10-31" as that calendar day, whatever the local time zone; other ISO forms through FromIso. A plain
+        /// date must not go through FromIso, which reads it as UTC midnight and moves it to the previous day west of UTC.
+        /// </summary>
+        public static DateTime? Day(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return null;
+            DateTime d;
+            if (DateTime.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d)) return d.Date;
+            var t = FromIso(s);
+            return t.HasValue ? t.Value.Date : (DateTime?)null;
+        }
 
         public static DateTime? FromIso(string s)
         {

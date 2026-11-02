@@ -8,25 +8,26 @@ using System.Text.RegularExpressions;
 namespace AIMeter
 {
     /// <summary>
-    /// Discover existing API keys in OpenCode, Pi, Crush and shell profiles on Windows and running WSL.
+    /// Discover existing API keys in the coding agents of agents/*.json (OpenCode, Pi, Crush and any agent a definition
+    /// gives key sources) and shell profiles on Windows and running WSL.
     /// Provider definitions declare the service aliases used by those apps in auth.ids.
     /// Resolve environment references using auth.env and exports from the same home directory.
     /// Never execute command values; discovered credentials are used only for their configured service.
     /// </summary>
     internal static class KeyFinder
     {
-        internal sealed class Found { public string Key, Source; }
+        /// <summary>
+        /// A discovered key: Source is the display text, which names WSL when the key is there; App (the agent's name,
+        /// such as "OpenCode", or "profile") says where; Alias is the provider id the app keeps it under (null for a
+        /// profile export).
+        /// </summary>
+        internal sealed class Found { public string Key, Source, App, Alias; }
 
-        /// <summary>App name, home-relative path and JSON value path, with {id} standing for a service alias.</summary>
-        private static readonly string[][] Sources =
+        /// <summary>App name, home-relative path and JSON value path, with {id} standing for a service alias, in agent order.</summary>
+        private static IEnumerable<string[]> Sources
         {
-            new[] { "OpenCode", @".local\share\opencode\auth.json", "{id}.key" },
-            new[] { "OpenCode", @".config\opencode\opencode.json", "provider.{id}.options.apiKey" },
-            new[] { "Pi", @".pi\agent\auth.json", "{id}.key" },
-            new[] { "Pi", @".pi\agent\models.json", "providers.{id}.apiKey" },
-            new[] { "Crush", @".config\crush\crush.json", "providers.{id}.api_key" },
-            new[] { "Crush", @".local\share\crush\crush.json", "providers.{id}.api_key" },
-        };
+            get { return Agents.All.SelectMany(a => a.Keys.Select(k => new[] { a.Name, k.File, k.Path })); }
+        }
 
         private static readonly string[] Profiles = { ".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile", ".zshenv", @".config\fish\config.fish" };
 
@@ -51,7 +52,10 @@ namespace AIMeter
 
         public static void Forget() { lock (cache) cache.Clear(); }
 
-        private static Found Search(ServiceDefinition d, string home, bool wsl)
+        private static Found Search(ServiceDefinition d, string home, bool wsl) { return SearchAll(d, home, wsl).FirstOrDefault(); }
+
+        /// <summary>Keys in one home, lazily: taking the first one reads no further files.</summary>
+        internal static IEnumerable<Found> SearchAll(ServiceDefinition d, string home, bool wsl)
         {
             var ids = ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id).ToList();
             string where = wsl ? " (WSL)" : "";
@@ -62,16 +66,15 @@ namespace AIMeter
                 foreach (var id in ids)
                 {
                     string v = Resolve(JPath.Str(JPath.Get(doc, s[2].Replace("{id}", id))), home, wsl);
-                    if (v != null) return new Found { Key = v, Source = s[0] + where };
+                    if (v != null) { yield return new Found { Key = v, Source = s[0] + where, App = s[0], Alias = id }; break; }
                 }
             }
             // Read exports from WSL or Windows Git Bash shell profiles.
             foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
             {
                 string v = FromProfiles(name, home);
-                if (Plausible(v)) return new Found { Key = v, Source = L.T("shell profile") + where };
+                if (Plausible(v)) { yield return new Found { Key = v, Source = L.T("shell profile") + where, App = "profile" }; break; }
             }
-            return null;
         }
 
         /// <summary>Resolve a literal key or environment reference, without executing commands.</summary>

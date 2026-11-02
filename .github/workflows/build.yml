@@ -102,7 +102,16 @@ jobs:
           STORE_IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
           STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}
           STORE_PUBLISHER_NAME: ${{ vars.STORE_PUBLISHER_NAME }}
-        run: ./build.ps1 -NoInstall -Package
+          STORE_DISPLAY_NAME: ${{ vars.STORE_DISPLAY_NAME }}
+        run: |
+          # Pull requests and branch builds use build.ps1's placeholder identity; a release package must carry the real one.
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+              $missing = @('STORE_IDENTITY_NAME', 'STORE_PUBLISHER', 'STORE_PUBLISHER_NAME', 'STORE_DISPLAY_NAME' | Where-Object { -not [Environment]::GetEnvironmentVariable($_) })
+              if ($missing) {
+                  throw "Release $env:GITHUB_REF_NAME needs the Partner Center package identity: set the repository variables $($missing -join ', ') (Settings > Secrets and variables > Actions > Variables; see docs/STORE.md)."
+              }
+          }
+          ./build.ps1 -NoInstall -Package
 
       - uses: actions/upload-artifact@v4
         with:

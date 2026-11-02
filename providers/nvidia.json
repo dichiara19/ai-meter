@@ -1,0 +1,30 @@
+{
+  "id": "nvidia",
+  "name": "NVIDIA API Catalog",
+  "monogram": "N",
+  "description": "Models of the NVIDIA API Catalog for your API key. NVIDIA does not publish your limits.",
+  "color": { "light": "#4E7A00", "dark": "#76B900" },
+  "detect": { "env": ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"] },
+  "auth": { "type": "key", "ids": ["nvidia", "nvidia-nim"], "env": ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"], "page": "https://build.nvidia.com/settings/api-keys" },
+  "freeModels": {
+    "url": "https://integrate.api.nvidia.com/v1/models",
+    "headers": { "Authorization": "Bearer {token}" },
+    "format": "openai",
+    "interval": 360,
+    "free": {
+      "status": "unknown",
+      "note": "NVIDIA offers hosted models for development but does not state which ones an account may call, at what price or with which limits. The list is NVIDIA's whole catalogue, not proof of access."
+    },
+    "pool": "nvidia:account",
+    "limits": [
+      { "metric": "requests_per_minute", "scope": "account", "source": "unknown", "note": "Often reported as 40 per account; not documented by NVIDIA." }
+    ]
+  },
+  "i18n": {
+    "it": { "Models of the NVIDIA API Catalog for your API key. NVIDIA does not publish your limits.": "Modelli dell'NVIDIA API Catalog per la tua chiave API. NVIDIA non pubblica i tuoi limiti." },
+    "es": { "Models of the NVIDIA API Catalog for your API key. NVIDIA does not publish your limits.": "Modelos del NVIDIA API Catalog para tu clave API. NVIDIA no publica tus límites." },
+    "fr": { "Models of the NVIDIA API Catalog for your API key. NVIDIA does not publish your limits.": "Modèles du NVIDIA API Catalog pour votre clé API. NVIDIA ne publie pas vos limites." },
+    "de": { "Models of the NVIDIA API Catalog for your API key. NVIDIA does not publish your limits.": "Modelle des NVIDIA API Catalog für deinen API-Schlüssel. NVIDIA veröffentlicht deine Limits nicht." },
+    "pt": { "Models of the NVIDIA API Catalog for your API key. NVIDIA does not publish your limits.": "Modelos do NVIDIA API Catalog para a sua chave de API. A NVIDIA não publica os seus limites." }
+  }
+}

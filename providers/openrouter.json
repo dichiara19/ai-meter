@@ -16,7 +16,15 @@
   "notes": [
     { "text": "Free models: {0} of {1} requests left today", "values": [{ "path": "data.free_model_daily_requests.remaining" }, { "path": "data.free_model_daily_requests.limit" }], "when": ["data.free_model_daily_requests.limit", "data.free_model_daily_requests.used"] }
   ],
-  "freeModels": { "url": "https://openrouter.ai/api/v1/models", "interval": 360 },
+  "freeModels": {
+    "url": "https://openrouter.ai/api/v1/models", "interval": 360,
+    "pool": "openrouter:free",
+    "limits": [
+      { "metric": "requests_per_minute", "limit": 20, "scope": "account", "source": "documented", "reference": "https://openrouter.ai/docs/api-reference/limits", "checked": "2026-11-02" },
+      { "metric": "requests_per_day", "limit": "data.free_model_daily_requests.limit", "used": "data.free_model_daily_requests.used", "remaining": "data.free_model_daily_requests.remaining",
+        "scope": "account", "source": "provider_reported", "period": "day", "note": "OpenRouter does not document when the day starts; midnight UTC is assumed." }
+    ]
+  },
   "more": [
     { "request": { "url": "https://openrouter.ai/api/v1/credits", "headers": { "Authorization": "Bearer {token}" } }, "key": "management",
       "limits": [ { "label": "Account credits", "short": "$", "used": "data.total_usage", "limit": "data.total_credits", "currency": "USD" } ] }

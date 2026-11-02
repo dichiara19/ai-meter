@@ -1,0 +1,568 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+
+namespace AIMeter
+{
+    /// <summary>
+    /// Execution candidates (docs/plans/orchestration-contracts.md sections 2.1 and 2.4): the free models a task can run
+    /// on now, through a coding agent on this PC that already holds its own key for the service, and why every other
+    /// model cannot. Delegation uses whichever supported agents the user has: those of agents/*.json with a verified
+    /// dispatch for the place they are in. Other agents it finds are reported as unsupported, with the reason.
+    /// Nothing here starts a process or reserves capacity: coordinator plugins run the agents (ADR 0002), and capacity
+    /// leases reserve room.
+    ///
+    /// Selection is deterministic: the same snapshot and request give the same order. Models that share a pool share
+    /// its limits, so capacity is reported per pool and never added up across the pool's models.
+    /// </summary>
+    internal static class Candidates
+    {
+        public const string FreeOnly = "free_only";
+        public const string FreeOrUnconfirmed = "free_or_unconfirmed";
+
+        /// <summary>Exclusions an agent's own model list can make up for: the price or a capability the service does not state.</summary>
+        private static readonly string[] Unstated = { "price_not_confirmed", "tools_unknown", "context_unknown", "output_unknown" };
+
+        /// <summary>
+        /// Choose the candidates for a task and explain each exclusion. A model the service's list leaves short (its
+        /// price, tool support, context or reply size unstated) can still be a best-effort candidate through an agent
+        /// whose own list has the model at no price and fills in what the task needs. Those are listed apart, only when
+        /// the request asks for them; otherwise they are counted in BestEffortAvailable and keep their exclusion.
+        /// </summary>
+        public static Selection Select(Snapshot snap, RuntimeScan runtimes, Requirements req, DateTime now, LeaseBook leases = null)
+        {
+            var result = new Selection();
+            foreach (var p in snap.Providers.Where(x => x.Catalogue != null && (req.Service == null || string.Equals(x.Id, req.Service, StringComparison.OrdinalIgnoreCase))))
+            {
+                // Sorted so that the agent whose reason is reported does not depend on the scan's order.
+                var access = runtimes.Access.Where(a => a.Service == p.Id).OrderBy(a => a.Runtime, StringComparer.Ordinal)
+                    .ThenBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).ToList();
+                foreach (var m in p.Catalogue.Models)
+                {
+                    string pool = p.Catalogue.PoolOf(m) ?? p.Id;
+                    var room = Room(p.Id, p.Catalogue.Rates, now, leases, pool);
+                    string reason = Check(m, req);
+                    if (reason == null && access.Count == 0) reason = runtimes.KeyDiscoveryOff ? "key_discovery_off" : runtimes.Found.Count == 0 ? "no_runtime" : "runtime_has_no_key";
+                    if (reason == null && room.Blocking != null) reason = room.Blocking;
+                    if (reason == null)
+                    {
+                        foreach (var a in access)
+                            result.Chosen.Add(new Candidate { Provider = p, Model = m, Access = a, Room = room, Pool = pool });
+                        continue;
+                    }
+                    if (Unstated.Contains(reason) && room.Blocking == null && EstimateFrom(result, p, m, access, req, room, ref reason)) continue;
+                    result.Exclude(p.Id, m.Id, reason, reason == room.Blocking ? room.Until : null);
+                }
+            }
+            result.Chosen = Ordered(result.Chosen);
+            result.BestEffort = Ordered(result.BestEffort);
+            return result;
+        }
+
+        /// <summary>
+        /// Try each agent's own list for a model the service's list leaves short. Returns true when the model went to the
+        /// best-effort list. Otherwise, when best effort was asked for, reason becomes the first agent's own reason, such
+        /// as agent_lists_price, if an agent lists the model.
+        /// </summary>
+        private static bool EstimateFrom(Selection result, ProviderState p, FreeModel m, List<RuntimeAccess> access, Requirements req, PoolRoom room, ref string reason)
+        {
+            bool added = false;
+            string agentReason = null;
+            foreach (var a in access)
+            {
+                List<string> unverified;
+                var known = AgentModels.Find(a, m.Id);
+                string why = Estimate(m, known, req, out unverified);
+                if (why != null)
+                {
+                    if (known != null && agentReason == null) agentReason = why;
+                    continue;
+                }
+                if (!req.BestEffort) { result.BestEffortAvailable++; continue; }
+                result.BestEffort.Add(new Candidate { Provider = p, Model = m, Access = a, Room = room, Pool = p.Catalogue.PoolOf(m) ?? p.Id, Estimated = known, Unverified = unverified });
+                added = true;
+            }
+            if (!added && req.BestEffort && agentReason != null) reason = agentReason;
+            return added;
+        }
+
+        /// <summary>Known room first, most room first; then unknown room; ties by service, model and runtime place.</summary>
+        private static List<Candidate> Ordered(IEnumerable<Candidate> candidates)
+        {
+            return candidates.OrderBy(c => c.Room.Ratio.HasValue ? 0 : 1).ThenByDescending(c => c.Room.Ratio ?? 0)
+                .ThenBy(c => c.Provider.Id, StringComparer.Ordinal).ThenBy(c => c.Model.Id, StringComparer.Ordinal)
+                .ThenBy(c => c.Access.Runtime, StringComparer.Ordinal).ThenBy(c => c.Access.Where, StringComparer.Ordinal)
+                .ThenBy(c => c.Access.Distro, StringComparer.Ordinal).ToList();
+        }
+
+        /// <summary>
+        /// Whether a model can take the task on what an agent's own list says, where the service's list is silent; null
+        /// when it can, with what rests on the agent's word in unverified ("price", "tools", "context", "output").
+        /// The agent must list the model at no price: a priced model would make the plugin stop at the first request.
+        /// </summary>
+        private static string Estimate(FreeModel m, AgentModel known, Requirements req, out List<string> unverified)
+        {
+            unverified = new List<string>();
+            if (m.Free != null && !m.Free.Confirmed)
+            {
+                if (m.Free.Status != "unknown") return "price_not_confirmed";
+                unverified.Add("price");
+            }
+            if (known == null) return "not_in_agent_list";
+            if (known.Priced) return "agent_lists_price";
+            if (req.Tools)
+            {
+                bool tools = m.FeaturesUnknown ? known.Tools == true : m.Tools;
+                if (!tools) return m.FeaturesUnknown && known.Tools == null ? "tools_unknown" : "no_tools";
+                if (m.FeaturesUnknown) unverified.Add("tools");
+            }
+            long context = m.Context > 0 ? m.Context : known.Context, output = m.MaxOutput > 0 ? m.MaxOutput : known.MaxOutput;
+            if (req.MinContext > 0)
+            {
+                if (context < req.MinContext) return context == 0 ? "context_unknown" : "context_too_small";
+                if (m.Context == 0) unverified.Add("context");
+            }
+            if (req.MinOutput > 0)
+            {
+                if (output < req.MinOutput) return output == 0 ? "output_unknown" : "output_too_small";
+                if (m.MaxOutput == 0) unverified.Add("output");
+            }
+            return null;
+        }
+
+        /// <summary>Why a model cannot take the task, before runtime and capacity; null when it can.</summary>
+        private static string Check(FreeModel m, Requirements req)
+        {
+            bool confirmed = m.Free == null || m.Free.Confirmed;
+            if (!confirmed && !(req.CostPolicy == FreeOrUnconfirmed && m.Free.Status == "unknown")) return "price_not_confirmed";
+            if (req.Tools && !m.Tools) return m.FeaturesUnknown ? "tools_unknown" : "no_tools";
+            if (req.MinContext > 0 && m.Context < req.MinContext) return m.Context == 0 ? "context_unknown" : "context_too_small";
+            if (req.MinOutput > 0 && m.MaxOutput < req.MinOutput) return m.MaxOutput == 0 ? "output_unknown" : "output_too_small";
+            return null;
+        }
+
+        /// <summary>
+        /// The room a pool has now: blocked while the service asked AI Meter to wait (rate_limited) or a reported counter
+        /// is used up (exhausted); at most one new task without a known concurrency limit. Ratio is the remaining share
+        /// of the tightest limit whose limit and remaining are both known, or null when none is.
+        /// </summary>
+        public static PoolRoom Room(string service, IList<RateLimit> rates, DateTime now, LeaseBook leases = null, string pool = null)
+        {
+            var room = new PoolRoom();
+            DateTime wait = NetworkBackoff.Until(service);
+            var exhausted = rates.FirstOrDefault(r => r.Remaining.HasValue && r.Remaining.Value <= 0);
+            if (wait > now) { room.Blocking = "rate_limited"; room.Until = wait; }
+            else if (exhausted != null) { room.Blocking = "exhausted"; room.Metric = exhausted.Metric; room.Until = exhausted.ResetsAt; }
+            var concurrency = rates.FirstOrDefault(r => r.Metric == "concurrent_requests" && r.Limit.HasValue);
+            room.MaxNewJobs = room.Blocking != null ? 0 : concurrency == null ? 1 : (int)Math.Max(0, concurrency.Limit.Value - (concurrency.Used ?? 0));
+            var known = rates.Where(r => r.Limit.HasValue && r.Limit.Value > 0 && r.Remaining.HasValue).ToList();
+            if (known.Count > 0)
+            {
+                var tightest = known.OrderBy(r => r.Remaining.Value / r.Limit.Value).First();
+                room.Ratio = Math.Max(0, tightest.Remaining.Value / tightest.Limit.Value);
+                room.BindingMetric = tightest.Metric;
+            }
+            if (leases != null && pool != null) ApplyLeases(room, leases, pool, now);
+            return room;
+        }
+
+        /// <summary>
+        /// Count the pool's active leases against its room, and close it while an agent's rate limit lasts. A pool whose
+        /// room is all leased is blocked ("leased") until its first lease expires or is released.
+        /// </summary>
+        private static void ApplyLeases(PoolRoom room, LeaseBook leases, string pool, DateTime now)
+        {
+            room.Leased = leases.Active(pool, now);
+            DateTime agentWait = leases.BackoffUntil(pool);
+            if (room.Blocking == null && agentWait > now)
+            {
+                room.Blocking = "rate_limited";
+                room.Until = agentWait;
+                room.MaxNewJobs = 0;
+            }
+            if (room.Blocking != null) return;
+            room.MaxNewJobs = Math.Max(0, room.MaxNewJobs - room.Leased);
+            if (room.MaxNewJobs == 0)
+            {
+                room.Blocking = "leased";
+                room.Until = leases.EarliestExpiry(pool, now);
+            }
+        }
+
+        // ------------------------------------------------------------ runtimes
+
+        /// <summary>Random per run, so credential ids cannot be matched across PCs or restarts.</summary>
+        private static readonly string Salt = Guid.NewGuid().ToString("N");
+
+        /// <summary>
+        /// The coding agents AI Meter knows (agents/*.json and %APPDATA%\AIMeter\agents): the folders that show they are
+        /// set up in a home, the program that shows they are still installed (a folder can outlive its agent), where
+        /// they keep keys and, for those delegation supports, how a plugin starts them.
+        /// </summary>
+        internal static IList<RuntimeKind> Kinds { get { return Agents.All; } }
+
+        /// <summary>
+        /// Where package managers and Node version managers put agents' programs, relative to a home; "*" stands for
+        /// each installed version, newest first.
+        /// </summary>
+        private static readonly string[] HomeBins =
+        {
+            @".npm-global\bin", @".local\bin", @".opencode\bin", @".bun\bin", @"go\bin", @".volta\bin", @".local\share\pnpm",
+            @".nvm\versions\node\*\bin", @".local\share\fnm\node-versions\*\installation\bin", @".fnm\node-versions\*\installation\bin",
+            @".asdf\installs\nodejs\*\bin", @".asdf\shims",
+        };
+
+        /// <summary>Where npm keeps global packages in WSL, relative to a home, for the folders of HomeBins.</summary>
+        private static readonly string[] HomeModules =
+        {
+            @".npm-global\lib\node_modules", @".local\lib\node_modules", @".nvm\versions\node\*\lib\node_modules",
+            @".local\share\fnm\node-versions\*\installation\lib\node_modules", @".fnm\node-versions\*\installation\lib\node_modules",
+            @".asdf\installs\nodejs\*\lib\node_modules",
+        };
+
+        /// <summary>Linux system folders for programs and global npm packages, relative to the distribution's root.</summary>
+        private static readonly string[] SystemBins = { @"usr\local\bin", @"usr\bin", @"home\linuxbrew\.linuxbrew\bin" };
+        private static readonly string[] SystemModules = { @"usr\local\lib\node_modules", @"usr\lib\node_modules" };
+
+        /// <summary>
+        /// Whether the agent's program is installed for this home. In WSL the usual Linux folders are checked through
+        /// the distribution's file share, so nothing is started inside WSL; on Windows, PATH and npm's global folder.
+        /// </summary>
+        internal static bool Installed(RuntimeKind kind, string home, bool wsl) { return ProgramPath(kind, home, wsl) != null; }
+
+        /// <summary>
+        /// The agent's program as this PC sees it (in WSL, through the distribution's file share), or null when it is not
+        /// installed in the usual folders. dirs are the folders to search, from SearchDirs.
+        /// </summary>
+        internal static string ProgramPath(RuntimeKind kind, string home, bool wsl, IList<string> dirs = null)
+        {
+            var names = kind.ProgramsIn(wsl ? "wsl" : "windows");
+            // On Windows a native program first, then the wrappers npm writes.
+            var files = wsl ? names : names.SelectMany(n => new[] { ".exe", ".cmd", ".bat", ".ps1" }.Select(x => n + x)).ToArray();
+            foreach (var d in dirs ?? SearchDirs(home, wsl))
+                foreach (var f in files)
+                {
+                    try { if (File.Exists(Path.Combine(d, f))) return Path.Combine(d, f); }
+                    catch (ArgumentException) { }   // A malformed PATH entry.
+                }
+            return null;
+        }
+
+        /// <summary>The existing folders where a home's programs are, in the order they are searched.</summary>
+        internal static List<string> SearchDirs(string home, bool wsl)
+        {
+            var dirs = HomeBins.SelectMany(b => Expand(home, b)).ToList();
+            if (wsl)
+            {
+                var root = DistributionRoot(home);
+                if (root != null) dirs.AddRange(SystemBins.Select(b => Path.Combine(root, b)));
+            }
+            else
+            {
+                dirs.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm"));
+                dirs.AddRange((Environment.GetEnvironmentVariable("PATH") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Select(d => d.Trim()));
+            }
+            return dirs.Where(d =>
+            {
+                try { return Directory.Exists(d); }
+                catch (ArgumentException) { return false; }
+            }).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        /// <summary>A home-relative pattern as paths, each "*" standing for every folder there, newest version first.</summary>
+        internal static IEnumerable<string> Expand(string home, string pattern)
+        {
+            IEnumerable<string> paths = new[] { home };
+            foreach (var part in pattern.Split('\\'))
+            {
+                string name = part;
+                paths = name == "*" ? paths.SelectMany(p => Probe.SafeDirs(p).OrderByDescending(VersionKey, StringComparer.Ordinal)) : paths.Select(p => Path.Combine(p, name));
+            }
+            return paths;
+        }
+
+        /// <summary>A folder name's numbers padded so that ordinal order is version order: v9.0.0 before v22.1.0.</summary>
+        private static string VersionKey(string path)
+        {
+            return string.Join(".", Regex.Matches(Path.GetFileName(path), @"\d+").Cast<Match>().Select(m => m.Value.PadLeft(10, '0')));
+        }
+
+        /// <summary>
+        /// The folder of the agent's npm package, or null when npm did not install it: next to its program first, then
+        /// npm's global folders (in WSL, also those of Node version managers).
+        /// </summary>
+        internal static string PackageFolder(RuntimeKind kind, string home, bool wsl, string program)
+        {
+            if (kind.Package == null) return null;
+            var roots = new List<string>();
+            if (program != null) roots.Add(Path.Combine(Path.GetDirectoryName(program), wsl ? @"..\lib\node_modules" : "node_modules"));
+            if (wsl)
+            {
+                roots.AddRange(HomeModules.SelectMany(m => Expand(home, m)));
+                var root = DistributionRoot(home);
+                if (root != null) roots.AddRange(SystemModules.Select(m => Path.Combine(root, m)));
+            }
+            else roots.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"npm\node_modules"));
+            foreach (var r in roots)
+            {
+                try
+                {
+                    string folder = Path.GetFullPath(Path.Combine(r, kind.Package.Replace('/', '\\')));
+                    if (File.Exists(Path.Combine(folder, "package.json"))) return folder;
+                }
+                catch (ArgumentException) { }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            return null;
+        }
+
+        /// <summary>The installed version from the package's package.json, read without running anything; null when unknown.</summary>
+        internal static string PackageVersion(string folder)
+        {
+            return folder == null ? null : Json.Str(Json.ParseFile(Path.Combine(folder, "package.json")), "version");
+        }
+
+        /// <summary>
+        /// On Windows, the native program to start: the one found if it is an .exe, else one of the definition's
+        /// executables inside its npm package (npm puts only .cmd and .ps1 wrappers, which need a shell, on the PATH).
+        /// </summary>
+        internal static string NativeProgram(RuntimeKind kind, string program, string package)
+        {
+            if (program == null || program.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return program;
+            var place = kind.PlaceFor("windows");
+            if (place == null || package == null) return program;
+            return place.Executables.Select(e => Path.Combine(package, e)).FirstOrDefault(File.Exists) ?? program;
+        }
+
+        /// <summary>The distribution's root (\\wsl.localhost\Distro) for a home under it (…\home\user).</summary>
+        private static string DistributionRoot(string home)
+        {
+            var parent = Directory.GetParent(home);
+            return parent == null || parent.Parent == null ? null : parent.Parent.FullName;
+        }
+
+        /// <summary>A path under a distribution's file share as Linux sees it: \\wsl.localhost\Distro\home\me\x → /home/me/x.</summary>
+        internal static string LinuxPath(string path, string home)
+        {
+            var root = DistributionRoot(home);
+            if (root == null || !path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return null;
+            return "/" + path.Substring(root.Length).TrimStart('\\').Replace('\\', '/');
+        }
+
+        /// <summary>
+        /// Which agents are set up on Windows and in every running WSL distribution: those delegation can run, with the
+        /// services each can call with its own key (one kept in that agent's files, or in the environment it starts with:
+        /// this process's variables on Windows, shell-profile exports in WSL), and those it cannot, with the reason. Keys
+        /// AI Meter keeps never count: it does not hand them to an agent. Follows the FindKeys setting, as reading these
+        /// files is key discovery.
+        /// </summary>
+        public static RuntimeScan ScanRuntimes()
+        {
+            return Scan(Probe.Home, Probe.WslPlacesUp, Kinds, Settings.Current != null && Settings.Current.FindKeys);
+        }
+
+        /// <summary>ScanRuntimes over the given homes: windowsHome (null to skip Windows) and running distributions.</summary>
+        internal static RuntimeScan Scan(string windowsHome, IEnumerable<WslPlace> wsl, IList<RuntimeKind> kinds, bool findKeys)
+        {
+            var scan = new RuntimeScan();
+            var homes = new List<WslPlace>();   // Distro null: the Windows home.
+            if (windowsHome != null) homes.Add(new WslPlace { Home = windowsHome });
+            homes.AddRange(wsl);
+            var dirs = homes.ToDictionary(h => h, h => SearchDirs(h.Home, h.Distro != null));
+            var found = new List<Tuple<RuntimeKind, WslPlace, string>>();
+            foreach (var kind in kinds)
+                foreach (var h in homes)
+                {
+                    bool inWsl = h.Distro != null;
+                    string where = inWsl ? "wsl" : "windows";
+                    bool setUp = kind.Folders.Any(f => Directory.Exists(Path.Combine(h.Home, f)));
+                    string program = ProgramPath(kind, h.Home, inWsl, dirs[h]);
+                    if (!setUp && program == null) continue;
+                    string reason = Unsupported(kind, where, setUp, program);
+                    if (reason != null)
+                    {
+                        scan.Unsupported.Add(new UnsupportedRuntime { Runtime = kind.Id, Name = kind.Name, Where = where, Distro = h.Distro, Reason = reason });
+                        continue;
+                    }
+                    found.Add(Tuple.Create(kind, h, program));
+                    scan.Found.Add(new RuntimePlace { Runtime = kind.Id, Where = where, Distro = h.Distro });
+                }
+            if (!findKeys) { scan.KeyDiscoveryOff = true; return scan; }
+            foreach (var d in Definitions.All.Where(x => x.UsesKey))
+                foreach (var f in found)
+                {
+                    bool inWsl = f.Item2.Distro != null;
+                    string alias;
+                    string key = RuntimeKey(f.Item1, d, f.Item2.Home, inWsl, out alias);
+                    if (key == null) continue;
+                    var access = Access(d.Id, f.Item1.Id, inWsl ? "wsl" : "windows", key);
+                    access.Provider = alias ?? ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id).First();
+                    access.Distro = f.Item2.Distro;
+                    string package = PackageFolder(f.Item1, f.Item2.Home, inWsl, f.Item3);
+                    access.Version = PackageVersion(package);
+                    if (inWsl)
+                    {
+                        access.Program = LinuxPath(f.Item3, f.Item2.Home);
+                        // An agent npm installed is a Node script: its PATH needs a node, perhaps in a version manager's folder.
+                        access.NeedsNode = package != null;
+                        string node = NodeFolder(f.Item3, dirs[f.Item2]);
+                        access.NodeFolder = node == null ? null : LinuxPath(node, f.Item2.Home);
+                    }
+                    else access.Program = NativeProgram(f.Item1, f.Item3, package);
+                    access.ModelsFile = AgentModels.FileFor(f.Item1, f.Item2.Home, package, access.Provider, access.Version);
+                    access.ModelsFormat = f.Item1.Models == null ? null : f.Item1.Models.Format;
+                    scan.Access.Add(access);
+                }
+            return scan;
+        }
+
+        /// <summary>The folder of the node an agent's program would run with: its own folder first, then the search folders.</summary>
+        internal static string NodeFolder(string program, IEnumerable<string> dirs)
+        {
+            return new[] { Path.GetDirectoryName(program) }.Concat(dirs).FirstOrDefault(d => File.Exists(Path.Combine(d, "node")));
+        }
+
+        /// <summary>Why delegation cannot use an agent found in a place, as a reason code; null when it can.</summary>
+        private static string Unsupported(RuntimeKind kind, string where, bool setUp, string program)
+        {
+            if (kind.Dispatch == null) return "no_dispatch";
+            if (kind.PlaceFor(where) == null) return "place_not_verified";
+            if (program == null) return "program_not_found";
+            if (!setUp) return "not_set_up";
+            return null;
+        }
+
+        /// <summary>
+        /// The key an agent would use for a service: its own, or one from the environment it starts with. Alias is the
+        /// provider id the agent keeps it under, when it is in the agent's own files.
+        /// </summary>
+        private static string RuntimeKey(RuntimeKind kind, ServiceDefinition d, string home, bool wsl, out string alias)
+        {
+            alias = null;
+            var found = KeyFinder.SearchAll(d, home, wsl).FirstOrDefault(f => f.App == kind.Name || (wsl && f.App == "profile"));
+            if (found != null) { alias = found.Alias; return found.Key; }
+            if (wsl) return null;
+            foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
+            {
+                string v = ServiceDefinition.Env(name);
+                if (!string.IsNullOrEmpty(v)) return v.Trim();
+            }
+            return null;
+        }
+
+        internal static RuntimeAccess Access(string service, string runtime, string where, string key)
+        {
+            string id;
+            using (var sha = SHA256.Create())
+                id = "cred_" + BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(Salt + "\n" + service + "\n" + key))).Replace("-", "").Substring(0, 16).ToLowerInvariant();
+            return new RuntimeAccess { Service = service, Runtime = runtime, Where = where, Credential = id };
+        }
+    }
+
+    /// <summary>What a task needs, and which prices it accepts.</summary>
+    internal sealed class Requirements
+    {
+        public bool Tools;
+        public long MinContext, MinOutput;
+        public string CostPolicy = Candidates.FreeOnly;
+        public string Service;
+        /// <summary>Also list best-effort candidates, built on the agents' own model lists.</summary>
+        public bool BestEffort;
+    }
+
+    /// <summary>A runtime that can call a service with its own key; Credential is an opaque id, never the key or its file.</summary>
+    internal sealed class RuntimeAccess
+    {
+        public string Service, Runtime, Where, Credential;
+        /// <summary>The provider id the agent knows the service by, such as "google" for the Gemini API.</summary>
+        public string Provider;
+        /// <summary>The agent's program where it runs: a Linux path in WSL, a Windows path on Windows; null when unknown.</summary>
+        public string Program;
+        /// <summary>The WSL distribution the agent is in; null on Windows.</summary>
+        public string Distro;
+        /// <summary>The installed version from its npm package; null when unknown.</summary>
+        public string Version;
+        /// <summary>In WSL: whether the program is a Node script (npm installed it), and the Linux folder of node, or null.</summary>
+        public bool NeedsNode;
+        public string NodeFolder;
+        /// <summary>The agent's own model list for this service's provider alias, and its format; null when it has none.</summary>
+        public string ModelsFile, ModelsFormat;
+    }
+
+    /// <summary>An agent set up in one place: "windows", or "wsl" with its distribution.</summary>
+    internal sealed class RuntimePlace
+    {
+        public string Runtime, Where, Distro;
+    }
+
+    /// <summary>
+    /// An agent found in a place that delegation cannot use there. Reason: no_dispatch (delegation does not support the
+    /// agent), place_not_verified (not in this place), program_not_found (a settings folder, no program) or not_set_up
+    /// (a program, no settings folder).
+    /// </summary>
+    internal sealed class UnsupportedRuntime
+    {
+        public string Runtime, Name, Where, Distro, Reason;
+    }
+
+    /// <summary>Where agents are set up and what they can call.</summary>
+    internal sealed class RuntimeScan
+    {
+        public readonly List<RuntimePlace> Found = new List<RuntimePlace>();
+        public readonly List<RuntimeAccess> Access = new List<RuntimeAccess>();
+        public readonly List<UnsupportedRuntime> Unsupported = new List<UnsupportedRuntime>();
+        public bool KeyDiscoveryOff;
+    }
+
+    /// <summary>A pool's room now (see Candidates.Room).</summary>
+    internal sealed class PoolRoom
+    {
+        public string Blocking, Metric, BindingMetric;
+        public DateTime? Until;
+        public int MaxNewJobs, Leased;
+        public double? Ratio;
+        public bool CanStart { get { return Blocking == null && MaxNewJobs > 0; } }
+    }
+
+    internal sealed class Candidate
+    {
+        public ProviderState Provider;
+        public FreeModel Model;
+        public RuntimeAccess Access;
+        public PoolRoom Room;
+        public string Pool;
+        /// <summary>For a best-effort candidate: what the agent's own list says, and which facts rest on it.</summary>
+        public AgentModel Estimated;
+        public List<string> Unverified;
+    }
+
+    /// <summary>
+    /// The ordered candidates, the best-effort ones when asked for (or how many there would be), and the excluded
+    /// models, grouped by service, reason and time.
+    /// </summary>
+    internal sealed class Selection
+    {
+        public List<Candidate> Chosen = new List<Candidate>();
+        public List<Candidate> BestEffort = new List<Candidate>();
+        public int BestEffortAvailable;
+        public readonly List<Exclusion> Excluded = new List<Exclusion>();
+
+        public void Exclude(string service, string model, string reason, DateTime? until)
+        {
+            var group = Excluded.FirstOrDefault(e => e.Service == service && e.Reason == reason && e.Until == until);
+            if (group == null) Excluded.Add(group = new Exclusion { Service = service, Reason = reason, Until = until });
+            group.Models.Add(model);
+        }
+    }
+
+    internal sealed class Exclusion
+    {
+        public string Service, Reason;
+        public DateTime? Until;
+        public readonly List<string> Models = new List<string>();
+    }
+}

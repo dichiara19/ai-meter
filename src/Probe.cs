@@ -60,38 +60,57 @@ namespace AIMeter
         /// <summary>The WSL home if the distribution is running, otherwise null: for readers outside a collection.</summary>
         public static volatile string WslHomeUp;
 
+        /// <summary>
+        /// Every running distribution with a home where a coding agent is set up (the configured one first, with its
+        /// configured home), as of the last check: for delegation, which can use agents in any of them. Empty when none.
+        /// </summary>
+        public static volatile IList<WslPlace> WslPlacesUp = new WslPlace[0];
+
+        private List<WslPlace> otherPlaces = new List<WslPlace>();
+
         private void RefreshWslState()
         {
             RefreshWslStateCore();
             WslHomeUp = wslUp ? WslHome : null;
+            var places = new List<WslPlace>();
+            if (wslUp) places.Add(new WslPlace { Distro = S.WslDistro, Home = WslHome });
+            places.AddRange(otherPlaces);
+            WslPlacesUp = places;
         }
 
         private void RefreshWslStateCore()
         {
             bool vm = Procs.ContainsValue("vmmemwsl") || Procs.ContainsValue("vmmem");
-            if (!vm || string.IsNullOrEmpty(S.WslDistro)) { wslUp = false; vmSeen = false; return; }
-            // A VM that has just appeared is checked immediately, then every minute if the distribution is active and every 5 if not.
+            if (!vm) { wslUp = false; vmSeen = false; otherPlaces = new List<WslPlace>(); return; }
+            // A VM that has just appeared is checked immediately, then every minute if a distribution is active and every 5 if not.
             // No longer than that: opening \\wsl.localhost of a distribution that has just stopped would restart it.
             // wsl.exe -l queries only the Windows service; it starts no processes in Linux.
-            if (vmSeen && (DateTime.Now - wslCheckedAt).TotalSeconds < (wslUp ? 60 : 300)) return;
+            if (vmSeen && (DateTime.Now - wslCheckedAt).TotalSeconds < (wslUp || otherPlaces.Count > 0 ? 60 : 300)) return;
             vmSeen = true;
             wslCheckedAt = DateTime.Now;
             // The VM may be running for another distribution: ask which ones are active, without starting any.
             string output = Run("wsl.exe", "-l --running -q", 8000, Encoding.Unicode);
-            wslUp = output != null && output.Split('\n').Any(l => l.Trim().Trim('\0').Equals(S.WslDistro, StringComparison.OrdinalIgnoreCase));
+            var running = (output ?? "").Split('\n').Select(l => l.Trim().Trim('\0')).Where(l => l.Length > 0).ToList();
+            wslUp = !string.IsNullOrEmpty(S.WslDistro) && running.Any(d => d.Equals(S.WslDistro, StringComparison.OrdinalIgnoreCase));
             if (wslUp && !Directory.Exists(WslHome)) DetectWslUser();
+            otherPlaces = running.Where(d => !d.Equals(S.WslDistro ?? "", StringComparison.OrdinalIgnoreCase))
+                .Select(d => new WslPlace { Distro = d, Home = AgentHome(@"\\wsl.localhost\" + d) }).Where(p => p.Home != null).ToList();
         }
 
-        /// <summary>The Linux user may be named differently from the Windows one: picks the home holding a service's data.</summary>
+        /// <summary>The Linux user may be named differently from the Windows one: picks the home holding an agent's data.</summary>
         private void DetectWslUser()
         {
-            foreach (var home in SafeDirs(WslRoot + @"\home"))
-            {
-                if (!Directory.Exists(home + @"\.claude") && !Directory.Exists(home + @"\.codex")) continue;
-                S.WslUser = Path.GetFileName(home);
-                S.Save();
-                return;
-            }
+            string home = AgentHome(WslRoot);
+            if (home == null) return;
+            S.WslUser = Path.GetFileName(home);
+            S.Save();
+        }
+
+        /// <summary>The first home under a distribution's root where a coding agent of agents/*.json is set up, or null.</summary>
+        internal static string AgentHome(string root)
+        {
+            var markers = Agents.All.SelectMany(a => a.Folders).Distinct().ToList();
+            return SafeDirs(root + @"\home").FirstOrDefault(home => markers.Any(m => Directory.Exists(Path.Combine(home, m))));
         }
 
         // ================================================================ cache
@@ -246,6 +265,8 @@ namespace AIMeter
         public abstract ProviderState Collect(Probe p);
         /// <summary>Forces the next read over the network (Refresh button, fresh sign-in, resume).</summary>
         public virtual void InvalidateNetwork() { }
+        /// <summary>Forces the next read of the free-model list, which has its own, longer interval.</summary>
+        public virtual void InvalidateCatalogue() { }
     }
 
     /// <summary>Orchestrator: collects the state of each enabled service, sharing processes, WSL and cache.</summary>
@@ -253,6 +274,8 @@ namespace AIMeter
     {
         private readonly Probe probe;
         private readonly List<Provider> providers;
+        private readonly HashSet<string> failing = new HashSet<string>();   // Providers whose last read threw, already logged.
+        private readonly Dictionary<string, string> names = new Dictionary<string, string>();   // Card names from the last good reads.
 
         public Collector(Settings settings)
         {
@@ -262,9 +285,26 @@ namespace AIMeter
             providers.Add(new LocalProvider(settings));
         }
 
+        /// <summary>A collector of the given providers only, for tests.</summary>
+        internal Collector(Settings settings, List<Provider> providers)
+        {
+            probe = new Probe(settings);
+            this.providers = providers;
+        }
+
         public bool WslUp { get { return probe.WslUp; } }
 
         public void InvalidateNetwork() { foreach (var p in providers) p.InvalidateNetwork(); }
+
+        /// <summary>Force one provider's next network read: its usage, or its free-model list.</summary>
+        public void Invalidate(string id, bool catalogue)
+        {
+            foreach (var p in providers.Where(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (catalogue) p.InvalidateCatalogue();
+                else p.InvalidateNetwork();
+            }
+        }
 
         public void Trim() { probe.Trim(); }
 
@@ -275,11 +315,33 @@ namespace AIMeter
             foreach (var p in providers)
             {
                 if (!p.Enabled(probe.S)) continue;
-                try { snap.Providers.Add(p.Collect(probe)); }
-                catch (Exception ex) { Trace.WriteLine(p.Id + ": " + ex); }   // A faulty service does not stop the others.
+                try
+                {
+                    var state = p.Collect(probe);
+                    snap.Providers.Add(state);
+                    failing.Remove(p.Id);
+                    if (state.Name != null) names[p.Id] = state.Name;
+                }
+                catch (Exception ex) { snap.Providers.Add(Failed(p.Id, ex)); }   // A faulty service does not stop the others.
             }
             PlaceAgentSessions(snap);
             return snap;
+        }
+
+        /// <summary>
+        /// The card of a provider whose read threw: it stays in place with a notice instead of vanishing. The error is
+        /// logged once until a read succeeds again, so a provider that fails every cycle does not fill the log.
+        /// </summary>
+        private ProviderState Failed(string id, Exception ex)
+        {
+            if (failing.Add(id)) Program.LogError("collect-" + id, ex);
+            string name;
+            if (!names.TryGetValue(id, out name))
+            {
+                var definition = Definitions.Get(id);
+                name = definition != null ? definition.Name : id;
+            }
+            return new ProviderState { Id = id, Name = name, Notice = L.T("Could not read this service: see errors.log") };
         }
 
         // Agent provider ids for the services implemented in code; defined services use their key ids ("auth.ids").
@@ -316,5 +378,11 @@ namespace AIMeter
             var d = Definitions.Get(serviceId);
             return d == null ? new string[0] : ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id);
         }
+    }
+
+    /// <summary>A running WSL distribution and the home, as Windows sees it (\\wsl.localhost\Distro\home\user), to read.</summary>
+    internal sealed class WslPlace
+    {
+        public string Distro, Home;
     }
 }

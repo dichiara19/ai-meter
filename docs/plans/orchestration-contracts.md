@@ -12,63 +12,29 @@ New fields are additive. Any change in meaning is listed in the release notes.
 
 ## 1. Freshness of read tools (M1)
 
-### 1.1 Arguments
+M1 implements this section. The reference is [docs/MCP.md, *Fresh data*](../MCP.md#fresh-data). This section keeps only the decisions and how the implementation differs from the first draft.
 
-`get_limits`, `get_spend`, `list_free_models` and `suggest_service` accept two new arguments:
+**Decisions:**
+- **No refresh by default** (maintainer decision, 2026-11-02). Tools answer from the latest reading unless the caller passes `refresh` or `max_age_seconds`. This keeps the 0.8.6 promise.
+- **No second collector.** Requests go through `RefreshGate` (`src/Freshness.cs`) to the existing collection worker. As a result:
+  - concurrent callers share one collection, and a caller that joins a read already in progress starts no new one;
+  - a caller that gives up cancels nothing;
+  - periodic and requested collection never run side by side.
+- **Separate timers.** Usage and free-model lists are invalidated separately: `InvalidateNetwork` for usage, `InvalidateCatalogue` for the list.
+- **Upstream backoff** (`NetworkBackoff`). After a `429`, or a `503` with `Retry-After`, a service is not contacted before the time it asked for. Without `Retry-After`, the wait is 5 minutes. This applies to periodic reads too.
+- **Minimum interval.** A service is asked on request at most once every 60 seconds.
+- **Timeout.** The caller waits up to 20 seconds for the whole collection, which is published only at its end. When it times out, the caller gets the previous snapshot, marked `timed_out` per service, rather than per-provider partial results.
+- **Unknown stays unknown.** In `suggest_service`, an unknown room is `null` with `quota: "unknown"`, ranked after known room. Stale readings are marked and ranked after fresh ones with the same room.
 
-| Argument | Type | Meaning |
-| --- | --- | --- |
-| `refresh` | boolean | Ask the provider now, ignoring AI Meter's own interval. Backoff and `Retry-After` still apply |
-| `max_age_seconds` | integer ≥ 0 | Refresh only data older than this |
+**Differences from the first draft:**
+- `freshness` is one map per result, keyed by service id, instead of a block inside each service entry. The same shape works for model lists, which are not grouped by service.
+- `collected_at` is the existing top-level `updated_at`.
+- `provider_read_at` is named `read_at`.
+- The service-level `source` was dropped: estimated windows already say `estimated: true`. `configured` and per-metric sources arrive with free-model limits (§2.3).
+- `unsupported` is not reported yet. M1 cannot tell "no endpoint" from "no reading". M2, which separates catalogues from usage, adds it.
+- The refresh outcome values are the ones listed in docs/MCP.md. `shared` is internal, and `failed` became `unchanged`.
 
-`list_sessions` and `list_local_models` accept `refresh` to re-read local state. That reads local files and `127.0.0.1` only.
-
-**Default (open decision).**
-- **Recommended:** no refresh unless the caller asks. This keeps the 0.8.6 promise that tools add no network requests, and lets agents opt in with `max_age_seconds`.
-- **Alternative:** `get_limits` and `suggest_service` refresh quotas by default, as the original plan proposed.
-
-`start_job` (§3) always makes sure the quotas it relies on are fresh, unless a shared collection finished less than 30 seconds earlier.
-
-### 1.2 Per-service freshness block
-
-Every service in a result carries a `freshness` object:
-
-```json
-"freshness": {
-  "collected_at": "2026-11-02T12:00:05+01:00",
-  "provider_read_at": "2026-11-02T11:58:00+01:00",
-  "state": "fresh",
-  "refresh": "refreshed",
-  "source": "provider_reported",
-  "reason": null
-}
-```
-
-| Field | Values |
-| --- | --- |
-| `collected_at` | When AI Meter last tried to read the provider for this service |
-| `provider_read_at` | When the data shown was actually read. It is not overwritten by later failed attempts |
-| `state` | `fresh`, `stale`, `unavailable` (tried and failed), or `unsupported` (no endpoint for this metric) |
-| `refresh` | `not_requested`, `refreshed`, `cached` (fresh enough), `shared` (joined a collection already running), `backoff`, `timed_out` or `failed` |
-| `source` | `provider_reported`, `local_estimate` or `configured` |
-| `reason` | A short machine-readable reason when the state is not `fresh` (`rate_limited`, `auth_expired`, `network`, `no_endpoint`…) |
-
-### 1.3 Collection rules
-
-- **Single flight.** Concurrent requests for one provider share one collection.
-  - Cancelling one caller does not cancel a collection that others are waiting on.
-  - Periodic collection and forced refresh never mutate the same provider state at the same time.
-- **Separate timers.** Quota and catalogue refreshes are invalidated separately: `fetchedAt` for quotas, and `freeNextFetch` or its successor for catalogues.
-- **Timeout.** A refresh has a bounded timeout (proposed: 10 s per provider). It returns partial results, with each service marked as above.
-- **Unknown stays unknown.** An unknown remainder is `null`, never 100.
-
-### 1.4 `suggest_service`
-
-- `remaining_percent` is `null` when no limit is known. It is no longer 100.
-- Sorting:
-  1. services with a known remaining room, by that room;
-  2. services whose free models are confirmed free but whose quota is unknown, flagged with `"quota": "unknown"`;
-  3. stale data, which is ranked below fresh data with the same room.
+`claim_capacity` (§3) checks the pool's room on the latest reading. Plugins that need fresher quotas call `list_candidates` with `max_age_seconds` first.
 
 ## 2. Providers and execution candidates (M2, M3)
 
@@ -93,7 +59,9 @@ Every service in a result carries a `freshness` object:
 
 ### 2.3 Limits of free models
 
-A coordinator can split work sensibly only if it knows, for each free model, what one request may contain and how much the model can still take. Free tiers are mostly made of limits, so these limits are part of the contract from M2 on. They do not wait for the runner.
+M2 implements this section in `list_free_models`; [docs/MCP.md](../MCP.md#free-models-and-their-limits) is the reference. Still to come: the `observed` counters, which come from the outcomes released with capacity leases (M4, §3).
+
+A coordinator can split work sensibly only if it knows, for each free model, what one request may contain and how much the model can still take. Free tiers are mostly made of limits, so these limits are part of the contract from M2 on. They do not wait for delegation.
 
 Today (0.8.6) `list_free_models` returns the context window, tool and reasoning support, and the last free day. It returns no output cap and no rate limit.
 
@@ -188,9 +156,18 @@ With no known concurrency limit, `max_new_jobs_now` is at most 1.
    Ties are broken deterministically by service id and model id.
 4. **Label estimates.** Duration or quality estimates may adjust the order only if the result labels them as estimates.
 
-**`list_candidates` (M3, read tool).** It takes the same `requirements` and `cost_policy` as `start_job`. It returns the ordered candidates, each with its `limits` and `headroom`, plus the reason each excluded candidate was dropped.
+M3 implements this section in `src/Candidates.cs` and `list_candidates`; [docs/MCP.md](../MCP.md#choosing-where-to-run-a-task-list_candidates) is the reference. The differences from this draft:
+- The cost policies are `free_only` and `free_or_unconfirmed`. A paid policy waits until model lists carry prices for paid models.
+- `CredentialReference` is the `credential` id with its runtime and place. The source app is not returned, since only each agent's own keys count.
+- Runtimes are a data table of agents (`agents/*.json`, plus the user's `%APPDATA%\AIMeter\agents`), not a single one. Only agents with a verified dispatch for their place are candidates (Pi in WSL, OpenCode in WSL and on Windows); none of them is required. Agents found without one (Codex, Claude Code, Gemini CLI, Antigravity CLI, Cursor Agent, Crush, Pi on Windows) are listed in `runtimes.unsupported` with a reason, so a plugin can tell the user why. The table's shape is in [docs/MCP.md](../MCP.md#agent-definitions).
+- Every running WSL distribution is scanned, each candidate carrying its `distro`; the Linux home is the one holding any agent's folder.
+- `warnings` flags candidates a plugin must watch: `openrouter_byok_fallback` today.
+- **Best effort.** Models whose service list leaves the price or a needed capability unstated can be filled in from an agent's own model list (`models` in its definition). They are returned apart, in `best_effort`, only with `include_best_effort`, labelled with `estimated` and `unverified`, as point 4 requires. NVIDIA and Gemini have no ordinary candidates otherwise ([docs/MCP.md](../MCP.md#best-effort-candidates)).
+- Reservations and the `observed` counters come with capacity leases (M4, §3).
 
-This lets a coordinator plan several tasks at once, such as how many parallel jobs to start and on which pools, before it calls `start_job`. `start_job` still re-checks and reserves capacity atomically, because the answer can change between the two calls.
+**`list_candidates` (M3, read tool).** It takes the task's `requirements` and a `cost_policy`. It returns the ordered candidates, each with its `limits` and `headroom`, plus the reason each excluded candidate was dropped.
+
+This lets a coordinator plan several tasks at once, such as how many parallel jobs to start and on which pools, before it calls `claim_capacity`. `claim_capacity` still re-checks and reserves capacity atomically, because the answer can change between the two calls.
 
 ### 2.5 Provider notes
 
@@ -202,73 +179,65 @@ This lets a coordinator plan several tasks at once, such as how many parallel jo
   - The aliases `nvidia` and `nvidia-nim` are distinct providers.
   - The catalogue and authentication are exposed even when no remainder is readable.
 
-## 3. Jobs (M4)
+## 3. Dispatch and capacity leases (M4)
 
-These tools are listed only while execution is turned on ([ADR 0001](../adr/0001-optional-agent-orchestration.md), decision 2).
+AI Meter runs no jobs ([ADR 0002](../adr/0002-delegation-through-coordinator-plugins.md)). A coordinator plugin runs the agent. AI Meter describes how to run it, and keeps cooperative leases on pool capacity.
 
-### 3.1 `start_job`
+M4 implements this section in `src/Dispatch.cs`, `src/Leases.cs` and the MCP tools; [docs/MCP.md](../MCP.md#running-a-task-describe_dispatch-and-capacity-leases) is the reference. Differences from this draft:
+- `describe_dispatch` also takes `mode` and `from`.
+- `claim_capacity` derives the pool from service and model rather than taking it.
+- `renew_capacity` exists.
+- A rate limit without Retry-After closes the pool for 60 s.
+
+### 3.1 `describe_dispatch`
+
+Input: a candidate from `list_candidates`, identified by `service`, `model`, `runtime`, `where` and, in WSL, `distro`.
+
+Output:
 
 ```json
 {
-  "task": "Add a regression test for …",
-  "workspace": "C:\\src\\project",
-  "mode": "read_only | modify_in_worktree",
-  "requirements": { "tools": true, "min_context": 64000, "min_output_tokens": 8000 },
-  "cost_policy": "free_only",
-  "candidate": "optional explicit candidate id",
-  "timeout_seconds": 1800,
-  "max_turns": 40,
-  "max_output_bytes": 1048576,
-  "idempotency_key": "client-chosen string"
+  "runtime": "pi", "where": "wsl", "version": "1.4.0",
+  "program": "pi",
+  "arguments": ["--provider", "openrouter", "--model", "z/large:free", "…"],
+  "task_input": "stdin",
+  "output": { "format": "jsonl", "final": "…" },
+  "workspace_flag": null,
+  "notes": "…"
 }
 ```
 
-- `workspace` must be inside a folder authorised in Settings.
-- `task` is passed to the runtime as data, never through a shell. There is no field for an arbitrary command.
-- `start_job` returns at once with `job_id` and `queued`. No call stays open for the life of the job.
-- Repeating `idempotency_key` returns the existing job. It never starts a second process.
+- The description comes from a data table per agent (`agents/*.json`, see [docs/MCP.md](../MCP.md#agent-definitions)): per verified place, a version range, and the argument template per mode with `{provider}`, `{model}` and `{workspace}`, plus the environment. The M4 spike filled the built-in rows, and nothing is written from memory. [spike-agents.md](spike-agents.md) has the evidence (Pi 1.x, OpenCode 1.x).
+- Besides the fields above, each row says how to tell the end (Pi: `agent_settled`), where the outcome is (Pi: the last assistant `stopReason`, not the exit code), how to count requests and tokens, where each request's price appears (`output.cost`: Pi's `usage.cost.total`, OpenCode's `step_finish.part.cost`), and how to stop the agent. Agents price requests from their own model list, so a price above zero means a paid request, but zero does not rule out a BYOK fallback billed by the provider.
+- `warnings` (such as `openrouter_byok_fallback`) repeats the candidate's warnings.
+- `arguments` is an array. The plugin starts the program without a shell and passes the task as data, through stdin or a single argument, as `task_input` says. There is no field for an arbitrary command, and the task text never enters the description.
+- `where: "wsl"` means the plugin starts the agent inside WSL, which must already be running. AI Meter never starts WSL.
+- An agent without a verified row returns `unsupported`, and the reason. Before that, distinct errors name an unknown runtime, AI Meter still reading its first data, an agent not set up here, key discovery turned off, and an agent without its own key for the service.
+- An agent npm installed in WSL needs `node`: its folder goes next to the agent's in the generated PATH (nvm, fnm and asdf included), and without one the answer is `unsupported`. On Windows only a native `.exe` is described, never a `.cmd` or `.ps1` wrapper.
 
-### 3.2 States
+### 3.2 Leases
 
-```
-queued → running → completed | failed | cancelled | timed_out
-                 ↘ cancelling → cancelled
-interrupted: AI Meter restarted and could not reconcile the process
-```
+| Tool | Input | Output |
+| --- | --- | --- |
+| `claim_capacity` | `pool`, `service`, `model`, `runtime`, `ttl_seconds` (default 1800, at most 7200), `client` (a free label such as `claude-code`) | `lease_id`, `expires_at`; or `refused` with `blocking` when the pool has no room |
+| `renew_capacity` | `lease_id`, `ttl_seconds` | New `expires_at`. Long tasks renew before expiry |
+| `release_capacity` | `lease_id`, `outcome` (`completed`, `failed`, `cancelled`, `timed_out`), `requests`, `rate_limited` (count, and `retry_after` when the agent saw one), `tokens` (input, output, when known) | `released`. Idempotent: a second release changes nothing |
 
-Every transition is stored with its time.
+- **Headroom.** While a lease is active, `max_new_jobs_now` of its pool counts it, for every caller of `list_free_models` and `list_candidates`. A claim that would exceed the pool's room is refused, and the check and the claim happen together.
+- **Expiry.** A lease that reaches `expires_at` without a release ends with outcome `unknown`. A crashed plugin cannot block a pool.
+- **Rate limits.** A released `rate_limited` with `retry_after` puts the pool in backoff, as an AI Meter read that gets a `429` does.
+- **Observed counters.** Released outcomes feed `observed` (§2.3) with `coverage: "ai_meter_leases_only"`. Values the provider reports stay authoritative.
+- **What is stored.** Leases are kept in a small local store, with their own retention. It holds pool, service, model, runtime, client, times and the outcome counters above. Never task text, code, logs, paths or keys.
 
-On restart, AI Meter reconciles running jobs by process id **and** process start time, so a reused PID is never mistaken for a job.
+### 3.3 What the plugins own
 
-### 3.3 Other tools
+These belong to the plugin, not to AI Meter:
+- status, result and cancellation;
+- background runs and their logs;
+- the worktree for tasks that change a repository: read-only by default, never merged automatically;
+- retries after a `429`. Before any side effect, a plugin may pick another candidate. After one, it never retries blindly.
 
-| Tool | Returns |
-| --- | --- |
-| `get_job` | State, timestamps, candidate used, worktree path, last progress line |
-| `list_jobs` | Jobs started by AI Meter, newest first. Never sessions started by other programs |
-| `cancel_job` | Cancels the job's own process tree. Idempotent |
-| `get_job_result` | The result below. Output and logs are paged with `cursor` and `max_bytes` |
-
-`resume_job` is added only after the spike shows that the runtime can really resume.
-
-### 3.4 Result
-
-- summary;
-- exit status;
-- changed files, with the patch or the worktree commit;
-- checks actually run, each with its outcome;
-- known tokens and cost, with the limits of that measurement;
-- truncation flags.
-
-Logs and patches follow the job store's retention, not the history archive's.
-
-### 3.5 Rate limits and failover
-
-- On `429`, honour `Retry-After`. Then either requeue the job or pick another allowed candidate before any side effect.
-- A rate-limit response puts the whole pool in backoff, not just the job, and is recorded in that pool's `observed` counters (§2.3).
-- Each job's result reports the requests and rate-limit responses the runtime exposes, so the counters improve as jobs run.
-- After a side effect, never retry blindly. Fail explicitly, or continue from a stored checkpoint.
-- `free_only` never falls back to a paid candidate.
+`free_only` never falls back to a paid candidate.
 
 ## 4. Versions
 
@@ -276,4 +245,4 @@ Logs and patches follow the job store's retention, not the history archive's.
 | --- | --- |
 | App | `AssemblyInfo.cs` / `Controller.Version` |
 | MCP contract | `serverInfo.version` stays the app version. A `contract` number in the `initialize` instructions is raised only on breaking changes |
-| Job store | Its own schema version, migrated transactionally like the history archive |
+| Lease store | Its own schema version, migrated transactionally like the history archive |

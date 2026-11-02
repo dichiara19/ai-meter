@@ -142,7 +142,7 @@ namespace AIMeter
                     Combo(new[] { Tuple.Create("auto", L.T("Automatic")), Tuple.Create("low", L.T("Maximum saving")) }, S.Refresh, v => { S.Refresh = v; Changed(); })));
             Section(L.T("Windows Subsystem for Linux"));
             Group(Row(Ui.Glyph("", 20, "Text"), L.T("WSL distribution"), L.T("Where to look for Claude Code and Codex installed in Linux. AI Meter never starts WSL: it reads it only if it is already running."),
-                Combo(new[] { S.WslDistro }.Concat(WslDistros()).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => Tuple.Create(x, x)).ToArray(), S.WslDistro,
+                Combo(new[] { S.WslDistro }.Concat(Settings.WslDistros()).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => Tuple.Create(x, x)).ToArray(), S.WslDistro,
                       v => { S.WslDistro = v; Changed(); })));
         }
 
@@ -153,7 +153,7 @@ namespace AIMeter
             statsText = Ui.Text("", 12, "Text2");
             statsText.TextWrapping = TextWrapping.Wrap;
             Group(
-                Row(Ui.Glyph("", 20, "Text"), "AI Meter", null, Button(L.T("Open data folder"), () => Process.Start("explorer.exe", "\"" + Settings.Folder + "\""), false), statsText),
+                Row(Ui.Glyph("", 20, "Text"), "AI Meter", null, Button(L.T("Open data folder"), () => Program.OpenFolder(Settings.Folder), false), statsText),
                 Row(Ui.Glyph("", 20, "Text"), L.T("Privacy"),
                     L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off.")
                     + " " + L.T(Native.IsPackaged ? "The update check below asks the Microsoft Store whether an update is waiting." : "The update check below also asks GitHub for the latest version."),
@@ -197,22 +197,6 @@ namespace AIMeter
                         Button(L.T("Release page"), () => Controller.OpenReleasePage(latest), true)));
             }
             Group(rows.ToArray());
-        }
-
-        private static string[] WslDistros()
-        {
-            try
-            {
-                using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Lxss"))
-                {
-                    if (k == null) return new string[0];
-                    return k.GetSubKeyNames().Select(n =>
-                    {
-                        using (var d = k.OpenSubKey(n)) return d == null ? null : d.GetValue("DistributionName") as string;
-                    }).Where(n => n != null && !n.StartsWith("docker-desktop", StringComparison.OrdinalIgnoreCase)).ToArray();
-                }
-            }
-            catch (Exception) { return new string[0]; }
         }
     }
 }

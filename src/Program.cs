@@ -40,13 +40,20 @@ namespace AIMeter
             get { return Environment.GetEnvironmentVariable("AIMETER_HOME") ?? AppDomain.CurrentDomain.BaseDirectory; }
         }
 
-        /// <summary>Command Windows uses to launch the app at sign-in.</summary>
+        /// <summary>
+        /// Command that starts this copy of the app: for the start-up shortcut, the taskbar identity and the MCP relay.
+        /// The packaged app is started through its execution alias (windows.appExecutionAlias in the manifest), whose
+        /// path stays the same across Store updates, whilst the executable's folder names the package version.
+        /// </summary>
         public static string LaunchCommand
         {
             get
             {
-                return Environment.GetEnvironmentVariable("AIMETER_LAUNCH")
-                       ?? "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\"";
+                string launch = Environment.GetEnvironmentVariable("AIMETER_LAUNCH");
+                if (launch != null) return launch;
+                if (Native.IsPackaged)
+                    return "\"" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WindowsApps\AIMeter.exe") + "\"";
+                return "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\"";
             }
         }
 
@@ -107,6 +114,13 @@ namespace AIMeter
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+        }
+
+        /// <summary>Open a folder in File Explorer, creating it first: Explorer shows Documents for a path that does not exist.</summary>
+        internal static void OpenFolder(string folder)
+        {
+            Directory.CreateDirectory(folder);
+            Process.Start("explorer.exe", "\"" + folder + "\"");
         }
 
         internal static void Run(string[] args)

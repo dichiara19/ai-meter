@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace AIMeter
 {
@@ -15,11 +16,51 @@ namespace AIMeter
         {
             test("MCP answers the handshake, lists read-only tools and ignores notifications", Protocol);
             test("MCP tools report limits, sessions without titles, free models and room", Tools);
+            test("An MCP refresh asks only for old readings and reports each service's freshness", RefreshTargets);
+            test("Concurrent MCP refreshes share one collection", RefreshShared);
+            test("A call after a refresh sees the new reading before the surfaces apply it", RefreshThenRead);
+            test("An MCP refresh respects Retry-After, the minimum interval, pauses and its timeout", RefreshLimits);
+            test("suggest_service reports unknown room as unknown and ranks it after known room", SuggestUnknown);
+            test("Retry-After is read as seconds or an HTTP date and capped", RetryAfter);
             test("MCP relay and pipe carry requests from a separate process", Relay);
             test("A client that disconnects abruptly leaves the MCP pipe serving", AbruptDisconnect);
             test("Connecting an app adds only AI Meter's JSON entry and keeps the rest", JsonEdits);
             test("Codex TOML gains and loses only AI Meter's tables", TomlEdits);
+            test("Antigravity CLI is found by its own folder and its empty MCP file is connected", AntigravityCli);
             test("Command-line installation quotes paths and places -- for each agent", Commands);
+            test("A copy button confirms the copy on itself, then returns to its label", CopiedFeedback);
+        }
+
+        private static void CopiedFeedback()
+        {
+            var button = new System.Windows.Controls.Button { Content = "WSL", MinWidth = 10 };
+            SettingsWindow.ShowCopied(button, TimeSpan.FromMilliseconds(150));
+            Assert(button.Content is System.Windows.Controls.Panel, "The button does not show the confirmation.");
+            Assert(System.Windows.Automation.AutomationProperties.GetName(button) == L.T("Copied"), "Screen readers are not told about the copy.");
+            Assert(System.Windows.Automation.AutomationProperties.GetLiveSetting(button) != System.Windows.Automation.AutomationLiveSetting.Off, "The confirmation is not a live region.");
+            SettingsWindow.ShowCopied(button, TimeSpan.FromMilliseconds(150));   // A second click while it shows "Copied".
+
+            // Let the dispatcher run the timer.
+            var frame = new System.Windows.Threading.DispatcherFrame();
+            var stop = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+            stop.Tick += (o, e) => { stop.Stop(); frame.Continue = false; };
+            stop.Start();
+            System.Windows.Threading.Dispatcher.PushFrame(frame);
+
+            Assert(button.Content as string == "WSL", "The label did not come back, or a second click replaced it.");
+            Assert(button.MinWidth == 10 && string.IsNullOrEmpty(System.Windows.Automation.AutomationProperties.GetName(button)), "The button kept its temporary width or name.");
+
+            // The reserved width fits the wider confirmation, so showing it does not move the buttons beside it.
+            var narrow = new System.Windows.Controls.Button { Content = "WSL" };
+            var infinite = new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity);
+            narrow.Measure(infinite);
+            double labelWidth = narrow.DesiredSize.Width;
+            double reserved = SettingsWindow.CopiedWidth(narrow);
+            Assert(narrow.Content as string == "WSL", "Measuring changed the label.");
+            SettingsWindow.ShowCopied(narrow, TimeSpan.FromSeconds(5));
+            narrow.UpdateLayout();
+            Assert(reserved > labelWidth && reserved >= narrow.DesiredSize.Width - 0.5,
+                "The reserved width does not fit the confirmation: label " + labelWidth + ", reserved " + reserved + ", shown " + narrow.DesiredSize.Width + ".");
         }
 
         private static void Assert(bool condition, string message)
@@ -42,10 +83,14 @@ namespace AIMeter
             claude.Sessions.Add(new Session { Kind = "Chat", Status = "app" });
             var router = new ProviderState { Id = "openrouter", Name = "OpenRouter", Usage = new Usage { Source = "live", At = DateTime.Now } };
             router.Usage.Windows.Add(new UsageWindow { Label = "Free requests today", Short = UsageWindow.ShortDay, Used = 10 });
-            router.Usage.FreeModels = new List<FreeModel>
+            router.Catalogue = new Catalogue
             {
-                new FreeModel { Id = "a/small:free", Name = "Small", Context = 32000 },
-                new FreeModel { Id = "b/large:free", Name = "Large", Context = 256000, Tools = true, Expires = DateTime.Today.AddDays(3) },
+                ReadAt = DateTime.Now.AddHours(-1),
+                Models = new List<FreeModel>
+                {
+                    new FreeModel { Id = "a/small:free", Name = "Small", Context = 32000 },
+                    new FreeModel { Id = "b/large:free", Name = "Large", Context = 256000, MaxOutput = 8192, Tools = true, Expires = DateTime.Today.AddDays(3) },
+                },
             };
             router.Usage.TodayModels = new List<ModelCost> { new ModelCost { Model = "b/large:free", Cost = 0, Tokens = 1200, Replies = 3 } };
             router.Sessions.Add(new Session { Kind = "Pi · WSL", Title = "Batch job", Status = "idle", Provider = "openrouter" });
@@ -65,8 +110,10 @@ namespace AIMeter
 
             Assert(server.Handle("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}") == "", "A notification received an answer.");
             var tools = (IList)Json.Obj(Reply(server, "{\"jsonrpc\":\"2.0\",\"id\":\"t\",\"method\":\"tools/list\"}"), "result")["tools"];
-            Assert(tools.Count == 6, "Unexpected tool count.");
-            Assert(tools.OfType<Dictionary<string, object>>().All(t => Json.Bool(Json.Obj(t, "annotations"), "readOnlyHint")), "A tool is not marked read-only.");
+            Assert(tools.Count == 11, "Unexpected tool count.");
+            var writers = new[] { "claim_capacity", "renew_capacity", "release_capacity" };
+            Assert(tools.OfType<Dictionary<string, object>>().All(t => Json.Bool(Json.Obj(t, "annotations"), "readOnlyHint") != writers.Contains(Json.Str(t, "name"))),
+                "Only the lease tools may change state.");
 
             var missing = Json.Obj(Reply(server, "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\"}"), "error");
             Assert(Json.Num(missing, "code") == -32601, "An unknown method was not refused.");
@@ -105,6 +152,7 @@ namespace AIMeter
 
             var free = ((IList)CallTool(server, "list_free_models", "{\"tools\":true,\"min_context\":100000}")["models"]).OfType<Dictionary<string, object>>().Single();
             Assert(Json.Str(free, "id") == "b/large:free" && Json.Str(free, "free_until") != null, "The free model filter is wrong.");
+            Assert(Json.Num(free, "max_output_tokens") == 8192, "The output limit is missing.");
 
             var spend = ((IList)CallTool(server, "get_spend", "{}")["services"]).OfType<Dictionary<string, object>>().Single();
             Assert(Json.Str(spend, "service") == "openrouter", "Spending lists a service without spending.");
@@ -112,6 +160,156 @@ namespace AIMeter
             var order = ((IList)CallTool(server, "suggest_service", "{}")["services"]).OfType<Dictionary<string, object>>().Select(s => Json.Str(s, "service")).ToList();
             Assert(order.SequenceEqual(new[] { "openrouter", "claude" }), "Services are not ordered by room.");
             Assert(CallTool(server, "nothing", "{}").ContainsKey("error"), "An unknown tool did not report an error.");
+        }
+
+        /// <summary>Stands in for the collection worker: after each wake it waits briefly, then publishes collect().</summary>
+        private sealed class FakeWorker
+        {
+            public readonly List<string> Invalidated = new List<string>();
+            public int Collections;
+            public readonly RefreshGate Gate;
+            private readonly AutoResetEvent wake = new AutoResetEvent(false);
+
+            public FakeWorker(Func<Snapshot> collect, bool paused = false, bool publishes = true)
+            {
+                Gate = new RefreshGate((id, catalogue) => { lock (Invalidated) Invalidated.Add(catalogue ? id + "#catalogue" : id); }, () => wake.Set(), () => paused);
+                new Thread(() =>
+                {
+                    while (true)
+                    {
+                        wake.WaitOne();
+                        Thread.Sleep(200);
+                        if (!publishes) continue;
+                        var s = collect();
+                        Interlocked.Increment(ref Collections);
+                        Gate.Publish(s);
+                    }
+                }) { IsBackground = true }.Start();
+            }
+        }
+
+        /// <summary>The fixture with Claude's reading taken ten minutes ago.</summary>
+        private static Snapshot OldClaude()
+        {
+            var snap = Fixture();
+            snap.Providers[0].Usage.At = DateTime.Now.AddMinutes(-10);
+            return snap;
+        }
+
+        private static Dictionary<string, object> Fresh(Dictionary<string, object> content, string service)
+        {
+            return Json.Obj(Json.Obj(content, "freshness"), service);
+        }
+
+        private static void RefreshTargets()
+        {
+            NetworkBackoff.Clear();
+            var worker = new FakeWorker(() =>
+            {
+                var s = Fixture();
+                s.Providers[1].Catalogue.ReadAt = DateTime.Now;
+                return s;
+            });
+            var snap = OldClaude();
+            var server = new McpServer(() => snap, () => false, worker.Gate, TimeSpan.FromSeconds(5));
+
+            var plain = CallTool(server, "get_limits", "{}");
+            Assert(worker.Invalidated.Count == 0 && Json.Str(Fresh(plain, "claude"), "refresh") == "not_requested", "A plain read asked for a refresh.");
+            Assert(Json.Str(Fresh(plain, "claude"), "read_at") != null && Json.Str(Fresh(plain, "claude"), "state") == "fresh", "Freshness lacks the reading time.");
+
+            var limits = CallTool(server, "get_limits", "{\"max_age_seconds\":300}");
+            Assert(worker.Invalidated.SequenceEqual(new[] { "claude" }), "Only Claude's old reading should be asked for: " + string.Join(",", worker.Invalidated));
+            Assert(Json.Str(Fresh(limits, "claude"), "refresh") == "refreshed", "The refreshed service is not marked so.");
+            Assert(Json.Str(Fresh(limits, "openrouter"), "refresh") == "cached", "A recent reading was not kept.");
+
+            var models = CallTool(server, "list_free_models", "{\"refresh\":true}");
+            Assert(worker.Invalidated.Last() == "openrouter#catalogue" && worker.Invalidated.Count == 2, "The free-model list was not asked for on its own.");
+            Assert(Json.Str(Fresh(models, "openrouter"), "refresh") == "refreshed" && Fresh(models, "claude") == null, "Model-list freshness is wrong.");
+
+            var sessions = CallTool(server, "list_sessions", "{\"refresh\":true}");
+            Assert(Json.Str(sessions, "refresh") == "refreshed" && worker.Invalidated.Count == 2, "A local refresh contacted a service or did not wait.");
+            Assert(CallTool(server, "get_limits", "{\"max_age_seconds\":-1}").ContainsKey("error"), "A negative age was accepted.");
+        }
+
+        private static void RefreshShared()
+        {
+            NetworkBackoff.Clear();
+            var worker = new FakeWorker(Fixture);
+            var snap = OldClaude();
+            var server = new McpServer(() => snap, () => false, worker.Gate, TimeSpan.FromSeconds(5));
+            var results = new Dictionary<string, object>[2];
+            var threads = Enumerable.Range(0, 2).Select(i => new Thread(() => results[i] = CallTool(server, "get_limits", "{\"refresh\":true}"))).ToList();
+            threads[0].Start();
+            Thread.Sleep(50);
+            threads[1].Start();
+            foreach (var t in threads) t.Join(10000);
+            Assert(results.All(r => r != null && Json.Str(Fresh(r, "claude"), "refresh") == "refreshed"), "A waiting caller did not receive the shared reading.");
+            Assert(worker.Collections == 1 && worker.Invalidated.Count == 1, "Concurrent callers started " + worker.Collections + " collections.");
+        }
+
+        private static void RefreshThenRead()
+        {
+            NetworkBackoff.Clear();
+            var worker = new FakeWorker(Fixture);
+            var shown = OldClaude();   // What the surfaces still show: the controller applies snapshots after history.
+            var server = new McpServer(() => worker.Gate.Newest(shown), () => false, worker.Gate, TimeSpan.FromSeconds(5));
+            Assert(Json.Str(Fresh(CallTool(server, "get_limits", "{\"refresh\":true}"), "claude"), "refresh") == "refreshed", "The first refresh failed.");
+            var next = Fresh(CallTool(server, "get_limits", "{\"refresh\":true}"), "claude");
+            Assert(Json.Str(next, "refresh") == "cached", "The next call used the older snapshot: " + Json.Str(next, "refresh"));
+        }
+
+        private static void RefreshLimits()
+        {
+            NetworkBackoff.Clear();
+            // A service that keeps failing: the new reading is as old as before.
+            var worker = new FakeWorker(OldClaude);
+            var snap = OldClaude();
+            var server = new McpServer(() => snap, () => false, worker.Gate, TimeSpan.FromSeconds(5));
+
+            NetworkBackoff.Set("claude", DateTime.Now.AddMinutes(10));
+            var blocked = Fresh(CallTool(server, "get_limits", "{\"service\":\"claude\",\"refresh\":true}"), "claude");
+            Assert(Json.Str(blocked, "refresh") == "backoff" && Json.Str(blocked, "retry_after") != null && worker.Invalidated.Count == 0, "Retry-After was not respected.");
+            NetworkBackoff.Clear();
+
+            var failed = Fresh(CallTool(server, "get_limits", "{\"service\":\"claude\",\"refresh\":true}"), "claude");
+            Assert(Json.Str(failed, "refresh") == "unchanged", "A failed read was reported as refreshed.");
+            var again = Fresh(CallTool(server, "get_limits", "{\"service\":\"claude\",\"refresh\":true}"), "claude");
+            Assert(Json.Str(again, "refresh") == "too_soon" && Json.Str(again, "retry_after") != null && worker.Invalidated.Count == 1, "A second refresh within a minute reached the service.");
+
+            var paused = new McpServer(() => snap, () => false, new FakeWorker(Fixture, true).Gate, TimeSpan.FromSeconds(5));
+            Assert(Json.Str(Fresh(CallTool(paused, "get_limits", "{\"refresh\":true}"), "claude"), "refresh") == "paused", "A paused collection was awaited.");
+
+            var silent = new McpServer(() => snap, () => false, new FakeWorker(Fixture, false, false).Gate, TimeSpan.FromMilliseconds(400));
+            var late = CallTool(silent, "get_limits", "{\"refresh\":true}");
+            Assert(Json.Str(Fresh(late, "claude"), "refresh") == "timed_out" && ((IList)late["services"]).Count == 2, "A timeout did not return the previous reading.");
+        }
+
+        private static void SuggestUnknown()
+        {
+            var snap = Fixture();
+            var stale = new ProviderState { Id = "aaa", Name = "Stale", Usage = new Usage { Source = "cache", At = DateTime.Now.AddHours(-1) } };
+            stale.Usage.Windows.Add(new UsageWindow { Label = "Day", Short = UsageWindow.ShortDay, Used = 10 });
+            // A service with a model list but no readable usage at all.
+            var unknown = new ProviderState { Id = "nvidia", Name = "NVIDIA" };
+            unknown.Catalogue = new Catalogue { ReadAt = DateTime.Now, Models = new List<FreeModel> { new FreeModel { Id = "n/free", Name = "Free" } } };
+            snap.Providers.Add(unknown);
+            snap.Providers.Add(stale);
+            var rows = ((IList)CallTool(new McpServer(() => snap, () => false), "suggest_service", "{}")["services"]).OfType<Dictionary<string, object>>().ToList();
+            Assert(rows.Select(r => Json.Str(r, "service")).SequenceEqual(new[] { "openrouter", "aaa", "claude", "nvidia" }),
+                "Wrong order: " + string.Join(",", rows.Select(r => Json.Str(r, "service"))));
+            var last = rows.Last();
+            Assert(last.ContainsKey("remaining_percent") && last["remaining_percent"] == null && Json.Str(last, "quota") == "unknown", "Unknown room was not reported as unknown.");
+            Assert(Json.Bool(rows[1], "stale"), "A stale reading is not marked.");
+        }
+
+        private static void RetryAfter()
+        {
+            var now = new DateTime(2026, 11, 2, 12, 0, 0, DateTimeKind.Utc);
+            Assert(NetworkBackoff.Parse("120", now) == TimeSpan.FromSeconds(120), "Seconds were misread.");
+            Assert(NetworkBackoff.Parse("Mon, 02 Nov 2026 12:01:30 GMT", now) == TimeSpan.FromSeconds(90), "An HTTP date was misread.");
+            Assert(NetworkBackoff.Parse("Mon, 02 Nov 2026 11:00:00 GMT", now) == TimeSpan.Zero, "A past date gave a negative delay.");
+            Assert(NetworkBackoff.Parse("9999999", now) == TimeSpan.FromHours(24), "A huge delay was not capped.");
+            Assert(NetworkBackoff.Parse("soon", now) == null && NetworkBackoff.Parse("-5", now) == null, "An invalid value was accepted.");
         }
 
         private static void Relay()
@@ -215,6 +413,38 @@ namespace AIMeter
             Assert(McpClients.WithToml(null, "ps.exe", args).StartsWith("[mcp_servers.ai-meter]\n", StringComparison.Ordinal), "A new file is wrong.");
         }
 
+        private static void AntigravityCli()
+        {
+            string home = Path.Combine(Path.GetTempPath(), "aimeter-agy-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Func<McpClients.Client> find = () => McpClients.Known(home, Path.Combine(home, "AppData"), null).Single(c => c.Id == "antigravity-cli");
+                Directory.CreateDirectory(Path.Combine(home, ".gemini"));
+                Assert(!find().Installed, "A bare .gemini folder, left by Gemini CLI, counts as Antigravity CLI.");
+                Assert(McpClients.Known(home, Path.Combine(home, "AppData"), null).All(c => c.Id != "gemini"), "Gemini CLI is still listed.");
+
+                Directory.CreateDirectory(Path.Combine(home, @".gemini\antigravity-cli"));
+                var agy = find();
+                Assert(agy.Installed && agy.ConfigPath == Path.Combine(home, @".gemini\config\mcp_config.json"), "Antigravity CLI is not found or edits the wrong file.");
+
+                // agy creates its MCP file empty: it must read as no servers, not as a file AI Meter refuses.
+                Directory.CreateDirectory(Path.GetDirectoryName(agy.ConfigPath));
+                File.WriteAllText(agy.ConfigPath, "");
+                Assert(!McpClients.IsConnected(agy), "An empty file reads as connected.");
+                string relay = @"C:\Users\x\AppData\Roaming\AIMeter\mcp.ps1";
+                McpClients.Connect(agy, relay);
+                var entry = Json.Obj(Json.Obj(Json.Parse(File.ReadAllText(agy.ConfigPath)), "mcpServers"), "ai-meter");
+                Assert(entry != null && Json.Str(entry, "command") == McpClients.PowerShell(false) && !entry.ContainsKey("type"), "Wrong Antigravity CLI entry.");
+                Assert(McpClients.IsConnected(agy) && File.ReadAllText(agy.ConfigPath + ".aimeter-backup") == "", "The empty file was not kept as a backup.");
+
+                File.WriteAllText(agy.ConfigPath, "{\"mcpServers\":{\"other\":{\"command\":\"node\",\"args\":[],\"disabled\":true},\"ai-meter\":{\"command\":\"old\",\"args\":[],\"disabled\":false}}}");
+                McpClients.Disconnect(agy);
+                var servers = Json.Obj(Json.Parse(File.ReadAllText(agy.ConfigPath)), "mcpServers");
+                Assert(servers.Keys.Single() == "other" && Json.Obj(servers, "other")["disabled"] is bool, "Disconnecting changed agy's other servers.");
+            }
+            finally { if (Directory.Exists(home)) Directory.Delete(home, true); }
+        }
+
         private static void Commands()
         {
             // A user name with an apostrophe must survive both shells' single quotes.
@@ -225,9 +455,10 @@ namespace AIMeter
                 "The Claude Code command for PowerShell is wrong.");
             Assert(McpClients.Command("codex", relay, true) == "codex mcp add ai-meter -- '" + McpClients.PowerShell(true) + "' " + flags + @"'C:\Users\O'\''Brien\AppData\Roaming\AIMeter\mcp.ps1'",
                 "The Codex command for WSL is wrong.");
-            string gemini = McpClients.Command("gemini", relay, true);
-            Assert(gemini.StartsWith("gemini mcp add --scope user ai-meter '/mnt/c/", StringComparison.Ordinal) && gemini.Contains("powershell.exe' -- -NoProfile"),
-                "Gemini CLI does not get the command before -- and its flags after.");
+            Assert(McpClients.Command("antigravity-cli", relay, true) == "agy mcp add ai-meter '" + McpClients.PowerShell(true) + "' -- " + flags + @"'C:\Users\O'\''Brien\AppData\Roaming\AIMeter\mcp.ps1'",
+                "Antigravity CLI does not get the command before -- and its flags after.");
+            Assert(McpClients.Command("antigravity-cli", relay, false) == "agy mcp add ai-meter " + windows + " '--' " + flags + @"'C:\Users\O''Brien\AppData\Roaming\AIMeter\mcp.ps1'",
+                "The Antigravity CLI command for PowerShell is wrong.");
         }
     }
 }

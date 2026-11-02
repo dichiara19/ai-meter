@@ -1,0 +1,7 @@
+{
+  "id": "codex",
+  "name": "Codex",
+  "programs": { "windows": ["codex"], "wsl": ["codex"] },
+  "folders": [".codex"],
+  "package": "@openai/codex"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "gemini",
+  "name": "Gemini CLI",
+  "programs": { "windows": ["gemini"], "wsl": ["gemini"] },
+  "folders": [".gemini/tmp"],
+  "package": "@google/gemini-cli"
+}
