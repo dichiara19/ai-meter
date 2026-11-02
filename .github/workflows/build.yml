@@ -22,7 +22,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Release tags: vX.Y.Z (stable), vX.Y.Z-beta.N or vX.Y.Z-rc.N (pre-releases). The numeric part must be the
       # assembly version and the whole tag the informational version, so a tag cannot ship a binary that reports
@@ -132,7 +132,7 @@ jobs:
   plugin-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Coordinator plugin tests (fake AI Meter and fake agents)
         run: node --test plugins/ai-meter/tests/delegate.test.mjs
@@ -144,7 +144,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v8
         with:
