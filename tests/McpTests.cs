@@ -26,6 +26,7 @@ namespace AIMeter
             test("A client that disconnects abruptly leaves the MCP pipe serving", AbruptDisconnect);
             test("Connecting an app adds only AI Meter's JSON entry and keeps the rest", JsonEdits);
             test("Codex TOML gains and loses only AI Meter's tables", TomlEdits);
+            test("Antigravity CLI is found by its own folder and its empty MCP file is connected", AntigravityCli);
             test("Command-line installation quotes paths and places -- for each agent", Commands);
         }
 
@@ -371,6 +372,38 @@ namespace AIMeter
             Assert(McpClients.WithToml(null, "ps.exe", args).StartsWith("[mcp_servers.ai-meter]\n", StringComparison.Ordinal), "A new file is wrong.");
         }
 
+        private static void AntigravityCli()
+        {
+            string home = Path.Combine(Path.GetTempPath(), "aimeter-agy-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Func<McpClients.Client> find = () => McpClients.Known(home, Path.Combine(home, "AppData"), null).Single(c => c.Id == "antigravity-cli");
+                Directory.CreateDirectory(Path.Combine(home, ".gemini"));
+                Assert(!find().Installed, "A bare .gemini folder, left by Gemini CLI, counts as Antigravity CLI.");
+                Assert(McpClients.Known(home, Path.Combine(home, "AppData"), null).All(c => c.Id != "gemini"), "Gemini CLI is still listed.");
+
+                Directory.CreateDirectory(Path.Combine(home, @".gemini\antigravity-cli"));
+                var agy = find();
+                Assert(agy.Installed && agy.ConfigPath == Path.Combine(home, @".gemini\config\mcp_config.json"), "Antigravity CLI is not found or edits the wrong file.");
+
+                // agy creates its MCP file empty: it must read as no servers, not as a file AI Meter refuses.
+                Directory.CreateDirectory(Path.GetDirectoryName(agy.ConfigPath));
+                File.WriteAllText(agy.ConfigPath, "");
+                Assert(!McpClients.IsConnected(agy), "An empty file reads as connected.");
+                string relay = @"C:\Users\x\AppData\Roaming\AIMeter\mcp.ps1";
+                McpClients.Connect(agy, relay);
+                var entry = Json.Obj(Json.Obj(Json.Parse(File.ReadAllText(agy.ConfigPath)), "mcpServers"), "ai-meter");
+                Assert(entry != null && Json.Str(entry, "command") == McpClients.PowerShell(false) && !entry.ContainsKey("type"), "Wrong Antigravity CLI entry.");
+                Assert(McpClients.IsConnected(agy) && File.ReadAllText(agy.ConfigPath + ".aimeter-backup") == "", "The empty file was not kept as a backup.");
+
+                File.WriteAllText(agy.ConfigPath, "{\"mcpServers\":{\"other\":{\"command\":\"node\",\"args\":[],\"disabled\":true},\"ai-meter\":{\"command\":\"old\",\"args\":[],\"disabled\":false}}}");
+                McpClients.Disconnect(agy);
+                var servers = Json.Obj(Json.Parse(File.ReadAllText(agy.ConfigPath)), "mcpServers");
+                Assert(servers.Keys.Single() == "other" && Json.Obj(servers, "other")["disabled"] is bool, "Disconnecting changed agy's other servers.");
+            }
+            finally { if (Directory.Exists(home)) Directory.Delete(home, true); }
+        }
+
         private static void Commands()
         {
             // A user name with an apostrophe must survive both shells' single quotes.
@@ -381,9 +414,10 @@ namespace AIMeter
                 "The Claude Code command for PowerShell is wrong.");
             Assert(McpClients.Command("codex", relay, true) == "codex mcp add ai-meter -- '" + McpClients.PowerShell(true) + "' " + flags + @"'C:\Users\O'\''Brien\AppData\Roaming\AIMeter\mcp.ps1'",
                 "The Codex command for WSL is wrong.");
-            string gemini = McpClients.Command("gemini", relay, true);
-            Assert(gemini.StartsWith("gemini mcp add --scope user ai-meter '/mnt/c/", StringComparison.Ordinal) && gemini.Contains("powershell.exe' -- -NoProfile"),
-                "Gemini CLI does not get the command before -- and its flags after.");
+            Assert(McpClients.Command("antigravity-cli", relay, true) == "agy mcp add ai-meter '" + McpClients.PowerShell(true) + "' -- " + flags + @"'C:\Users\O'\''Brien\AppData\Roaming\AIMeter\mcp.ps1'",
+                "Antigravity CLI does not get the command before -- and its flags after.");
+            Assert(McpClients.Command("antigravity-cli", relay, false) == "agy mcp add ai-meter " + windows + " '--' " + flags + @"'C:\Users\O''Brien\AppData\Roaming\AIMeter\mcp.ps1'",
+                "The Antigravity CLI command for PowerShell is wrong.");
         }
     }
 }

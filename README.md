@@ -76,7 +76,7 @@ Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now,
 | **Desktop widget** | Off by default. Always stays *below* your windows, like part of the wallpaper. Compact cards; click a card header to show its sessions. Drag it by its header. |
 | **Compact overlay** | A tiny always-on-top pill (off by default) with two micro buttons: collapse to a live ring icon, or close. Never steals focus, hides itself during full-screen games, videos and presentations, shows details on hover. |
 | **Settings** | Built like Windows 11 Settings: connected services, what to show, where, start with Windows, theme, refresh rate, live resource usage. |
-| **AI apps (MCP)** | Claude Desktop, Claude Code, Codex, Gemini CLI, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's read-only MCP server. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
+| **AI apps (MCP)** | Claude Desktop, Claude Code, Codex, Antigravity CLI, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's read-only MCP server. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
 | **Usage history** | Local quota cycles, spending, session tokens, models and tools, daily totals and consumption signals. Optional feedback records whether the result was worth the consumption. Open from the notification-area menu or Settings → Usage history. |
 
 For each service: remaining share of the **5-hour** and **weekly** limits with reset times, plus the active sessions with title, model and status.
