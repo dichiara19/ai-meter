@@ -4,6 +4,7 @@
   "monogram": "G",
   "description": "Models your Gemini API key can use, with their token limits. Google does not let a key read its quota.",
   "color": { "light": "#1A73E8", "dark": "#8AB4F8" },
+  "logo": { "image": "gemini.png" },
   "detect": { "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"] },
   "auth": { "type": "key", "ids": ["google", "gemini"], "env": ["GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"], "page": "https://aistudio.google.com/apikey" },
   "freeModels": {

@@ -4,6 +4,7 @@
   "monogram": "N",
   "description": "Models of the NVIDIA API Catalog for your API key. NVIDIA does not publish your limits.",
   "color": { "light": "#4E7A00", "dark": "#76B900" },
+  "logo": { "image": "nvidia.png" },
   "detect": { "env": ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"] },
   "auth": { "type": "key", "ids": ["nvidia", "nvidia-nim"], "env": ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"], "page": "https://build.nvidia.com/settings/api-keys" },
   "freeModels": {
