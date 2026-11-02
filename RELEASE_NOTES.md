@@ -1,9 +1,20 @@
-## What changed in 0.8.5
+## What changed in 0.8.6
 
-- **Running Pi sessions found anywhere.** AI Meter reads the session folder of Pi processes that are running now, also when Pi is started by a script with `--session-dir`, `PI_CODING_AGENT_DIR` or `PI_CODING_AGENT_SESSION_DIR`, or inside a `bwrap` sandbox. Windows processes are read from their command line; WSL processes from `\\wsl.localhost`, only while the distribution is already running. Today's model costs include these sessions.
-- **Sessions on their service's card.** A Pi session that uses OpenRouter, Experiential Labs, Claude, ChatGPT, Copilot or Antigravity is shown on that service's card. Sessions with providers that have no card stay under Local models → Coding agents.
-- **Session lists fold in the taskbar window too.** Before, only the desktop widget could fold them. The Local models card now folds its agent sessions as well, and the choice is shared between the two windows.
-- **Free models you can use.** Click the free-model count to open the full list, with each model's end date or context window. Click a model to copy its ID for Pi, OpenCode or your scripts.
+- **AI apps can read AI Meter (MCP).** AI Meter now includes a read-only [MCP](https://modelcontextprotocol.io) server. Connected AI apps and coding agents can ask it:
+  - how much room your limits have;
+  - which sessions are running;
+  - which models are free;
+  - what you spent today;
+  - which local models are loaded;
+  - which service has the most room left.
+
+  It never shares keys, tokens or account identities. Session titles are shared only when you turn on *Share session titles*.
+- **Connect apps in one click.** **Settings → AI apps** lists the apps it finds on this PC and in WSL: Claude Desktop, Claude Code, Codex, Gemini CLI, OpenCode, Pi, Cursor and Visual Studio Code. Turn an app on, then restart it.
+  - AI Meter changes only its own `ai-meter` entry and keeps a copy of the previous file.
+  - **Copy configuration** gives the entry for any other app that can start a local MCP server.
+- **Or from the command line.** For Claude Code, Codex and Gemini CLI, the **Windows** and **WSL** buttons copy the agent's own `mcp add` command with your paths filled in.
+
+See [docs/MCP.md](https://github.com/dichiara19/ai-meter/blob/main/docs/MCP.md) for the tools and the commands.
 
 ## Download
 
