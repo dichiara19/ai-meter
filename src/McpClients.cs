@@ -135,6 +135,41 @@ namespace AIMeter
             return JsonText.Indented(new Dictionary<string, object> { { "mcpServers", new Dictionary<string, object> { { EntryName, entry } } } });
         }
 
+        // ------------------------------------------------------------ command-line installation
+
+        /// <summary>Command-line agents whose own CLI can add an MCP server, by client id and display name.</summary>
+        public static readonly string[][] CommandLineClients =
+        {
+            new[] { "claude-code", "Claude Code" },
+            new[] { "codex", "Codex" },
+            new[] { "gemini", "Gemini CLI" },
+        };
+
+        /// <summary>
+        /// The agent's own "mcp add" command, for Windows PowerShell or for a WSL (bash) shell.
+        /// Claude Code and Codex take the server command after "--"; Gemini CLI takes it before, with its
+        /// dash-prefixed arguments after "--". In PowerShell the separator is quoted: PowerShell drops a bare "--"
+        /// when the agent is an npm-installed .ps1 shim, and the agent would then read -NoProfile as its own option.
+        /// </summary>
+        public static string Command(string clientId, string relay, bool wsl)
+        {
+            Func<string, string> quote = wsl
+                ? (Func<string, string>)(s => "'" + s.Replace("'", "'\\''") + "'")
+                : s => "'" + s.Replace("'", "''") + "'";
+            string separator = wsl ? "--" : "'--'";
+            var args = Arguments(relay);
+            args[args.Count - 1] = quote(relay);
+            string powerShell = quote(PowerShell(wsl));
+            string flags = string.Join(" ", args);
+            switch (clientId)
+            {
+                case "claude-code": return "claude mcp add --scope user " + EntryName + " " + separator + " " + powerShell + " " + flags;
+                case "codex": return "codex mcp add " + EntryName + " " + separator + " " + powerShell + " " + flags;
+                case "gemini": return "gemini mcp add --scope user " + EntryName + " " + powerShell + " " + separator + " " + flags;
+                default: throw new ArgumentException("No command-line installation for " + clientId, "clientId");
+            }
+        }
+
         // ------------------------------------------------------------ JSON
 
         private static string ServersKey(Format f)

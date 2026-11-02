@@ -19,6 +19,7 @@ namespace AIMeter
             test("A client that disconnects abruptly leaves the MCP pipe serving", AbruptDisconnect);
             test("Connecting an app adds only AI Meter's JSON entry and keeps the rest", JsonEdits);
             test("Codex TOML gains and loses only AI Meter's tables", TomlEdits);
+            test("Command-line installation quotes paths and places -- for each agent", Commands);
         }
 
         private static void Assert(bool condition, string message)
@@ -212,6 +213,21 @@ namespace AIMeter
             Assert(!removed.Contains("ai-meter") && removed.Contains("model = \"gpt-6\"") && removed.Contains("[profiles.fast]"), "Disconnecting removed the wrong tables.");
             Assert(McpClients.WithoutToml(removed) == null, "Disconnecting changed a file without AI Meter.");
             Assert(McpClients.WithToml(null, "ps.exe", args).StartsWith("[mcp_servers.ai-meter]\n", StringComparison.Ordinal), "A new file is wrong.");
+        }
+
+        private static void Commands()
+        {
+            // A user name with an apostrophe must survive both shells' single quotes.
+            string relay = @"C:\Users\O'Brien\AppData\Roaming\AIMeter\mcp.ps1";
+            string flags = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ";
+            string windows = "'" + McpClients.PowerShell(false) + "'";
+            Assert(McpClients.Command("claude-code", relay, false) == "claude mcp add --scope user ai-meter '--' " + windows + " " + flags + @"'C:\Users\O''Brien\AppData\Roaming\AIMeter\mcp.ps1'",
+                "The Claude Code command for PowerShell is wrong.");
+            Assert(McpClients.Command("codex", relay, true) == "codex mcp add ai-meter -- '" + McpClients.PowerShell(true) + "' " + flags + @"'C:\Users\O'\''Brien\AppData\Roaming\AIMeter\mcp.ps1'",
+                "The Codex command for WSL is wrong.");
+            string gemini = McpClients.Command("gemini", relay, true);
+            Assert(gemini.StartsWith("gemini mcp add --scope user ai-meter '/mnt/c/", StringComparison.Ordinal) && gemini.Contains("powershell.exe' -- -NoProfile"),
+                "Gemini CLI does not get the command before -- and its flags after.");
         }
     }
 }

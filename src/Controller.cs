@@ -106,10 +106,11 @@ namespace AIMeter
             ThreadPool.RegisterWaitForSingleObject(showSignal, (s, t) => ui.BeginInvoke(new Action(ToggleFlyout)), null, -1, false);
             ThreadPool.RegisterWaitForSingleObject(settingsSignal, (s, t) => ui.BeginInvoke(new Action(OpenSettings)), null, -1, false);
 
-            // AI apps connected through MCP read the latest snapshot; refresh their relay so it names this copy.
+            // AI apps connected through MCP read the latest snapshot. The relay is written at every start, so it names
+            // this copy and exists before anyone adds AI Meter with an agent's own "mcp add" command.
             mcpHost = new McpPipeHost(new McpServer(() => Last, () => Settings.McpTitles));
             mcpHost.Start();
-            try { if (File.Exists(McpRelay.FilePath)) McpRelay.Write(); } catch (Exception ex) { Program.LogError("mcp-relay", ex); }
+            try { McpRelay.Write(); } catch (Exception ex) { Program.LogError("mcp-relay", ex); }
 
             var worker = new Thread(WorkerLoop) { IsBackground = true, Name = "AIMeter.Collector", Priority = ThreadPriority.BelowNormal };
             worker.Start();

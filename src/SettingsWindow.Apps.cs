@@ -37,6 +37,16 @@ namespace AIMeter
                     Button(L.T("Copy configuration"), CopyMcpSnippet, false)),
                 Row(Ui.Glyph("", 20, "Text"), L.T("Share session titles"), L.T("Titles often repeat your first request. When off, apps see only the agent, status, model and provider of each session."),
                     Toggle(S.McpTitles, v => { S.McpTitles = v; S.Save(); })));
+
+            // Agents can also add AI Meter themselves; the buttons copy each agent's own "mcp add" command.
+            Header(L.T("From the command line"));
+            Hint(L.T("Prefer a terminal? Copy the command for your CLI, paste it into PowerShell on Windows or into a WSL shell, then restart the CLI."));
+            Group(McpClients.CommandLineClients.Select(cli =>
+            {
+                string id = cli[0];
+                return Row(null, cli[1], null,
+                    Pair(Button("Windows", () => CopyMcpCommand(id, false), false), Button("WSL", () => CopyMcpCommand(id, true), false)));
+            }).ToArray());
         }
 
         private void ConnectApp(McpClients.Client c, bool on)
@@ -64,8 +74,19 @@ namespace AIMeter
 
         private void CopyMcpSnippet()
         {
+            CopyMcpText(() => McpClients.Snippet(McpRelay.Write()));
+        }
+
+        private void CopyMcpCommand(string clientId, bool wsl)
+        {
+            CopyMcpText(() => McpClients.Command(clientId, McpRelay.Write(), wsl));
+        }
+
+        /// <summary>Copy text that names the relay; writing the relay first makes sure the pasted command works.</summary>
+        private void CopyMcpText(Func<string> text)
+        {
             string failure = null;
-            try { Clipboard.SetText(McpClients.Snippet(McpRelay.Write())); }
+            try { Clipboard.SetText(text()); }
             catch (IOException ex) { failure = ex.Message; }
             catch (UnauthorizedAccessException ex) { failure = ex.Message; }
             catch (System.Runtime.InteropServices.ExternalException ex) { failure = ex.Message; }
