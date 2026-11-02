@@ -132,7 +132,7 @@ Each model from `list_free_models` says how its price is known and what limits a
   - `blocking` names what stops a task now: the service asked AI Meter to wait (`rate_limited`), or a reported counter is used up (`exhausted`, with `until`).
   - Without a known concurrency limit, `max_new_jobs_now` is at most 1.
   - AI Meter decides how many tasks start. It does not pace the requests a running agent makes.
-  - Counters of AI Meter's own tasks arrive with the task runner.
+  - Counters of delegated tasks arrive with capacity leases, which coordinator plugins claim and release.
 
 ### Choosing where to run a task: `list_candidates`
 

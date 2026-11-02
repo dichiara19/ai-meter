@@ -34,7 +34,7 @@ M1 implements this section. The reference is [docs/MCP.md, *Fresh data*](../MCP.
 - `unsupported` is not reported yet. M1 cannot tell "no endpoint" from "no reading". M2, which separates catalogues from usage, adds it.
 - The refresh outcome values are the ones listed in docs/MCP.md. `shared` is internal, and `failed` became `unchanged`.
 
-`start_job` (§3) still always makes sure the quotas it relies on are fresh, unless a shared collection finished less than 30 seconds earlier.
+`claim_capacity` (§3) checks the pool's room on the latest reading. Plugins that need fresher quotas call `list_candidates` with `max_age_seconds` first.
 
 ## 2. Providers and execution candidates (M2, M3)
 
@@ -59,9 +59,9 @@ M1 implements this section. The reference is [docs/MCP.md, *Fresh data*](../MCP.
 
 ### 2.3 Limits of free models
 
-M2 implements this section in `list_free_models`; [docs/MCP.md](../MCP.md#free-models-and-their-limits) is the reference. Two parts are still to come: the `observed` counters, which need AI Meter's own jobs (M4), and `list_candidates` (M3).
+M2 implements this section in `list_free_models`; [docs/MCP.md](../MCP.md#free-models-and-their-limits) is the reference. Still to come: the `observed` counters, which come from the outcomes released with capacity leases (M4, §3).
 
-A coordinator can split work sensibly only if it knows, for each free model, what one request may contain and how much the model can still take. Free tiers are mostly made of limits, so these limits are part of the contract from M2 on. They do not wait for the runner.
+A coordinator can split work sensibly only if it knows, for each free model, what one request may contain and how much the model can still take. Free tiers are mostly made of limits, so these limits are part of the contract from M2 on. They do not wait for delegation.
 
 Today (0.8.6) `list_free_models` returns the context window, tool and reasoning support, and the last free day. It returns no output cap and no rate limit.
 
@@ -160,11 +160,11 @@ M3 implements this section in `src/Candidates.cs` and `list_candidates`; [docs/M
 - The cost policies are `free_only` and `free_or_unconfirmed`. A paid policy waits until model lists carry prices for paid models.
 - `CredentialReference` is the `credential` id with its runtime and place. The source app is not returned, since only each agent's own keys count.
 - Runtimes are a table of supported agents (Pi, OpenCode, Crush), not a single one: no particular agent is required.
-- The `observed` counters and reservations come with the runner (M4).
+- Reservations and the `observed` counters come with capacity leases (M4, §3).
 
-**`list_candidates` (M3, read tool).** It takes the same `requirements` and `cost_policy` as `start_job`. It returns the ordered candidates, each with its `limits` and `headroom`, plus the reason each excluded candidate was dropped.
+**`list_candidates` (M3, read tool).** It takes the task's `requirements` and a `cost_policy`. It returns the ordered candidates, each with its `limits` and `headroom`, plus the reason each excluded candidate was dropped.
 
-This lets a coordinator plan several tasks at once, such as how many parallel jobs to start and on which pools, before it calls `start_job`. `start_job` still re-checks and reserves capacity atomically, because the answer can change between the two calls.
+This lets a coordinator plan several tasks at once, such as how many parallel jobs to start and on which pools, before it calls `claim_capacity`. `claim_capacity` still re-checks and reserves capacity atomically, because the answer can change between the two calls.
 
 ### 2.5 Provider notes
 
@@ -176,73 +176,56 @@ This lets a coordinator plan several tasks at once, such as how many parallel jo
   - The aliases `nvidia` and `nvidia-nim` are distinct providers.
   - The catalogue and authentication are exposed even when no remainder is readable.
 
-## 3. Jobs (M4)
+## 3. Dispatch and capacity leases (M4)
 
-These tools are listed only while execution is turned on ([ADR 0001](../adr/0001-optional-agent-orchestration.md), decision 2).
+AI Meter runs no jobs ([ADR 0002](../adr/0002-delegation-through-coordinator-plugins.md)). A coordinator plugin runs the agent. AI Meter describes how to run it, and keeps cooperative leases on pool capacity.
 
-### 3.1 `start_job`
+### 3.1 `describe_dispatch`
+
+Input: a candidate from `list_candidates`, identified by `service`, `model`, `runtime` and `where`.
+
+Output:
 
 ```json
 {
-  "task": "Add a regression test for …",
-  "workspace": "C:\\src\\project",
-  "mode": "read_only | modify_in_worktree",
-  "requirements": { "tools": true, "min_context": 64000, "min_output_tokens": 8000 },
-  "cost_policy": "free_only",
-  "candidate": "optional explicit candidate id",
-  "timeout_seconds": 1800,
-  "max_turns": 40,
-  "max_output_bytes": 1048576,
-  "idempotency_key": "client-chosen string"
+  "runtime": "pi", "where": "wsl", "version": "1.4.0",
+  "program": "pi",
+  "arguments": ["--provider", "openrouter", "--model", "z/large:free", "…"],
+  "task_input": "stdin",
+  "output": { "format": "jsonl", "final": "…" },
+  "workspace_flag": null,
+  "notes": "…"
 }
 ```
 
-- `workspace` must be inside a folder authorised in Settings.
-- `task` is passed to the runtime as data, never through a shell. There is no field for an arbitrary command.
-- `start_job` returns at once with `job_id` and `queued`. No call stays open for the life of the job.
-- Repeating `idempotency_key` returns the existing job. It never starts a second process.
+- The description comes from a data table per agent, one row per verified version range. The M4 spike fills it, and nothing is written from memory.
+- `arguments` is an array. The plugin starts the program without a shell and passes the task as data, through stdin or a single argument, as `task_input` says. There is no field for an arbitrary command, and the task text never enters the description.
+- `where: "wsl"` means the plugin starts the agent inside WSL, which must already be running. AI Meter never starts WSL.
+- An agent without a verified row returns `unsupported`, and the reason.
 
-### 3.2 States
+### 3.2 Leases
 
-```
-queued → running → completed | failed | cancelled | timed_out
-                 ↘ cancelling → cancelled
-interrupted: AI Meter restarted and could not reconcile the process
-```
+| Tool | Input | Output |
+| --- | --- | --- |
+| `claim_capacity` | `pool`, `service`, `model`, `runtime`, `ttl_seconds` (default 1800, at most 7200), `client` (a free label such as `claude-code`) | `lease_id`, `expires_at`; or `refused` with `blocking` when the pool has no room |
+| `renew_capacity` | `lease_id`, `ttl_seconds` | New `expires_at`. Long tasks renew before expiry |
+| `release_capacity` | `lease_id`, `outcome` (`completed`, `failed`, `cancelled`, `timed_out`), `requests`, `rate_limited` (count, and `retry_after` when the agent saw one), `tokens` (input, output, when known) | `released`. Idempotent: a second release changes nothing |
 
-Every transition is stored with its time.
+- **Headroom.** While a lease is active, `max_new_jobs_now` of its pool counts it, for every caller of `list_free_models` and `list_candidates`. A claim that would exceed the pool's room is refused, and the check and the claim happen together.
+- **Expiry.** A lease that reaches `expires_at` without a release ends with outcome `unknown`. A crashed plugin cannot block a pool.
+- **Rate limits.** A released `rate_limited` with `retry_after` puts the pool in backoff, as an AI Meter read that gets a `429` does.
+- **Observed counters.** Released outcomes feed `observed` (§2.3) with `coverage: "ai_meter_leases_only"`. Values the provider reports stay authoritative.
+- **What is stored.** Leases are kept in a small local store, with their own retention. It holds pool, service, model, runtime, client, times and the outcome counters above. Never task text, code, logs, paths or keys.
 
-On restart, AI Meter reconciles running jobs by process id **and** process start time, so a reused PID is never mistaken for a job.
+### 3.3 What the plugins own
 
-### 3.3 Other tools
+These belong to the plugin, not to AI Meter:
+- status, result and cancellation;
+- background runs and their logs;
+- the worktree for tasks that change a repository: read-only by default, never merged automatically;
+- retries after a `429`. Before any side effect, a plugin may pick another candidate. After one, it never retries blindly.
 
-| Tool | Returns |
-| --- | --- |
-| `get_job` | State, timestamps, candidate used, worktree path, last progress line |
-| `list_jobs` | Jobs started by AI Meter, newest first. Never sessions started by other programs |
-| `cancel_job` | Cancels the job's own process tree. Idempotent |
-| `get_job_result` | The result below. Output and logs are paged with `cursor` and `max_bytes` |
-
-`resume_job` is added only after the spike shows that the runtime can really resume.
-
-### 3.4 Result
-
-- summary;
-- exit status;
-- changed files, with the patch or the worktree commit;
-- checks actually run, each with its outcome;
-- known tokens and cost, with the limits of that measurement;
-- truncation flags.
-
-Logs and patches follow the job store's retention, not the history archive's.
-
-### 3.5 Rate limits and failover
-
-- On `429`, honour `Retry-After`. Then either requeue the job or pick another allowed candidate before any side effect.
-- A rate-limit response puts the whole pool in backoff, not just the job, and is recorded in that pool's `observed` counters (§2.3).
-- Each job's result reports the requests and rate-limit responses the runtime exposes, so the counters improve as jobs run.
-- After a side effect, never retry blindly. Fail explicitly, or continue from a stored checkpoint.
-- `free_only` never falls back to a paid candidate.
+`free_only` never falls back to a paid candidate.
 
 ## 4. Versions
 
@@ -250,4 +233,4 @@ Logs and patches follow the job store's retention, not the history archive's.
 | --- | --- |
 | App | `AssemblyInfo.cs` / `Controller.Version` |
 | MCP contract | `serverInfo.version` stays the app version. A `contract` number in the `initialize` instructions is raised only on breaking changes |
-| Job store | Its own schema version, migrated transactionally like the history archive |
+| Lease store | Its own schema version, migrated transactionally like the history archive |

@@ -29,9 +29,9 @@ This file is a plan. Nothing here exists in code until a milestone's pull reques
 
 ## Architecture
 
-One job engine, one execution adapter per supported agent, provider adapters, and thin client integrations. AI Meter keeps collection and the UI.
+AI Meter keeps collection and the UI, chooses where a task runs (`list_candidates`), describes how to run the chosen agent, and keeps cooperative capacity leases and the outcomes they report.
 
-The runner is optional and local, and its exact shape comes from the M4 spike ([ADR 0001](../adr/0001-optional-agent-orchestration.md), decision 5).
+A plugin per coordinator (Claude Code, Codex) runs the agent in the background and owns status, result and cancellation ([ADR 0002](../adr/0002-delegation-through-coordinator-plugins.md)). AI Meter has no job runner.
 
 The first version targets Windows. It uses WSL only when WSL is already running. Standalone Linux and macOS are out of scope.
 
@@ -43,25 +43,24 @@ The first version targets Windows. It uses WSL only when WSL is already running.
 | M1 | MCP freshness / `feat/mcp-freshness` | M0 | Real clients verified on Windows and WSL; refresh bypasses the right caches; timeout and concurrency tested; Settings → AI apps verified. The Store relay path moved to M6 |
 | M2 | NVIDIA and Gemini discovery, catalogues and free-model limits / `feat/provider-discovery` | M0, M1 contract | Keys found with fixtures; catalogues independent of quotas; `list_free_models` returns `limits` and `pool` for every free model of every supported provider, with source and `checked_at`; documented limits live in the provider JSON; unknown stays unknown |
 | M3 | Quota-aware candidate selection / `feat/execution-candidates` | M1, M2 | `list_candidates` with `headroom`; selection is deterministic; per-request caps filter; pools never add up; `free_only`, quota scope and `429` tested |
-| M4 | Agent spike, then runner MVP / `feat/agent-jobs` | M0; M3 for real routing | A job can be started, watched and cancelled; isolation and restart verified |
-| M5 | Claude Code and Codex adapters / `feat/client-delegation` | M4 | One real task from each client, in the foreground or background where supported, with result and cancellation |
+| M4 | Agent spike, dispatch descriptions and capacity leases / `feat/dispatch-leases` | M3 | For at least two agents, a verified non-interactive invocation on a free model, described as data. `describe_dispatch` returns it without the task text and without a shell string. `claim_capacity` and `release_capacity` make headroom account for leases, expire on their own, and feed `observed` counters. No task text, code or key is stored |
+| M5 | Claude Code and Codex plugins / `feat/coordinator-plugins` | M4 | One real task from each coordinator, through its plugin: choose, claim, run in the background, status, result, cancel, release. Read-only by default; changes in a new worktree; measured cost of coordinator, intermediary and agent |
 | M6 | Stabilisation, UX, packaging, release candidate | M1–M5 | End-to-end tests; upgrade from 0.8.6 verified; artefacts verified, including the MCP relay in the Store package; version decided |
 
 M1 and M2 can proceed independently after M0. A coding agent works on one milestone at a time unless it is explicitly told otherwise.
 
-A milestone may land as several small pull requests. Read-side improvements do not wait for the runner.
+A milestone may land as several small pull requests.
 
-**MVP for M4:**
-1. a read-only job;
-2. a modifying job that runs its tests in a worktree;
-3. At least two agents behind the same adapter interface (Pi, already installed, and a second one), so the interface is not shaped around one agent.
+**MVP for M4 and M5:**
+1. At least two agents with a verified dispatch description: Pi, already installed, and a second one. The description format must not be shaped around one agent.
+2. A read-only task, then a task that changes a repository in a new worktree, each run from a coordinator plugin with a lease.
 
 Not in the MVP:
 - a universal installer;
-- autonomous choice among many runtimes;
 - multi-provider resume;
 - remote execution;
-- a visual integration identical to native subagents.
+- a visual integration identical to native subagents;
+- reservation that binds clients which do not use leases.
 
 ## Spikes
 
@@ -79,7 +78,7 @@ Each spike records the version tested and what it observed, in the status log.
   - **Consequences.**
     - `codex app-server` and `claude -p` are candidate adapter interfaces next to Pi's and OpenCode's.
     - These plugins delegate to another paid agent, not to free models. Whether Codex can run free models through an OpenAI-compatible provider is still to be checked.
-    - A lighter route is also possible: AI Meter chooses the model and pool (`list_candidates`) and counts consumption, while the coordinators' own plugins run the task. Weigh it against the runner owned by AI Meter before building M4.
+    - A lighter route is also possible: AI Meter chooses the model and pool (`list_candidates`) and counts consumption, while the coordinators' own plugins run the task. **Chosen on 2026-11-02:** see [ADR 0002](../adr/0002-delegation-through-coordinator-plugins.md).
 - **Agents (Pi first, as it is installed here; then at least one more).**
   - Pick the structured interface available in the pinned version.
   - Check events, EOF, errors, cancellation, resume and the usage it reports.
@@ -104,15 +103,16 @@ Each spike records the version tested and what it observed, in the status log.
 | Catalogues | Missing price is not zero, expired model, unknown context or tools, missing quota, paid tier, expired sign-in |
 | Quotas | UTC and Pacific resets across daylight saving, shared project quotas, `429` and `Retry-After`, concurrent reservations, usage from other clients |
 | Free-model limits | Output cap below the task's need; context fits but output does not; two models in one pool; unknown concurrency gives at most one job; documented limit older than its `checked_at` policy; observed counters never shown as account-wide; headroom after reservations |
-| Runner | Paths with spaces, tasks containing shell characters, idempotency, timeout, crash, process-tree cancellation, restart, huge output, file isolation |
-| Integration | Real Pi with a tool-capable model; Claude Code and Codex; Windows, and WSL already running; no duplicate jobs |
+| Dispatch and leases | No task text in a dispatch description; arguments as an array, never a shell string; leases counted in headroom; expiry; double release; outcome counters; no task text or key stored |
+| Plugins | Paths with spaces, tasks containing shell characters, background run, status, result, cancellation, huge output, worktree isolation, lease always released or left to expire |
+| Integration | Real Pi and a second agent on a free model; Claude Code and Codex through their plugins; Windows, and WSL already running |
 | Compatibility | Existing MCP reads, previous settings and history, startup, script/EXE/MSIX packages, themes and translations |
 
 Automated tests use:
 - a controllable clock;
 - loopback servers;
 - fake credentials;
-- a fake runner.
+- fake agents for the plugins.
 
 They never use real keys or personal configuration. Live smoke tests are separate. They use enabled accounts and redacted logs, and record the client and runtime versions.
 
@@ -148,10 +148,10 @@ A test that cannot be run is recorded as **NOT RUN**, with the reason and the ga
 
 **Version numbers.**
 - **0.9.0:** operational MCP and the new providers (M1–M3).
-- **0.10.0, or 1.0.0-rc.N:** the runner, as a preview.
+- **0.10.0, or 1.0.0-rc.N:** dispatch, leases and the plugins, as a preview.
 - **1.0.0:** once the operational contract and the job lifecycle are stable and tested.
 
-Confirm these numbers again if other releases ship in between. The app, the MCP/job contract and the job store schema are versioned separately.
+Confirm these numbers again if other releases ship in between. The app, the MCP contract, the lease store schema and each plugin are versioned separately.
 
 **The release workflow publishes a release for every `v*` tag.** It does not distinguish prereleases.
 - Before any RC tag, change the workflow to set prerelease or draft correctly.
@@ -163,7 +163,7 @@ Confirm these numbers again if other releases ship in between. The app, the MCP/
 - **Version numbers:** align `Controller.Version` and the assembly versions. Search with `rg` for other occurrences, without rewriting examples or history.
 - **Notes and docs:** update RELEASE_NOTES, README, docs/MCP.md, provider docs and migration notes.
 - **MSIX:** the version comes from `AssemblyInfo`, is numeric and always increases. An RC suffix never goes into it.
-- **Runner:** the packages that promise the runner must include it. Today's packaging copies only `src/*.cs` and providers.
+- **Plugins:** they ship through each coordinator's plugin mechanism, not inside the app packages, and their install instructions name the AI Meter version they need.
 - **Upgrade:** test upgrade from 0.8.6, and rollback, on isolated copies of settings and history.
 - **Tag:** tag only the verified commit. Never move a published tag.
 - **Artefacts:**
@@ -174,7 +174,7 @@ Confirm these numbers again if other releases ship in between. The app, the MCP/
 
 **Rollback:**
 - turn execution off and keep monitoring and the read tools;
-- stop the jobs before updating;
+- let plugin tasks finish or cancel them from the coordinator before updating;
 - keep other clients' configurations.
 
 Fix forward. Never recreate an existing tag.

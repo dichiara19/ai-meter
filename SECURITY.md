@@ -26,7 +26,7 @@ Of particular interest:
 - loading of service definitions from `%APPDATA%\AIMeter\providers`;
 - requests to local model servers on `127.0.0.1`;
 - the MCP server: the per-user named pipe, the `mcp.ps1` relay, what its tools return, and the configuration files of other apps that it edits from Settings → AI apps;
-- once it ships, the optional task runner ([ADR 0001](docs/adr/0001-optional-agent-orchestration.md)): workspace authorisation, worktree isolation, the processes it starts and cancels, and where credentials go;
+- once they ship, delegation ([ADR 0002](docs/adr/0002-delegation-through-coordinator-plugins.md)): dispatch descriptions (no shell strings, no task text), capacity leases and what they store, and the coordinator plugins in `plugins/` (how they start agents, worktree isolation), and where credentials go;
 - the build and release pipeline in `.github/workflows`.
 
 Out of scope:

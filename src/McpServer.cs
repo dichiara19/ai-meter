@@ -457,7 +457,7 @@ namespace AIMeter
 
         /// <summary>
         /// A model's limits (docs/plans/orchestration-contracts.md section 2.3): per-request caps, its pool, the pool's
-        /// rate limits and the headroom left. Counters of the jobs AI Meter runs ("observed") arrive with the job runner.
+        /// rate limits and the headroom left. Counters of delegated tasks ("observed") arrive with capacity leases.
         /// </summary>
         private static Dictionary<string, object> LimitsJson(ProviderState p, FreeModel m)
         {
