@@ -12,7 +12,7 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | --- | --- | --- | --- | --- | --- |
 | M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
 | M1 MCP freshness | merged | [PR #18](https://github.com/dichiara19/ai-meter/pull/18), squash-merged as `972c7f3` | `f051b41` / `5eacffc` | `tests/run.ps1`: 95 passed. Live: relay from Windows; Claude Code, Codex and Antigravity CLI in WSL; Settings → AI apps. CI `build` green | Store relay path moved to M6 |
-| M2 Provider discovery | merged | [PR #21](https://github.com/dichiara19/ai-meter/pull/21), squash-merged as `4441b54` | `649bff3` / `048550f` | Rebased tree: 102 tests passed. CI `build` green (run 41470098975). Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: **NOT RUN** |
+| M2 Provider discovery | merged | [PR #21](https://github.com/dichiara19/ai-meter/pull/21), squash-merged as `4441b54` | `649bff3` / `048550f` | Rebased tree: 102 tests passed. CI `build` green (run 41470098975). Real NVIDIA and OpenRouter lists parsed | Live NVIDIA and Gemini reads with real keys: done 2026-11-02 (see the log). Neither catalogue states tool support, so neither gives candidates yet |
 | M3 Execution candidates | merged | [PR #22](https://github.com/dichiara19/ai-meter/pull/22), squash-merged as `79c28c2` | `4441b54` / `2b2d967` | Rebased tree: 108 tests passed. CI `build` green (run 41471025123). Live agent scan on the test PC | — |
 | M4 Dispatch descriptions and capacity leases | merged | [PR #26](https://github.com/dichiara19/ai-meter/pull/26), squash-merged as `ba8d1e3`; ADR 0002 as [PR #23](https://github.com/dichiara19/ai-meter/pull/23), `830837b` | `830837b` / `e52285d` | Rebased tree: 114 tests passed. CI `build` green (run 41475549785). Pi and OpenCode in WSL started from Windows with AI Meter's descriptions, live | — |
 | M5 Claude Code and Codex plugins | in_review | [PR #27](https://github.com/dichiara19/ai-meter/pull/27), `feat/coordinator-plugins` | `ba8d1e3` / see PR | `node --test`: 18 passed on Windows and in WSL; `tests/run.ps1` 114 passed. Live: Windows and WSL, Pi and OpenCode, read-only, `modify`, cancel; Claude Code 2.1.316 in WSL through the plugin; Pi against an AI Meter built from #30 (distribution, warnings, prices); cost measured | A task driven by Codex's own model, coordinators on native Windows and the interactive screens: **NOT RUN**. Merge after #29 and #30 (conflict in `docs/MCP.md`, steps order) |
@@ -64,6 +64,20 @@ Three things the PR marked as unverified are still unverified after the release,
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M2 checked live with real NVIDIA and Gemini keys.**
+  - **Setup.** The maintainer added both keys to Pi in WSL (`~/.pi/agent/auth.json`, under `nvidia` and `google`), and turned NVIDIA on in Settings. The AI Meter build was from #30.
+  - **Pi.** `pi auth check` answered `ready` for both. Pi lists 21 NVIDIA and 24 Google models.
+  - **Catalogues, read live** (`refresh: true`):
+    - **NVIDIA:** 69 models, all `free.status: unknown`, pool `nvidia:account`, and no context window, because the OpenAI-format list states none.
+    - **Gemini:** 40 models, `unknown` price, context windows and per-model pools.
+  - **Keys found in Pi.** `describe_dispatch` described Pi in `Ubuntu-24.04` with `--provider nvidia` (`deepseek-ai/deepseek-v4.1-flash`) and `--provider google` (`gemini-2.5-flash`). 20 of Pi's 21 NVIDIA models are in the catalogue.
+  - **No candidates yet.**
+    - With `free_only`, every model is `price_not_confirmed`, as designed.
+    - With `free_or_unconfirmed`, every model is `tools_unknown`, because neither list states tool support (NVIDIA's states no context either).
+    - Delegation asks for tools, so neither service can be delegated to until AI Meter learns these capabilities. The agents know them: Pi lists context and reasoning per model.
+  - **Not run:** a model request on either service, which could use the account's quota or credits.
+
 
 - **2026-11-02, the review of `main` absorbed into M5; inputs for M6.**
   - **The review.** Four read-only reviews of `main` at `ba8d1e3` (`docs/plans/review-2026-11-02.md`) were answered by three PRs, all cut from `ba8d1e3` with CI green:
