@@ -21,6 +21,8 @@ function setUp(scenario) {
   process.env.AI_METER_RELAY = JSON.stringify([process.execPath, join(here, "fixtures", "fake-meter.mjs")]);
   process.env.FAKE_METER_SCENARIO = JSON.stringify(scenario);
   process.env.FAKE_METER_LOG = join(folder, "meter.jsonl");
+  // CI's Linux runner is not WSL; the place only picks describe_dispatch's "from" and how agents are stopped.
+  process.env.AI_METER_PLACE = process.platform === "win32" ? "windows" : "wsl";
   return { folder, calls: () => (existsSync(process.env.FAKE_METER_LOG) ? readFileSync(process.env.FAKE_METER_LOG, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : []) };
 }
 
@@ -258,19 +260,24 @@ test("the MCP server lists its tools and runs a delegation", async () => {
     return answers.find((a) => a.id === id);
   };
 
-  send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", clientInfo: { name: "claude-code" } } });
-  send({ method: "notifications/initialized" });
-  send({ id: 2, method: "tools/list" });
-  send({ id: 3, method: "tools/call", params: { name: "delegate", arguments: { task: "hi", workspace: folder, wait_seconds: 15 } } });
-  send({ id: 4, method: "tools/call", params: { name: "delegate", arguments: { task: "hi", workspace: join(folder, "missing") } } });
+  // A failed assertion must not leave the server running: node --test would wait for it.
+  try {
+    send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", clientInfo: { name: "claude-code" } } });
+    send({ method: "notifications/initialized" });
+    send({ id: 2, method: "tools/list" });
+    send({ id: 3, method: "tools/call", params: { name: "delegate", arguments: { task: "hi", workspace: folder, wait_seconds: 15 } } });
+    send({ id: 4, method: "tools/call", params: { name: "delegate", arguments: { task: "hi", workspace: join(folder, "missing") } } });
 
-  assert.equal((await answer(1)).result.serverInfo.name, "ai-meter-delegate");
-  assert.deepEqual((await answer(2)).result.tools.map((t) => t.name), ["delegate", "delegate_result", "delegate_status", "delegate_cancel", "delegate_candidates"]);
-  const delegated = (await answer(3)).result.structuredContent;
-  assert.equal(delegated.status, "completed");
-  assert.equal(delegated.answer, "echo: hi");
-  assert.equal(delegated.client, "claude-code");
-  assert.equal((await answer(4)).result.isError, true);
-  assert.equal(answers.length, 4, "the notification gets no answer");
-  server.stdin.end();
+    assert.equal((await answer(1)).result.serverInfo.name, "ai-meter-delegate");
+    assert.deepEqual((await answer(2)).result.tools.map((t) => t.name), ["delegate", "delegate_result", "delegate_status", "delegate_cancel", "delegate_candidates"]);
+    const delegated = (await answer(3)).result.structuredContent;
+    assert.equal(delegated.status, "completed");
+    assert.equal(delegated.answer, "echo: hi");
+    assert.equal(delegated.client, "claude-code");
+    assert.equal((await answer(4)).result.isError, true);
+    assert.equal(answers.length, 4, "the notification gets no answer");
+  } finally {
+    server.stdin.end();
+    server.kill();
+  }
 });

@@ -10,8 +10,12 @@ const RELAY_SCRIPT =
   "if (-not (Test-Path $p)) { $p = Join-Path $env:USERPROFILE '.aimeter\\mcp.ps1' }; " +
   "& $p";
 
-/** Where this script runs: "windows", "wsl", or null elsewhere (delegation needs AI Meter on Windows). */
+/**
+ * Where this script runs: "windows", "wsl", or null elsewhere (delegation needs AI Meter on Windows).
+ * AI_METER_PLACE overrides the detection, for tests on plain Linux, which has neither.
+ */
 export function place() {
+  if (process.env.AI_METER_PLACE === "windows" || process.env.AI_METER_PLACE === "wsl") return process.env.AI_METER_PLACE;
   if (process.platform === "win32") return "windows";
   if (process.platform !== "linux") return null;
   if (process.env.WSL_DISTRO_NAME) return "wsl";

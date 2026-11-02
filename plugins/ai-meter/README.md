@@ -2,7 +2,11 @@
 
 A plugin for **Claude Code** and **Codex** that hands self-contained coding tasks to a coding agent you already have, such as Pi or OpenCode, on a free model. [AI Meter](../../README.md) chooses where the task can run and paces it; the plugin runs the agent ([ADR 0002](../../docs/adr/0002-delegation-through-coordinator-plugins.md)).
 
-The same folder is both plugins. Claude Code reads `.claude-plugin/` and `.mcp.json`; Codex reads `.codex-plugin/` and `codex-mcp.json`. Both get the same MCP server and the same `delegate` skill.
+The same folder is both plugins, each in its coordinator's standard layout:
+- **Claude Code** reads `.claude-plugin/plugin.json` and `.mcp.json`.
+- **Codex** reads the portable Agent Plugins 1.0.0 manifest: `plugin.json`, with its settings under `extensions.com.openai`, and `mcp.json`, where the server is declared as `stdio`.
+
+Both get the same MCP server and the same `delegate` skill. The marketplaces are at the repository root, `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json`. The plugin's version is kept in its manifests only.
 
 ## What you need
 
@@ -13,15 +17,13 @@ The same folder is both plugins. Claude Code reads `.claude-plugin/` and `.mcp.j
 
 ## Install
 
-**Claude Code:**
+**Claude Code** (2.1.292 or later, in one step):
 
 ```bash
-claude plugin marketplace add dichiara19/ai-meter
+claude plugin install ai-meter --marketplace dichiara19/ai-meter
 ```
 
-```bash
-claude plugin install ai-meter@ai-meter
-```
+Claude Code asks you to trust the marketplace first, as it does for every marketplace that Anthropic does not run. Older versions need the two steps: `claude plugin marketplace add dichiara19/ai-meter`, then `claude plugin install ai-meter@ai-meter`.
 
 **Codex:**
 

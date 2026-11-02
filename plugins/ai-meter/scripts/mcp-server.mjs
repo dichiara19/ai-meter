@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The plugin's MCP server, used by both coordinators: Claude Code starts it from .mcp.json, Codex from codex-mcp.json.
+// The plugin's MCP server, used by both coordinators: Claude Code starts it from .mcp.json, Codex from mcp.json.
 // It speaks newline-delimited JSON-RPC on stdio, with no dependencies. Tools return at once: a delegated task runs as
 // a background job (lib/jobs.mjs), which the coordinator follows with delegate_status and delegate_result.
 //

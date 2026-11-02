@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "ai-meter-delegate": {
-      "command": "node",
-      "args": ["./scripts/mcp-server.mjs"],
-      "cwd": "."
-    }
-  }
-}
