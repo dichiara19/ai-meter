@@ -155,12 +155,48 @@ namespace AIMeter
             Group(
                 Row(Ui.Glyph("", 20, "Text"), "AI Meter", null, Button(L.T("Open data folder"), () => Process.Start("explorer.exe", "\"" + Settings.Folder + "\""), false), statsText),
                 Row(Ui.Glyph("", 20, "Text"), L.T("Privacy"),
-                    L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off."),
+                    L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off.")
+                    + " " + L.T(Native.IsPackaged ? "The update check below asks the Microsoft Store whether an update is waiting." : "The update check below also asks GitHub for the latest version."),
                     Button(L.T("Source code"), () => Process.Start("https://github.com/dichiara19/ai-meter#privacy-policy"), false)),
                 Row(Ui.Glyph("", 20, "Text"), L.T("Sample data"),
                     L.T("Show invented figures to preview AI Meter without signing in to any service. Not saved: real data returns at the next start."),
                     Toggle(Program.Demo, v => C.SetSampleData(v))));
+            BuildUpdates();
             UpdateStats();
+        }
+
+        /// <summary>
+        /// Update check: GitHub for the zip and script builds; in the Microsoft Store package only the Store's own answer,
+        /// because the Store installs updates by itself.
+        /// </summary>
+        private void BuildUpdates()
+        {
+            Section(L.T("Updates"));
+            // Changing a choice allows one immediate check instead of waiting up to a day.
+            Action recheck = () => { S.UpdateCheckedAt = DateTime.MinValue; S.Save(); C.CheckForUpdate(); Rebuild(); };
+            var rows = new List<FrameworkElement>();
+            if (Native.IsPackaged)
+            {
+                rows.Add(Row(Ui.Glyph("\uE895", 20, "Text"), L.T("Check for updates"),
+                    L.T("The Microsoft Store installs updates by itself. Once a day AI Meter also asks the Store whether one is waiting, to show it here; it never contacts GitHub."),
+                    Toggle(S.UpdateCheck, v => { S.UpdateCheck = v; recheck(); })));
+                if (S.UpdateCheck && C.StoreUpdateWaiting)
+                    rows.Add(Row(null, L.T("An update is waiting in the Microsoft Store"), null,
+                        Button(L.T("Open the Store"), () => Process.Start("ms-windows-store://downloadsandupdates"), true)));
+            }
+            else
+            {
+                rows.Add(Row(Ui.Glyph("\uE895", 20, "Text"), L.T("Check for updates"),
+                    L.T("Once a day, ask GitHub whether a newer stable version exists and show a notice. Nothing is downloaded or installed, and the request includes no account or identifier."),
+                    Toggle(S.UpdateCheck, v => { S.UpdateCheck = v; recheck(); })));
+                rows.Add(Row(null, L.T("Include pre-releases"), L.T("Also tell me about beta and release candidate versions, which can be less stable."),
+                    Toggle(S.UpdatePreReleases, v => { S.UpdatePreReleases = v; S.UpdateAvailable = null; recheck(); })));
+                string latest = S.UpdateAvailable;
+                if (S.UpdateCheck && UpdateCheck.IsNewer(latest, Controller.Version))
+                    rows.Add(Row(null, L.F("AI Meter {0} is available", latest), L.F("You are using {0}.", Controller.Version),
+                        Button(L.T("Release page"), () => Controller.OpenReleasePage(latest), true)));
+            }
+            Group(rows.ToArray());
         }
 
         private static string[] WslDistros()

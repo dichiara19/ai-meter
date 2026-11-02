@@ -111,6 +111,7 @@ namespace AIMeter
             mcpHost = new McpPipeHost(new McpServer(() => Last, () => Settings.McpTitles));
             mcpHost.Start();
             try { McpRelay.Write(); } catch (Exception ex) { Program.LogError("mcp-relay", ex); }
+            StartUpdateChecks();
 
             var worker = new Thread(WorkerLoop) { IsBackground = true, Name = "AIMeter.Collector", Priority = ThreadPriority.BelowNormal };
             worker.Start();

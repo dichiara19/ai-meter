@@ -88,6 +88,13 @@ namespace AIMeter
         public bool SessionFeedback { get; set; }
         public DateTime FeedbackEnabledSince { get; set; }
 
+        // Updates: a daily GitHub check outside the Microsoft Store, which updates its package by itself.
+        public bool UpdateCheck { get; set; }
+        public bool UpdatePreReleases { get; set; }     // Opt-in: also report beta and release candidate versions.
+        public DateTime UpdateCheckedAt { get; set; }   // UTC time of the last automatic or explicit check.
+        public string UpdateAvailable { get; set; }     // Newer version found by the last successful check, or null.
+        public string UpdateNotified { get; set; }      // Version already announced with a notification.
+
         public Settings()
         {
             ClaudeEnabled = ClaudeProvider.Detected(); ClaudeLiveUsage = true; ClaudeShowChat = true; ClaudeShowCode = true; ClaudeShowCowork = true;
@@ -103,6 +110,7 @@ namespace AIMeter
             HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
             HistoryEnabled = true;
+            UpdateCheck = true;
         }
 
         /// <summary>Whether every reset of this limit should be announced.</summary>

@@ -59,6 +59,7 @@ namespace AIMeter
             HistoryRegressionTests.Register(Test);
             ConsumptionTests.Register(Test);
             McpTests.Register(Test);
+            UpdateTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 
