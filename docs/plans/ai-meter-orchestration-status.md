@@ -11,7 +11,7 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 | Milestone | State | Branch / PR | Base / head SHA | Tests and evidence | Blockers / next action |
 | --- | --- | --- | --- | --- | --- |
 | M0 Baseline, ADR, contracts | merged | [PR #16](https://github.com/dichiara19/ai-meter/pull/16), squash-merged as `f051b41`; epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `692917b` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on every PR commit, the last being `692917b` (run 41435557504) | — |
-| M1 MCP freshness | in_progress | `feat/mcp-freshness`, from `main` | `f051b41` / not yet pushed | `tests/run.ps1`: 94 passed (5 new). `build.ps1 -NoInstall` compiled | Real clients on Windows and WSL, Settings → AI apps and the Store relay path: **NOT RUN** (see the log) |
+| M1 MCP freshness | in_progress | `feat/mcp-freshness`, draft [PR #18](https://github.com/dichiara19/ai-meter/pull/18) | `f051b41` / working tree after `f778d85` | `tests/run.ps1`: 95 passed. `build.ps1 -NoInstall` compiled. Live: relay from Windows, Claude Code and Codex in WSL, Settings → AI apps | Store relay path and Gemini CLI: **NOT RUN**. Then move the PR out of draft |
 | M2 Provider discovery | planned | `feat/provider-discovery` | — | — | Needs the M1 freshness contract |
 | M3 Execution candidates | planned | `feat/execution-candidates` | — | — | Needs M1 and M2 |
 | M4 Pi spike and runner MVP | planned | `feat/agent-jobs` | — | — | Spike first. Real routing needs M3 |
@@ -64,6 +64,35 @@ Three things the PR marked as unverified are still unverified after the release,
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M1 live check.**
+  - **Setup.** Build from `feat/mcp-freshness` on Windows 11.
+    - Run through `AIMeter.ps1`, because Smart App Control blocks the unsigned `bin\AIMeter.exe`.
+    - The installed 0.8.6 copy was stopped for the test, then restarted.
+  - **Relay from a Windows process** (JSON-RPC over `mcp.ps1`):
+    - `tools/list` shows the new arguments.
+    - Readings younger than a minute come back `cached`.
+    - After 75 s, `max_age_seconds: 60` gives `refreshed` in 3–4 s.
+    - Two concurrent clients received the same snapshot.
+    - A negative age is refused.
+    - `list_sessions` with `refresh` gives `refreshed`.
+  - **Bug found and fixed.** The first live run showed that a call right after a refresh still read `Controller.Last`, which the UI updates only after history is recorded. It answered `too_soon` with the old reading.
+    - Fix: the MCP now reads the newest of `Last` and the snapshot the worker published (`RefreshGate.Newest`).
+    - Added a regression test. 95 tests pass.
+    - The live re-run shows `cached` with the new reading.
+  - **Claude Code 2.1.316 in WSL** (`--mcp-config`, `--strict-mcp-config`, user configuration unchanged): `get_limits` called through the Windows relay over WSL interop. It returned `freshness` with `too_soon` and `retry_after`, which is correct because the last request was under a minute earlier.
+  - **Codex 0.163.0 in WSL** (`-c mcp_servers.ai-meter...`, user configuration unchanged): `get_limits` with `max_age_seconds: 30` gave `refreshed` for Claude, ChatGPT and Antigravity.
+  - **Settings → AI apps** in this build lists 9 apps:
+    - on Windows: Claude Desktop, VS Code, Claude Code, Codex;
+    - in WSL: Claude Code, Codex, Gemini CLI, OpenCode, Pi, with the adapter note.
+
+    No switch was turned on, to leave user files unchanged.
+  - **NOT RUN:**
+    - Gemini CLI (not installed on Windows or in WSL);
+    - Windows-native CLIs (none on PATH);
+    - Claude Desktop (needs its UI);
+    - the Store package relay path (needs the MSIX installed).
+  - **Separate finding, not caused by M1.** Before the test, `%APPDATA%\AIMeter\mcp.ps1` (written 10:56) named `$launch = 'C:\Windows\system32'`, which is what an empty launch command produces, and had LF line endings. A relay like that cannot start AI Meter when it is not running. Both this build and the installed 0.8.6, started through `conhost`, rewrote it correctly. The origin is not identified; a copy was kept for investigation.
 
 - **2026-11-02, M1 in progress.**
   - Implemented `refresh` and `max_age_seconds` on the MCP read tools, plus the per-service `freshness` map.

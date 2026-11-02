@@ -47,6 +47,15 @@ namespace AIMeter
             }
         }
 
+        /// <summary>
+        /// The newer of the given snapshot and the last one published. The worker publishes before it records history
+        /// and before the UI applies the snapshot, so a published reading can be newer than the one surfaces show.
+        /// </summary>
+        public Snapshot Newest(Snapshot shown)
+        {
+            lock (sync) return published != null && (shown == null || published.Taken > shown.Taken) ? published : shown;
+        }
+
         /// <summary>Worker side: release every caller waiting for a collection that started before this snapshot.</summary>
         public void Publish(Snapshot snapshot)
         {
@@ -64,7 +73,7 @@ namespace AIMeter
         /// </summary>
         public RefreshResult Request(IEnumerable<string> networkIds, bool catalogues, Snapshot current, TimeSpan timeout)
         {
-            var result = new RefreshResult { Snapshot = current };
+            var result = new RefreshResult { Snapshot = Newest(current) };
             var ids = networkIds.ToList();
             if (paused())
             {

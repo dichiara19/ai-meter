@@ -18,6 +18,7 @@ namespace AIMeter
             test("MCP tools report limits, sessions without titles, free models and room", Tools);
             test("An MCP refresh asks only for old readings and reports each service's freshness", RefreshTargets);
             test("Concurrent MCP refreshes share one collection", RefreshShared);
+            test("A call after a refresh sees the new reading before the surfaces apply it", RefreshThenRead);
             test("An MCP refresh respects Retry-After, the minimum interval, pauses and its timeout", RefreshLimits);
             test("suggest_service reports unknown room as unknown and ranks it after known room", SuggestUnknown);
             test("Retry-After is read as seconds or an HTTP date and capped", RetryAfter);
@@ -203,6 +204,17 @@ namespace AIMeter
             foreach (var t in threads) t.Join(10000);
             Assert(results.All(r => r != null && Json.Str(Fresh(r, "claude"), "refresh") == "refreshed"), "A waiting caller did not receive the shared reading.");
             Assert(worker.Collections == 1 && worker.Invalidated.Count == 1, "Concurrent callers started " + worker.Collections + " collections.");
+        }
+
+        private static void RefreshThenRead()
+        {
+            NetworkBackoff.Clear();
+            var worker = new FakeWorker(Fixture);
+            var shown = OldClaude();   // What the surfaces still show: the controller applies snapshots after history.
+            var server = new McpServer(() => worker.Gate.Newest(shown), () => false, worker.Gate, TimeSpan.FromSeconds(5));
+            Assert(Json.Str(Fresh(CallTool(server, "get_limits", "{\"refresh\":true}"), "claude"), "refresh") == "refreshed", "The first refresh failed.");
+            var next = Fresh(CallTool(server, "get_limits", "{\"refresh\":true}"), "claude");
+            Assert(Json.Str(next, "refresh") == "cached", "The next call used the older snapshot: " + Json.Str(next, "refresh"));
         }
 
         private static void RefreshLimits()
