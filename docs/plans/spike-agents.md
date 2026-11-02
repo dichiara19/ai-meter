@@ -37,7 +37,7 @@ The results feed `describe_dispatch` ([contracts §3.1](orchestration-contracts.
 - **Either way, a stopped task reports 0 tokens.** The work done before stopping is not counted, so a cancelled lease releases with unknown tokens.
 
 **A free model is not always free.**
-- The first run, on `google/gemma-4-31b-it:free`, failed. OpenRouter got a `429` from the free route, then retried on the user's own Google key, which is linked to OpenRouter as BYOK, and that key answered `402: prepayment credits are depleted`.
+- The first run, on `google/gemma-4-31b-it:free`, failed. OpenRouter got a `429` from the free route, then retried on a provider key linked to OpenRouter as BYOK, and that provider refused it with `402`.
 - With BYOK keys linked in OpenRouter, a `:free` model can end up billed to the user's own provider account. `confirmed_free` comes from the catalogue price only, so it cannot see this. The plugin and the docs must warn about it. Spotting it would need OpenRouter's key settings, which AI Meter does not read today.
 
 **Dispatch row (Pi 1.x, read-only task):**
@@ -62,7 +62,7 @@ A task that changes files drops `--tools`, or lists the editing tools, and runs 
   - `-o <file>` (last message);
   - `-c key=value` (configuration overrides, including `model_provider` and `model_providers.<id>`);
   - `--oss --local-provider ollama|lmstudio` (local models).
-- **Free models.** Codex can run them only through a provider the user configured with its own key variable. On this PC no such variable is exported in WSL, so a free OpenRouter run was not tried: AI Meter must not pass a key. Local models through `--oss` are a free route to check.
+- **Free models.** Codex can run them only through a provider the user configured with its own key variable. On the test PC no such variable is exported in WSL, so a free OpenRouter run was not tried: AI Meter must not pass a key. Local models through `--oss` are a free route to check.
 - **Not verified:** the event names in `--json`, the exit codes, and cancellation.
 
 ## OpenCode 1.19.5, in WSL (verified live)
@@ -117,7 +117,7 @@ A task that changes files uses the `build` agent in a new worktree.
 
 **Installation, and a packaged-app trap.**
 - The first install, run from this Claude Code session, never reached the real system.
-- The Claude desktop app is an MSIX package, and the commands it runs inherit its file-system virtualisation, outside Claude Code's own sandbox too. `npm install -g` wrote `%APPDATA%\npm` into `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\npm`. The commands of this session could see that copy; the user's own PowerShell could not.
+- The Claude desktop app is an MSIX package, and the commands it runs inherit its file-system virtualisation, outside Claude Code's own sandbox too. `npm install -g` wrote `%APPDATA%\npm` into `%LOCALAPPDATA%\Packages\<Claude package>\LocalCache\Roaming\npm`. The commands of this session could see that copy; the user's own PowerShell could not.
 - The copy was removed. The maintainer then installed OpenCode from their own PowerShell and added the OpenRouter key with `opencode auth login` (`%USERPROFILE%\.local\share\opencode\auth.json`).
 - **This matters beyond the spike.**
   - A coordinator running inside a packaged app may not see agents the user installed, and may install them where nobody else finds them.
