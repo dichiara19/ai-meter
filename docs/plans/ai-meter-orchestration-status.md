@@ -10,7 +10,7 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 
 | Milestone | State | Branch / PR | Base / head SHA | Tests and evidence | Blockers / next action |
 | --- | --- | --- | --- | --- | --- |
-| M0 Baseline, ADR, contracts | in_progress | `docs/agent-orchestration-plan` | `b39d449` / not yet pushed | Documentation only. `tests/run.ps1` on the base: 89 passed | Maintainer review of [ADR 0001](../adr/0001-optional-agent-orchestration.md) and of the open decisions below. Create the epic issue |
+| M0 Baseline, ADR, contracts | in_review | `docs/agent-orchestration-plan`, [PR #16](https://github.com/dichiara19/ai-meter/pull/16), epic [#17](https://github.com/dichiara19/ai-meter/issues/17) | `b39d449` / `9a49ffb` | Documentation only. `tests/run.ps1` on the base: 89 passed. CI `build` passed on `ca722b1` (run 41433116825) and `9a49ffb` (run 41434473586) | Maintainer review and approval of PR #16, which accepts [ADR 0001](../adr/0001-optional-agent-orchestration.md). Settle the open decisions below |
 | M1 MCP freshness | planned | `feat/mcp-freshness`, from `main` | — | — | Starts once ADR 0001 is accepted. PR #15 is already merged, so there is no parent branch to follow |
 | M2 Provider discovery | planned | `feat/provider-discovery` | — | — | Needs the M1 freshness contract |
 | M3 Execution candidates | planned | `feat/execution-candidates` | — | — | Needs M1 and M2 |
@@ -20,7 +20,7 @@ Allowed states: `planned`, `in_progress`, `blocked`, `in_review`, `merged`, `rel
 
 ## Baseline (verified 2026-11-02)
 
-`gh` is not installed on the development PC, so the GitHub state below comes from the public REST API (`api.github.com/repos/dichiara19/ai-meter`) and `git fetch`.
+When the baseline was taken, `gh` was not installed on the development PC, so the GitHub state below came from the public REST API (`api.github.com/repos/dichiara19/ai-meter`) and `git fetch`. GitHub CLI 2.103.3 has since been installed.
 
 | Item | Observed |
 | --- | --- |
@@ -61,9 +61,14 @@ Three things the PR marked as unverified are still unverified after the release,
 1. **Accept [ADR 0001](../adr/0001-optional-agent-orchestration.md).** Merging this PR accepts it.
 2. **Default refresh behaviour of read tools** ([contracts §1.1](orchestration-contracts.md#11-arguments)). The recommendation is no network unless the caller asks for it, which keeps the 0.8.6 promise. The original plan proposed refreshing by default.
 3. **Credentials for the runner in the MVP.** The recommendation is that the runtime uses only its own sign-in, and AI Meter never passes a key to it (ADR 0001, decision 3).
-4. **Epic issue.** It has not been created, because `gh` is unavailable and creating it publishes content. A draft is in the PR description.
+4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-02, M0 ready for review.**
+  - Opened PR #16 and epic #17.
+  - CI `build` passed on both commits of the PR.
+  - Next action: the maintainer reviews and approves PR #16, then squash-merges it. After that, M1 starts on `feat/mcp-freshness` from the new `main`.
 
 - **2026-11-02, M0 (scope addition).** The maintainer asked for free-model limits to be part of the contract from the start.
   - Added contracts §2.3: per-request caps, rates, concurrency, shared pools, sources, coverage and headroom.
