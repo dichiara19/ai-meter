@@ -88,6 +88,7 @@ export function start(options) {
     mode,
     timeout_seconds: timeout,
     wanted: pick(options, ["service", "model", "runtime", "where", "distro", "min_context", "cost_policy"]),
+    allow_best_effort: options.allow_best_effort === true || options.allow_best_effort === "true",
     skipped: [],
   };
   save(job);
@@ -160,7 +161,8 @@ export async function runJob(id) {
  * Pick the first candidate in AI Meter's order that matches what the job asked for, whose events the plugin can read,
  * that AI Meter can describe for this place and whose pool grants a lease. A candidate AI Meter refuses to describe
  * (an error such as "no key of its own", or supported: false) is skipped with the reason, not fatal to the job.
- * Returns { candidate, plan, lease } or null after failing the job.
+ * Best-effort candidates (built on an agent's own model list, docs/MCP.md) come only after every ordinary one, and
+ * only when the job allows them. Returns { candidate, plan, lease } or null after failing the job.
  */
 async function choose(job) {
   const wanted = job.wanted;
@@ -174,11 +176,15 @@ async function choose(job) {
     const found = await meter.call("list_candidates", {
       tools: true,
       ...pick(wanted, ["service", "min_context", "cost_policy"]),
+      ...(job.allow_best_effort ? { include_best_effort: true } : {}),
     });
-    const candidates = found.candidates.filter(
-      (c) => (!wanted.model || c.model === wanted.model) && (!wanted.runtime || c.runtime.name === wanted.runtime) && (!wanted.where || c.runtime.where === wanted.where) &&
-        (!wanted.distro || c.runtime.distro === wanted.distro),
-    );
+    const matches = (c) =>
+      (!wanted.model || c.model === wanted.model) && (!wanted.runtime || c.runtime.name === wanted.runtime) && (!wanted.where || c.runtime.where === wanted.where) &&
+      (!wanted.distro || c.runtime.distro === wanted.distro);
+    const candidates = [
+      ...found.candidates.filter(matches),
+      ...(job.allow_best_effort ? (found.best_effort || []).filter(matches).map((c) => ({ ...c, bestEffort: true })) : []),
+    ];
     const refusedPools = new Set();
 
     for (const c of candidates) {
@@ -206,7 +212,8 @@ async function choose(job) {
         job.skipped.push({ ...which, reason: "pool " + c.pool + " has no room: " + (lease.headroom?.blocking?.reason || "full") });
         continue;
       }
-      job.candidate = { ...which, pool: c.pool };
+      job.candidate = { ...which, pool: c.pool, ...(c.bestEffort ? { best_effort: true } : {}) };
+      if (c.estimated) job.estimated = c.estimated;
       job.lease_id = lease.lease_id;
       const warnings = [...new Set([...(c.warnings || []), ...(plan.warnings || [])])];
       if (warnings.length) job.warnings = warnings;
@@ -216,6 +223,7 @@ async function choose(job) {
 
     job.status = "failed";
     job.error = candidates.length ? "No candidate could be started; see skipped." : "No free candidate matches this task; see excluded.";
+    if (!job.allow_best_effort && found.best_effort_available) job.best_effort_available = found.best_effort_available;
     job.excluded = found.excluded;
     job.runtimes = found.runtimes;
     job.ended_at = new Date().toISOString();

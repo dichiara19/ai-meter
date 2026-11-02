@@ -1,7 +1,8 @@
 // A stand-in for AI Meter's relay: answers the delegation tools over stdio the way AI Meter does, and logs each call
 // to FAKE_METER_LOG (JSONL). FAKE_METER_SCENARIO (JSON) sets the candidates, the agents it cannot describe
 // ("runtime@where"), the describe_dispatch errors by "runtime@where", the pools that refuse leases, the warnings,
-// the runtimes found and unsupported, and how each fake agent behaves.
+// the runtimes found and unsupported, the best-effort candidates (returned only with include_best_effort, counted
+// otherwise), and how each fake agent behaves.
 
 import { appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -14,8 +15,10 @@ let leases = 0;
 let readings = scenario.still_reading || 0;   // describe_dispatch answers "still reading" this many times first.
 
 const tools = {
-  list_candidates: () => ({
+  list_candidates: (args) => ({
     candidates: scenario.candidates || [],
+    ...(scenario.best_effort && args.include_best_effort ? { best_effort: scenario.best_effort } : {}),
+    ...(scenario.best_effort && !args.include_best_effort ? { best_effort_available: scenario.best_effort.length } : {}),
     pools: [],
     excluded: scenario.excluded || [],
     runtimes: { found: [], unsupported: scenario.unsupported_runtimes || [], key_discovery: true },

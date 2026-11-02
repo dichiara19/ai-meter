@@ -43,11 +43,11 @@ The coordinator calls these tools of the `ai-meter-delegate` server:
 
 | Tool | What it does |
 |---|---|
-| `delegate` | Starts a background job and returns its id. Takes `task`, `workspace` (absolute path), `mode`, and optionally `service`, `model`, `runtime`, `where`, `distro`, `min_context`, `cost_policy`, `timeout_seconds` (default 1200, at most 7000) and `wait_seconds` (at most 50) |
+| `delegate` | Starts a background job and returns its id. Takes `task`, `workspace` (absolute path), `mode`, and optionally `service`, `model`, `runtime`, `where`, `distro`, `min_context`, `allow_best_effort`, `cost_policy`, `timeout_seconds` (default 1200, at most 7000) and `wait_seconds` (at most 50) |
 | `delegate_result` | The job's report: status, the agent's answer, requests, tokens and price, the changed files of a `modify` task, AI Meter's `warnings`, and the candidates that were skipped and why |
 | `delegate_status` | The latest jobs |
 | `delegate_cancel` | Stops the agent and releases the lease |
-| `delegate_candidates` | Where a task could run now, from AI Meter's `list_candidates`, with `runtimes.unsupported`: the agents found that cannot be used, each with a sentence saying why. Starts nothing |
+| `delegate_candidates` | Where a task could run now, from AI Meter's `list_candidates`, with `runtimes.unsupported`: the agents found that cannot be used, each with a sentence saying why. With `include_best_effort`, also the best-effort candidates. Starts nothing |
 
 **How a job runs.**
 1. `list_candidates` with `tools: true`, narrowed by the pins you gave.
@@ -65,6 +65,14 @@ A job runs in its own worker process, so it outlives the call that started it. C
 **Read-only by default.** Pi gets only its reading tools, and OpenCode its `plan` agent. **`modify`** runs the agent in a new Git worktree on branch `ai-meter/<job id>`, made from the last commit. Uncommitted changes in your checkout are not in it, and the report says so. The plugin never commits, merges or removes the worktree: the report gives the commands to review and to discard it.
 
 **Choosing a model and an agent.** AI Meter orders candidates by the room left in their pool, not by quality. Within one pool the order is by service, model, agent id and place, alphabetically. So when Pi and OpenCode both have a key, OpenCode comes first, and on Windows before WSL. When it matters, look at `delegate_candidates` and pin `model`, `runtime` or `where`. Pi sends about 4,600 tokens of system prompt per request, and OpenCode, isolated, about 9,600.
+
+**Best effort, only with consent.** NVIDIA and the Gemini API do not state prices or tool support, so their models are never ordinary candidates. AI Meter can fill in what is missing from the agent's own model list ([best-effort candidates](../../docs/MCP.md#best-effort-candidates)).
+- With `allow_best_effort: true`, the plugin tries these models after every ordinary candidate.
+- The report marks the choice with `candidate.best_effort` and `estimated`.
+- The skill tells the coordinator to ask the user first, and not to retry a failed model on its own.
+- Live on 2026-11-02, with real keys:
+  - 20 NVIDIA models and 2 Gemma models on the Gemini API became best effort;
+  - 21 Gemini models stayed out as `agent_lists_price`, because Pi prices them at the paid-tier rate.
 
 **Free is not always free.** OpenRouter can retry a `:free` request that hit the free route's limit on a provider key you linked to OpenRouter (BYOK), billed to that provider account. AI Meter flags OpenRouter candidates with `warnings: ["openrouter_byok_fallback"]`, and the report repeats it.
 - The agents price requests from their own model lists, so a BYOK fallback shows a price of zero.

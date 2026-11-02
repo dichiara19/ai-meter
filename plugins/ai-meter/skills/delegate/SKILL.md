@@ -37,6 +37,14 @@ Keep it yourself when the task needs this conversation's context, a design decis
 - `skipped`: candidates that were tried and why, such as AI Meter's own error for that agent, an agent and place it has not verified, or a pool with no room.
 - AI Meter must be installed on Windows; its relay starts it when needed.
 
+## Best effort: only with the user's agreement
+
+Some services, such as NVIDIA and the Gemini API, do not state prices or tool support. Their models are never ordinary candidates. They can be **best-effort candidates** when an agent's own model list has them at no price.
+
+- `delegate_candidates` with `include_best_effort: true` lists them in `best_effort`. Each comes with `estimated`, which says what rests on the agent's word (`unverified`: price, tools, context, limits). Without the flag, `best_effort_available` counts them, and a failed job reports it too.
+- **Before using one, ask the user.** Say that the information is estimated, and that the task may fail, stop or meet limits no one has stated. Then call `delegate` with `allow_best_effort: true`. Ordinary candidates are still tried first.
+- If it fails, report the agent's error and decide with the user: try another model, or do the task yourself. Do not retry the same model on your own.
+
 ## Money
 
 - `counters.paid_request: true`: a request was priced above zero, so the plugin stopped the agent. Tell the user; do not retry on the same model.

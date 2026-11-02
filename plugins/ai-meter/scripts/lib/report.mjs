@@ -23,6 +23,8 @@ export function full(job, jobsFolder) {
     report.counters = counters;
   }
   if (job.warnings?.length) report.warnings = job.warnings;
+  if (job.estimated) report.estimated = job.estimated;
+  if (job.best_effort_available) report.best_effort_available = job.best_effort_available;
   if (job.worktree) report.worktree = job.worktree;
   if (job.skipped?.length) report.skipped = job.skipped;
   if (job.excluded) report.excluded = job.excluded;
@@ -39,16 +41,20 @@ export function full(job, jobsFolder) {
  * runtimes.unsupported (from AI Meter's agent table), with a sentence to show for each agent that cannot be used.
  */
 export function candidates(found) {
+  const brief = (c) => ({
+    service: c.service,
+    model: c.model,
+    runtime: c.runtime.name,
+    where: c.runtime.where,
+    ...(c.runtime.distro ? { distro: c.runtime.distro } : {}),
+    pool: c.pool,
+    ...(c.warnings?.length ? { warnings: c.warnings } : {}),
+    ...(c.estimated ? { estimated: c.estimated } : {}),
+  });
   return {
-    candidates: found.candidates.map((c) => ({
-      service: c.service,
-      model: c.model,
-      runtime: c.runtime.name,
-      where: c.runtime.where,
-      ...(c.runtime.distro ? { distro: c.runtime.distro } : {}),
-      pool: c.pool,
-      ...(c.warnings?.length ? { warnings: c.warnings } : {}),
-    })),
+    candidates: found.candidates.map(brief),
+    ...(found.best_effort ? { best_effort: found.best_effort.map(brief) } : {}),
+    ...(found.best_effort_available ? { best_effort_available: found.best_effort_available } : {}),
     pools: found.pools,
     excluded: found.excluded,
     runtimes: found.runtimes,

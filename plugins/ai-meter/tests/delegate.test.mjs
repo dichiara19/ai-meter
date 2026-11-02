@@ -163,6 +163,31 @@ for (const [runtime, candidate] of [["pi", pi], ["opencode", openCode]]) {
   });
 }
 
+const estimated = { source: "agent:pi", tools: true, context_tokens: 131072, unverified: ["price", "tools", "limits"] };
+const bestEffortPi = { ...pi, service: "nvidia", model: "meta/llama-4", pool: "nvidia:account", warnings: ["best_effort"], estimated };
+
+test("best-effort candidates are never used unless the job allows them", async () => {
+  const { folder, calls } = setUp({ candidates: [], best_effort: [bestEffortPi] });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: folder }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.equal(job.best_effort_available, 1, "the coordinator can tell the user that consent would help");
+  assert.equal(calls().find((c) => c.tool === "list_candidates").arguments.include_best_effort, undefined);
+  assert.equal(calls().filter((c) => c.tool === "claim_capacity").length, 0);
+});
+
+test("with allow_best_effort, ordinary candidates come first, then best effort, marked in the report", async () => {
+  const { folder, calls } = setUp({ candidates: [openCode], best_effort: [bestEffortPi], unsupported: ["opencode@windows"] });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: folder, allow_best_effort: true }).id, 20);
+
+  assert.equal(job.status, "completed");
+  assert.equal(calls().find((c) => c.tool === "list_candidates").arguments.include_best_effort, true);
+  assert.deepEqual(calls().filter((c) => c.tool === "describe_dispatch").map((c) => c.arguments.model), ["a:free", "meta/llama-4"], "the ordinary candidate is tried first");
+  assert.equal(job.candidate.best_effort, true);
+  assert.deepEqual(job.estimated, estimated);
+  assert.ok(job.warnings.includes("best_effort"));
+});
+
 test("cancelling stops the agent and releases the lease without tokens", async () => {
   const { folder, calls } = setUp({ candidates: [pi], behaviour: { pi: "hang" } });
   const { id } = jobs.start({ task: "x", workspace: folder });
