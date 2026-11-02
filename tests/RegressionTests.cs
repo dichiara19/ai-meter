@@ -58,6 +58,7 @@ namespace AIMeter
             StartupRegressionTests.Register(Test);
             HistoryRegressionTests.Register(Test);
             ConsumptionTests.Register(Test);
+            McpTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 
@@ -524,7 +525,7 @@ namespace AIMeter
                 Assert(L.T("Spending unavailable") != "Spending unavailable", "Missing unavailable translation for " + lang);
                 Assert(L.T("{0} estimated since {1}") != "{0} estimated since {1}", "Missing estimate translation for " + lang);
                 Assert(L.T("Last updated {0}") != "Last updated {0}", "Missing cached-data translation for " + lang);
-                foreach (var key in new[] { "Welcome to AI Meter", "Show in the taskbar", "Preview with sample data", "Sample data", "Leave sample data", "Showing sample data", "Free models", "free until {0}", "{0} free models", "Click a model to copy its ID for Pi, OpenCode or your scripts.", "Click to copy {0}", "Copied" })
+                foreach (var key in new[] { "Welcome to AI Meter", "Show in the taskbar", "Preview with sample data", "Sample data", "Leave sample data", "Showing sample data", "Free models", "free until {0}", "{0} free models", "Click a model to copy its ID for Pi, OpenCode or your scripts.", "Click to copy {0}", "Copied", "AI apps", "Connected apps and coding agents can ask AI Meter, through MCP, how much room your limits have, which sessions are running, which models are free and what you spent today. They only read: AI Meter never shares keys or tokens.", "Needs the pi-mcp-adapter extension: pi install npm:pi-mcp-adapter", "No supported apps found", "Use the configuration below in any app that can start a local MCP server.", "Restart an app after connecting it, so it loads AI Meter's tools. Apps in WSL are listed while WSL is running.", "Other apps", "Copy the configuration for apps that are not listed, such as the ChatGPT app when it accepts local servers.", "Copy configuration", "Share session titles", "Titles often repeat your first request. When off, apps see only the agent, status, model and provider of each session.", "{0} was not changed.", "{0} could not be read as plain JSON (it may contain comments). Add AI Meter by hand with the configuration below." })
                     Assert(L.T(key) != key, "Missing welcome translation for " + lang + ": " + key);
             }
             L.Init("en");

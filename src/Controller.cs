@@ -37,6 +37,7 @@ namespace AIMeter
         private HistoryWindow historyWindow;
         private HistoryStore historyStore;
         private HistoryCollector historyCollector;
+        private McpPipeHost mcpHost;
         internal ConsumptionMonitor Consumption { get; private set; }
         private List<ConsumptionNotice> pendingConsumption = new List<ConsumptionNotice>();   // Guarded by itself.
         private string pendingFeedback;
@@ -104,6 +105,11 @@ namespace AIMeter
             Native.SetWinEventHook(Native.EVENT_SYSTEM_FOREGROUND, Native.EVENT_SYSTEM_FOREGROUND, IntPtr.Zero, foregroundProc, 0, 0, 0);
             ThreadPool.RegisterWaitForSingleObject(showSignal, (s, t) => ui.BeginInvoke(new Action(ToggleFlyout)), null, -1, false);
             ThreadPool.RegisterWaitForSingleObject(settingsSignal, (s, t) => ui.BeginInvoke(new Action(OpenSettings)), null, -1, false);
+
+            // AI apps connected through MCP read the latest snapshot; refresh their relay so it names this copy.
+            mcpHost = new McpPipeHost(new McpServer(() => Last, () => Settings.McpTitles));
+            mcpHost.Start();
+            try { if (File.Exists(McpRelay.FilePath)) McpRelay.Write(); } catch (Exception ex) { Program.LogError("mcp-relay", ex); }
 
             var worker = new Thread(WorkerLoop) { IsBackground = true, Name = "AIMeter.Collector", Priority = ThreadPriority.BelowNormal };
             worker.Start();

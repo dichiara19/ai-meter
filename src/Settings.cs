@@ -84,6 +84,7 @@ namespace AIMeter
         public string Refresh { get; set; }         // "auto", "low"
         public bool FirstRunDone { get; set; }
         public bool HistoryEnabled { get; set; }
+        public bool McpTitles { get; set; }         // Whether AI apps connected through MCP may read session titles.
         public bool SessionFeedback { get; set; }
         public DateTime FeedbackEnabledSince { get; set; }
 
