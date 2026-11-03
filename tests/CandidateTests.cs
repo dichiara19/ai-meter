@@ -185,7 +185,7 @@ namespace AIMeter
             Assert((string)piKeyIn(pi, profile) == "sk-or-v1-profile-0123456789" && (string)piKeyIn(openCode, profile) == "sk-or-v1-profile-0123456789",
                 "A WSL profile export every agent inherits was not counted.");
             Assert(fromProfileIn(pi, profile) && !fromProfileIn(pi, both), "A key from a WSL profile was not marked as such, or an agent's own key was.");
-            Assert(Candidates.Kinds.Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi", "crush", "antigravity", "claude", "codex", "cursor", "gemini" }),
+            Assert(Candidates.Kinds.Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi", "crush", "hermes", "antigravity", "claude", "codex", "cursor", "gemini" }),
                 "The known agents changed without updating this test.");
             Assert(Candidates.Kinds.Where(k => k.Dispatch != null).Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi" }), "The agents delegation runs changed without updating this test.");
 
