@@ -101,9 +101,9 @@ namespace AIMeter
             }
             var w = Ui.Primary(p);
             string plan = p.Plan != null ? L.F("{0} plan", p.Plan.ToUpperInvariant()) + " · " : "";
-            if (w != null) return plan + L.F("{0}% left · {1}", Math.Round(p.Usage.Room(w)), Ui.LabelOf(w));
-            var bal = p.Usage == null ? null : p.Usage.Windows.FirstOrDefault(x => x.NoBar && x.RightText != null);
-            if (bal != null) return plan + Ui.LabelOf(bal) + ": " + bal.RightText;
+            if (w != null) return plan + Ui.Value(w, p.Usage, Ui.ValueStyle.Long) + " · " + Ui.LabelOf(w);
+            var bal = Ui.Balance(p);
+            if (bal != null) return plan + Ui.LabelOf(bal) + ": " + Ui.Value(bal, p.Usage, Ui.ValueStyle.Long);
             if (!string.IsNullOrEmpty(p.Notice)) return p.Notice;
             return L.T("On");
         }

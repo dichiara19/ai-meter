@@ -25,12 +25,11 @@ namespace AIMeter
         {
             var root = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
             var top = new DockPanel { LastChildFill = true };
-            // Display remaining money for monetary limits.
-            // Cap model quota by the enclosing limit's remaining room.
+            // Cap model quota by the enclosing limit's remaining room; the value says what it is ("18% left", "0.73 $ left").
             var parent = u == null ? null : u.ParentOf(w);
             bool capped = parent != null && parent.Remaining < w.Remaining;
             double room = capped ? parent.Remaining : w.Remaining;
-            string right = w.RightText != null ? L.T(w.RightText) : (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(room).ToString(It) + "%");
+            string right = Value(w, u, ValueStyle.Short);
             if (w.CachedAt.HasValue) right = L.F("{0} (cached)", right);
             var pct = Text(right, 13, "Text", FontWeights.SemiBold);
             pct.Margin = new Thickness(8, 0, 0, 0);
@@ -57,7 +56,7 @@ namespace AIMeter
                 return root;
             }
             // Draw effective room solid and the model's own remaining quota behind it.
-            var bar = Bar(room, capped ? LevelBrush(room, brand) : LevelBrush(w, brand), 4, capped ? w.Remaining : -1);
+            var bar = LimitBar(room, capped ? LevelBrush(room, brand) : LevelBrush(w, brand), 4, capped ? w.Remaining : -1);
             bar.Margin = new Thickness(0, 5, 0, 0);
             root.Children.Add(bar);
             if (capped)
@@ -458,9 +457,9 @@ namespace AIMeter
             if (p.Running && p.GpuTotal > 0)
             {
                 double free = 100 - Math.Min(100, p.GpuUsed * 100.0 / p.GpuTotal);
-                var w = new UsageWindow { Label = "Video memory", Used = 100 - free, RightText = L.F("{0} free", GpuMemory.Format(Math.Max(0, p.GpuTotal - p.GpuUsed))) };
+                var w = new UsageWindow { Label = "Video memory", Used = 100 - free, RightText = GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long) };
                 var row = UsageRow(w, null, "Info");
-                row.ToolTip = L.F("Video memory: {0} of {1} in use", GpuMemory.Format(p.GpuUsed), GpuMemory.Format(p.GpuTotal));
+                row.ToolTip = L.F("Video memory: {0}", GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long));
                 stack.Children.Add(row);
             }
 
