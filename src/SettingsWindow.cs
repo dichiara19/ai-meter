@@ -68,13 +68,14 @@ namespace AIMeter
             var body = new Grid();
             body.ColumnDefinitions.Add(navColumn);
             body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var navScroll = new ScrollViewer { Content = nav, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Focusable = false };
+            var navScroll = Ui.TouchScroll(new ScrollViewer { Content = nav, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Focusable = false });
             body.Children.Add(navScroll);
-            scroll = new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Focusable = false };
+            scroll = Ui.TouchScroll(new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Focusable = false });
             Grid.SetColumn(scroll, 1);
             body.Children.Add(scroll);
             root.Children.Add(body);
             Content = root;
+            Ui.ToolTipsOnHold(this);
 
             // Collapse navigation to icons in narrow windows, matching Windows Settings.
             SizeChanged += (o, e) =>

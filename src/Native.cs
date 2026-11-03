@@ -254,7 +254,8 @@ namespace AIMeter
 
         public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time);
         [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr mod, WinEventProc proc, uint pid, uint tid, uint flags);
-        public const uint EVENT_SYSTEM_FOREGROUND = 3;
+        [DllImport("user32.dll")] public static extern bool UnhookWinEvent(IntPtr hook);
+        public const uint EVENT_SYSTEM_FOREGROUND = 3, EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
 
         // --- notification area ----------------------------------------------------
         [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
@@ -279,6 +280,7 @@ namespace AIMeter
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
         [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
         public const int WS_CHILD = 0x40000000, WS_VISIBLE = 0x10000000, WS_CLIPSIBLINGS = 0x04000000;
+        public const int WS_POPUP = unchecked((int)0x80000000);
 
         /// <summary>The primary monitor's taskbar.</summary>
         public static IntPtr FindTaskbar() { return FindWindowW("Shell_TrayWnd", null); }
@@ -521,6 +523,16 @@ namespace AIMeter
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string title);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT r);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
+
+        /// <summary>Screen rectangle of a window (physical pixels), empty if it cannot be read.</summary>
+        public static RECT WindowRect(IntPtr h)
+        {
+            RECT r;
+            return GetWindowRect(h, out r) ? r : default(RECT);
+        }
+
+        /// <summary>The thread that created a window, and its process.</summary>
+        public static uint WindowThread(IntPtr h, out uint pid) { return GetWindowThreadProcessId(h, out pid); }
 
         /// <summary>Position and size of a window as text, to detect whether it has changed.</summary>
         public static string RectKey(IntPtr h)

@@ -105,15 +105,33 @@ namespace AIMeter
         }
 
         // ================================================================ panel and pill
-        public void ToggleFlyout() { ToggleFlyout(() => flyout.ShowFromTray()); }
+        public void ToggleFlyout() { ToggleFlyout(() => flyout.ShowFromTray(), DateTime.MinValue); }
 
-        public void ToggleFlyoutFromTaskbar(TaskbarPill anchor) { ToggleFlyout(() => flyout.ShowFromTaskbar(anchor.OnLeft)); }
+        public void ToggleFlyoutFromTaskbar(TaskbarPill anchor) { ToggleFlyout(() => flyout.ShowFromTaskbar(anchor.OnLeft), pillPressedAt); }
+
+        /// <summary>A mouse button, finger or pen went down on the taskbar pill; its click or tap follows on release.</summary>
+        public void PillPressed() { pillPressedAt = DateTime.Now; }
+
+        /// <summary>How long a press on the taskbar pill explains what follows it: the panel hiding, the taskbar coming to the foreground.</summary>
+        private static readonly TimeSpan PressEffects = TimeSpan.FromSeconds(2);
+
+        /// <summary>
+        /// Whether the click releasing a press is the one that just hid the panel: pressing the pill takes focus from an
+        /// open panel, which hides it before the click arrives. A touch tap can last longer than a mouse click, so the
+        /// press time counts, not a fixed delay. Without a recent press (the notification area icon reports only
+        /// clicks) a panel hidden in the last 300 ms counts.
+        /// </summary>
+        internal static bool ClosedByThisPress(DateTime hiddenAt, DateTime pressedAt, DateTime now)
+        {
+            if (now - pressedAt > PressEffects) pressedAt = now.AddMilliseconds(-300);
+            return hiddenAt >= pressedAt;
+        }
 
         /// <summary>Hide a pinned panel, or render and show it with the given placement.</summary>
-        private void ToggleFlyout(Action show)
+        private void ToggleFlyout(Action show, DateTime pressedAt)
         {
             if (flyout.IsVisible && !flyout.HoverMode) { flyout.Hide(); return; }
-            if ((DateTime.Now - flyoutHiddenAt).TotalMilliseconds < 300) return; // This click has just closed the panel.
+            if (ClosedByThisPress(flyoutHiddenAt, pressedAt, DateTime.Now)) return;
             if (Last != null) flyout.Render(Last);
             show();
             UpdateVisibility();
@@ -125,7 +143,20 @@ namespace AIMeter
             CancelHideDetails();
             if (flyout.IsVisible) return;
             if (Last != null) flyout.Render(Last);
-            flyout.ShowNear(anchor);
+            flyout.ShowNear(anchor, false);
+            UpdateVisibility();
+        }
+
+        /// <summary>
+        /// A tap on the overlay. Touch has no hover, so the panel opens next to it with focus: it stays while being read
+        /// or scrolled and closes on a tap elsewhere. A second tap on the overlay closes it.
+        /// </summary>
+        public void PinDetails(Window anchor)
+        {
+            CancelHideDetails();
+            if (flyout.IsVisible && !flyout.HoverMode) { flyout.Hide(); return; }
+            if (Last != null) flyout.Render(Last);
+            flyout.ShowNear(anchor, true);
             UpdateVisibility();
         }
 
@@ -160,7 +191,10 @@ namespace AIMeter
         private void OnForegroundChanged(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time)
         {
 
-            if (flyout.IsVisible && flyout.TaskbarMode && !Native.IsOwnWindow(hwnd)) flyout.Hide();   // A click outside the app closes the taskbar flyout.
+            // A click outside the app closes the taskbar flyout. Should pressing the pill bring the taskbar to the
+            // foreground, this asynchronous event can arrive after the tap has opened the panel: that is not outside.
+            bool pillPress = hwnd == Native.FindTaskbar() && DateTime.Now - pillPressedAt < PressEffects;
+            if (flyout.IsVisible && flyout.TaskbarMode && !pillPress && !Native.IsOwnWindow(hwnd)) flyout.Hide();
             bool busy = Native.UserIsBusyFullscreen();
             if (busy == fullscreenBusy) return;
             fullscreenBusy = busy;

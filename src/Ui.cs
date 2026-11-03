@@ -44,6 +44,55 @@ namespace AIMeter
             return b;
         }
 
+        // ------------------------------------------------------------ touch
+        /// <summary>
+        /// Let a finger scroll the content vertically, as the wheel does: a ScrollViewer ignores touch unless panning
+        /// is turned on. At either end the window stays still instead of shifting to show the boundary, which
+        /// WPF windows do by default.
+        /// </summary>
+        public static ScrollViewer TouchScroll(ScrollViewer scroll)
+        {
+            scroll.PanningMode = PanningMode.VerticalOnly;
+            scroll.ManipulationBoundaryFeedback += (o, e) => e.Handled = true;
+            return scroll;
+        }
+
+        /// <summary>
+        /// Touch has no hover, so WPF never shows tooltips to a finger. In this window a press and hold on an element
+        /// with a tooltip opens it above the element, until the next touch or until the window hides.
+        /// </summary>
+        public static void ToolTipsOnHold(Window w)
+        {
+            ToolTip open = null;
+            Action close = () => { if (open != null) { open.IsOpen = false; open = null; } };
+            w.AddHandler(Stylus.StylusSystemGestureEvent, new StylusSystemGestureEventHandler((o, e) =>
+            {
+                if (e.SystemGesture != SystemGesture.HoldEnter) return;
+                var owner = ToolTipOwner(e.OriginalSource as DependencyObject);
+                if (owner == null) return;
+                close();
+                open = owner.ToolTip as ToolTip ?? new ToolTip { Content = owner.ToolTip };
+                open.PlacementTarget = owner;
+                open.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+                open.IsOpen = true;
+            }), true);
+            w.PreviewStylusDown += (o, e) => close();
+            w.IsVisibleChanged += (o, e) => close();
+            w.Deactivated += (o, e) => close();
+        }
+
+        /// <summary>The nearest element, from the touched one outwards, that has a tooltip.</summary>
+        internal static FrameworkElement ToolTipOwner(DependencyObject d)
+        {
+            while (d != null && !(d is Window))
+            {
+                var fe = d as FrameworkElement;
+                if (fe != null && fe.ToolTip != null) return fe;
+                d = d is Visual ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);
+            }
+            return null;
+        }
+
         /// <summary>
         /// Default to the five-hour session, then a main non-monetary limit, then a monetary service limit,
         /// then a secondary limit.

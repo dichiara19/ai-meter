@@ -94,7 +94,7 @@ $bw.Flush()
   <startup><supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.8"/></startup>
   <runtime>
     <gcConcurrent enabled="false"/>
-    <AppContextSwitchOverrides value="Switch.System.Windows.DoNotScaleForDpiChanges=false"/>
+    <AppContextSwitchOverrides value="Switch.System.Windows.DoNotScaleForDpiChanges=false;Switch.System.Windows.Input.Stylus.EnablePointerSupport=true"/>
   </runtime>
 </configuration>
 '@ | Set-Content (Join-Path $bin 'AIMeter.exe.config') -Encoding UTF8
