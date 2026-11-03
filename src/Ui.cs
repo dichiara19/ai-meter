@@ -199,7 +199,7 @@ namespace AIMeter
             if (p.Models == null || p.Models.Count == 0) return L.T("Local models: none loaded");
             var lines = new List<string> { L.N(p.Models.Count, "{0} local model loaded", "{0} local models loaded") };
             foreach (var m in p.Models) lines.Add("• " + m.Name + " · " + string.Join(" · ", LocalFacts(m)));
-            if (p.GpuTotal > 0) lines.Add(L.F("Video memory: {0} of {1} in use", GpuMemory.Format(p.GpuUsed), GpuMemory.Format(p.GpuTotal)));
+            if (p.GpuTotal > 0) lines.Add(L.F("Video memory: {0}", GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long)));
             return string.Join("\n", lines);
         }
 
@@ -230,18 +230,68 @@ namespace AIMeter
             return (k >= 10 ? Math.Round(k).ToString(It) : k.ToString("0.#", It)) + "K";
         }
 
-        /// <summary>Summarise five-hour limits for tooltips.</summary>
+        /// <summary>Summarise the limit each service shows, or its balance when it has no limit, for tooltips.</summary>
         public static string Summary(Snapshot s)
         {
             return string.Join("\n", s.Shown.Select(p =>
             {
                 if (p.Models != null) return LocalSummary(p);
-                var w = Primary(p);
+                var w = Primary(p) ?? Balance(p);
                 string n = p.Name;
-                return w == null ? L.F("{0}: no data", n) : L.F("{0}: {1}% left ({2})", n, Math.Round(p.Usage.Room(w)), LabelOf(w)) +
+                return w == null ? L.F("{0}: no data", n) : L.F("{0}: {1} ({2})", n, Value(w, p.Usage, ValueStyle.Long), LabelOf(w)) +
                        (w.ResetsAt.HasValue ? L.F(", resets {0}", Alerts.When(w.ResetsAt.Value)) : "") +
                        (w.RunsOutAt.HasValue ? " · " + L.F("runs out {0}", Alerts.When(w.RunsOutAt.Value)) : "");
             }));
+        }
+
+        // ------------------------------------------------------------ limit values
+        // Every surface states a limit the same way: what is left (or, if chosen in Settings, what is used), as a
+        // percentage for quotas and as money for credit limits (or as a percentage, if chosen). A balance or a value the
+        // service states as text is shown as it is. Notifications always say what is left: they warn that it runs out.
+
+        /// <summary>How much a value says: the number alone (pill, tray), with "left" or "used" (cards), or also the total (tooltips, notifications).</summary>
+        internal enum ValueStyle { Number, Short, Long }
+
+        /// <summary>Whether limits show what is used instead of what is left (Settings → Where to see it).</summary>
+        internal static bool ShowUsed { get { return Settings.Current != null && Settings.Current.LimitValues == "used"; } }
+
+        /// <summary>Whether limits in money show a percentage instead of the amount.</summary>
+        internal static bool MoneyAsPercent { get { return Settings.Current != null && Settings.Current.MoneyValues == "percent"; } }
+
+        /// <summary>
+        /// A limit's value as every surface shows it. Percentages use the effective room, capped by an enclosing limit,
+        /// when <paramref name="u"/> is given. <paramref name="left"/> forces what is left, whatever the setting.
+        /// </summary>
+        public static string Value(UsageWindow w, Usage u, ValueStyle style, bool left = false)
+        {
+            if (w.RightText != null) return L.T(w.RightText);
+            bool used = ShowUsed && !left;
+            if (w.Spent != null && !MoneyAsPercent)
+            {
+                string amount = w.Spent.Format(used ? w.Spent.Used : Math.Max(0, w.Spent.Limit - w.Spent.Used));
+                if (style == ValueStyle.Number) return amount;
+                if (style == ValueStyle.Short) return L.F(used ? "{0} used" : "{0} left", amount);
+                return L.F(used ? "{0} used of {1}" : "{0} left of {1}", amount, w.Spent.Format(w.Spent.Limit));
+            }
+            double room = u == null ? w.Remaining : u.Room(w);
+            string percent = Math.Round(used ? 100 - room : room).ToString(It);
+            if (style == ValueStyle.Number) return L.F("{0}%", percent);
+            return L.F(used ? "{0}% used" : "{0}% left", percent);
+        }
+
+        /// <summary>A standalone balance or spending value, shown where a service has no limit with a percentage.</summary>
+        public static UsageWindow Balance(ProviderState p)
+        {
+            return p.Usage == null ? null : p.Usage.Windows.FirstOrDefault(w => w.NoBar && w.RightText != null && !w.Hidden);
+        }
+
+        /// <summary>
+        /// A limit's bar, drawn as its value reads: what is left, or what is used when that is chosen. The colour always
+        /// follows what is left. A faint fill shows a model's own quota behind an enclosing limit that caps it.
+        /// </summary>
+        public static FrameworkElement LimitBar(double room, string brush, double height, double ghost = -1)
+        {
+            return ShowUsed ? Bar(100 - room, brush, height) : Bar(room, brush, height, ghost);
         }
 
         /// <summary>

@@ -133,8 +133,8 @@ namespace AIMeter
         {
             var parts = s.Shown.Where(p => p.Models == null).Select(p =>
             {
-                var w = Ui.Primary(p);
-                return w == null ? p.Name + " –" : p.Name + " " + Math.Round(p.Usage.Room(w)) + "%";
+                var w = Ui.Primary(p) ?? Ui.Balance(p);
+                return w == null ? p.Name + " –" : p.Name + " " + Ui.Value(w, p.Usage, Ui.ValueStyle.Number);
             });
             string text = "AI Meter · " + string.Join(" · ", parts);
             tray.Text = text.Length > 63 ? text.Substring(0, 63) : text;
