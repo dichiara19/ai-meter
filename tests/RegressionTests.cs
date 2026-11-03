@@ -55,6 +55,7 @@ namespace AIMeter
             Test("Free models skip routers, paid, unpriced, expired and media models", FreeModelList);
             Test("Running Pi processes name their session folders, also inside a sandbox", RunningPiFolders);
             Test("Pi sessions record their provider and move to that service's card", PiSessionsByService);
+            Test("Antigravity CLI sessions give title, status and the latest model from agy's databases", AntigravitySessions);
             StartupRegressionTests.Register(Test);
             HistoryRegressionTests.Register(Test);
             ConsumptionTests.Register(Test);
@@ -636,6 +637,47 @@ namespace AIMeter
             Assert(claude.Sessions.Count == 1 && claude.Running && claude.Busy == 1, "The Anthropic session did not move to the Claude card.");
             // Providers whose service has no card shown keep their sessions with the agents.
             Assert(local.Sessions.Count == 2 && local.Sessions.All(x => x.Provider != "anthropic"), "Sessions without a card were moved.");
+        }
+
+        private static void AntigravitySessions()
+        {
+            string home = Path.Combine(Settings.TestFolder, "agy-home"), root = Path.Combine(home, @".gemini\antigravity-cli");
+            Func<int, byte[], byte[]> field = (number, bytes) => new[] { (byte)(number << 3 | 2), (byte)bytes.Length }.Concat(bytes).ToArray();
+            Func<int, byte[], byte[]> wide = (number, bytes) => new[] { (byte)(number << 3 & 0x7f | 0x80 | 2), (byte)(number >> 4), (byte)bytes.Length }.Concat(bytes).ToArray();
+            // executor_metadata as agy 1.4 writes it: the model at 10.1.28, after fields of other kinds that must be skipped.
+            Func<string, string> executor = model => BitConverter.ToString(new byte[] { 0x08, 0x96, 0x01 }.Concat(field(2, Encoding.UTF8.GetBytes("x")))
+                .Concat(field(10, new byte[] { 0x18, 0x01 }.Concat(field(1, wide(27, Encoding.UTF8.GetBytes("skills")).Concat(wide(28, Encoding.UTF8.GetBytes(model))).ToArray())).ToArray()))
+                .ToArray()).Replace("-", "");
+            Func<double, string> ago = minutes => DateTime.UtcNow.AddMinutes(-minutes).ToString("yyyy-MM-dd HH:mm:ss.fffffff", CultureInfo.InvariantCulture) + "+00:00";
+
+            using (var db = new HistoryDatabase(Path.Combine(root, "conversation_summaries.db")))
+            {
+                // agy's own definition, so that the query is checked against every column it names.
+                db.Execute("CREATE TABLE `conversation_summaries` (`conversation_id` text,`title` text NOT NULL DEFAULT \"\",`preview` text NOT NULL DEFAULT \"\",`step_count` integer NOT NULL DEFAULT 0,`last_modified_time` datetime NOT NULL,`workspace_uris` text NOT NULL,`status` text NOT NULL DEFAULT \"\",`source` text NOT NULL DEFAULT \"\",`project_id` text NOT NULL DEFAULT \"\",`agent_name` text NOT NULL DEFAULT \"\",`parent_conversation_id` text NOT NULL DEFAULT \"\",`nesting_depth` integer NOT NULL DEFAULT 0,`battle_id` text NOT NULL DEFAULT \"\",`winning_conversation_id` text NOT NULL DEFAULT \"\",`not_fully_idle` numeric NOT NULL DEFAULT false,`killed` numeric NOT NULL DEFAULT false,`last_user_input_time` datetime NOT NULL,`last_user_input_step_index` integer NOT NULL DEFAULT -1,`app_data_dir` text NOT NULL DEFAULT \"\",`raw_summary` blob,`group_id` text NOT NULL DEFAULT \"\",PRIMARY KEY (`conversation_id`))");
+                Action<string, string, string, string, string> add = (id, title, status, modified, parent) => db.Execute(
+                    "INSERT INTO conversation_summaries (conversation_id, title, last_modified_time, workspace_uris, status, parent_conversation_id, last_user_input_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    id, title, modified, "[\"file:///home/u/my%20app\"]", status, parent, modified);
+                add("busy", "Fix the pill", "CASCADE_RUN_STATUS_RUNNING", ago(1), "");
+                add("idle", "Review the README", "CASCADE_RUN_STATUS_IDLE", ago(5), "");
+                add("child", "A subagent", "CASCADE_RUN_STATUS_RUNNING", ago(1), "busy");
+                add("old", "Yesterday's work", "CASCADE_RUN_STATUS_IDLE", ago(120), "");
+                add("empty", "", "CASCADE_RUN_STATUS_IDLE", "0001-01-01 00:00:00+00:00", "");
+            }
+            using (var db = new HistoryDatabase(Path.Combine(root, @"conversations\busy.db")))
+            {
+                db.Execute("CREATE TABLE `executor_metadata` (`idx` integer,`data` blob,PRIMARY KEY (`idx`))");
+                db.Execute("INSERT INTO executor_metadata VALUES (0, X'" + executor("claude-sonnet-4-6") + "'), (1, X'" + executor("gemini-3.8-flash-high") + "')");
+            }
+
+            // Readers that follow environment variables or running processes may add sessions from this PC.
+            var sessions = new CodingAgents(Settings.Current).ScanHome(new Probe(Settings.Current), home).Where(x => x.Kind == "Antigravity CLI").ToList();
+            Assert(sessions.Count == 2, "Subagents, old or never-run conversations were listed: " + sessions.Count);
+            var busy = sessions[0];
+            Assert(busy.Title == "Fix the pill" && busy.Status == "busy" && busy.Model == "gemini-3.8-flash-high", "The running conversation was misread: " + busy.Model);
+            var idle = sessions[1];
+            Assert(idle.Title == "Review the README" && idle.Status == "idle" && idle.Model == null, "The idle conversation was misread.");
+            Assert(Math.Abs((DateTime.Now - busy.Updated).TotalMinutes - 1) < 0.1, "The last change was not read as UTC.");
+            Assert(CodingAgents.ProtoText(new byte[] { 0x52, 0x09, 0x0a, 0x01 }, 10, 1) == null, "A truncated message gave a value.");
         }
 
         private static void FreeModelList()

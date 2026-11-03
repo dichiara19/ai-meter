@@ -9,7 +9,7 @@ using System.Text;
 namespace AIMeter
 {
     /// <summary>
-    /// Sessions of coding CLIs (OpenCode, Pi, Gemini CLI, Qwen Code, Goose, Crush, Cline, Kilo): title,
+    /// Sessions of coding CLIs (OpenCode, Pi, Gemini CLI, Antigravity CLI, Qwen Code, Goose, Crush, Cline, Kilo): title,
     /// folder, model in use and context occupied, from their local files on Windows and in WSL (if already running).
     /// Pi sessions are also read from the folders that running Pi processes name (RunningAgents). Sessions active in
     /// the last 30 minutes are shown. Read-only.
@@ -62,6 +62,7 @@ namespace AIMeter
                 try { add(OpenCodeLike(p, pl, "Kilo", @".local\share\kilo", "kilo.db")); } catch (Exception) { }
                 try { add(Pi(p, PiRoot(pl))); } catch (Exception) { }
                 try { add(Gemini(p, pl)); } catch (Exception) { }
+                try { add(Antigravity(p, pl)); } catch (Exception) { }
                 try { add(Qwen(p, pl)); } catch (Exception) { }
                 try { add(Goose(p, pl)); } catch (Exception) { }
                 try { add(Crush(p, pl)); } catch (Exception) { }
@@ -292,6 +293,114 @@ namespace AIMeter
             f.Pending = lastType == "user";
             f.Fresh = 2;
             return f;
+        }
+
+        // ================================================================ Antigravity CLI (agy)
+        /// <summary>
+        /// agy keeps one row per conversation in conversation_summaries.db, with title, workspace, run status and last
+        /// change as plain columns. The model is only in the conversation's own database, inside a protobuf blob.
+        /// </summary>
+        private static IEnumerable<Found> Antigravity(Probe p, Place pl)
+        {
+            string root = Path.Combine(pl.Home, @".gemini\antigravity-cli");
+            string db = Path.Combine(root, "conversation_summaries.db");
+            if (!File.Exists(db) || !Recent(Stamp(db))) return new Found[0];
+            return (List<Found>)p.Cached("agent:antigravity:" + db, Stamp(db), () =>
+            {
+                var list = new List<Found>();
+                // Subagents have a parent; killed conversations are over.
+                var rows = Sqlite.Rows(Openable(db), "SELECT conversation_id, title, workspace_uris, status, last_modified_time FROM conversation_summaries"
+                                                    + " WHERE parent_conversation_id = '' AND killed = 0 ORDER BY last_modified_time DESC LIMIT 4", 4);
+                if (rows == null) return list;
+                foreach (var r in rows)
+                {
+                    var f = new Found { Agent = "Antigravity CLI", Title = S0(r, 1), Updated = GoTime(S0(r, 4)) ?? DateTime.MinValue };
+                    var uris = Json.ParseAny(S0(r, 2) ?? "") as IList;
+                    string uri = uris != null && uris.Count > 0 ? uris[0] as string : null;
+                    if (uri != null && uri.StartsWith("file://", StringComparison.Ordinal)) f.Cwd = Uri.UnescapeDataString(uri.Substring(7));
+                    string status = S0(r, 3);
+                    f.Pending = status == "CASCADE_RUN_STATUS_RUNNING" || status == "CASCADE_RUN_STATUS_BUSY" || status == "CASCADE_RUN_STATUS_CANCELING";
+                    if ((DateTime.Now - f.Updated).TotalMinutes <= RecentMinutes) f.Model = AntigravityModel(Path.Combine(root, "conversations", S0(r, 0) + ".db"));
+                    list.Add(f);
+                }
+                return list;
+            });
+        }
+
+        /// <summary>
+        /// The model id chosen for the conversation, such as "gemini-3.8-flash-high", from the latest executor_metadata
+        /// row (field 10.1.28, seen in agy 1.4). Null if the file or the field is missing: agy publishes no schema.
+        /// </summary>
+        private static string AntigravityModel(string conversation)
+        {
+            if (!File.Exists(conversation)) return null;
+            var rows = Sqlite.Rows(Openable(conversation), "SELECT hex(data) FROM executor_metadata ORDER BY idx DESC LIMIT 1", 1);
+            if (rows == null || rows.Count == 0) return null;
+            string hex = S0(rows[0], 0) ?? "";
+            var data = new byte[hex.Length / 2];
+            for (int i = 0; i < data.Length; i++) data[i] = byte.Parse(hex.Substring(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            string model = ProtoText(data, 10, 1, 28);
+            return string.IsNullOrEmpty(model) ? null : model;
+        }
+
+        /// <summary>
+        /// The text at a path of protobuf field numbers, following the first length-delimited field with each number.
+        /// Needs no schema; returns null when a field is missing or the bytes are not a well-formed message.
+        /// </summary>
+        internal static string ProtoText(byte[] data, params int[] path)
+        {
+            int start = 0, end = data.Length;
+            foreach (int wanted in path)
+            {
+                int pos = start, found = -1, length = 0;
+                while (pos < end && found < 0)
+                {
+                    ulong key;
+                    if (!Varint(data, ref pos, end, out key)) return null;
+                    int wire = (int)(key & 7);
+                    ulong value;
+                    switch (wire)
+                    {
+                        case 0: if (!Varint(data, ref pos, end, out value)) return null; break;
+                        case 1: pos += 8; break;
+                        case 5: pos += 4; break;
+                        case 2:
+                            if (!Varint(data, ref pos, end, out value) || value > (ulong)(end - pos)) return null;
+                            if ((int)(key >> 3) == wanted) { found = pos; length = (int)value; }
+                            pos += (int)value;
+                            break;
+                        default: return null;   // Groups are not used by current encoders.
+                    }
+                    if (pos > end) return null;
+                }
+                if (found < 0) return null;
+                start = found;
+                end = found + length;
+            }
+            try { return new UTF8Encoding(false, true).GetString(data, start, end - start); }
+            catch (ArgumentException) { return null; }
+        }
+
+        private static bool Varint(byte[] data, ref int pos, int end, out ulong value)
+        {
+            value = 0;
+            for (int shift = 0; shift < 64 && pos < end; shift += 7)
+            {
+                byte b = data[pos++];
+                value |= (ulong)(b & 0x7f) << shift;
+                if (b < 0x80) return true;
+            }
+            return false;
+        }
+
+        /// <summary>A Go time as stored by agy, "2026-11-02 12:04:30.669840086+00:00"; fractions of a second are dropped.</summary>
+        internal static DateTime? GoTime(string s)
+        {
+            if (s == null || s.Length < 25) return null;
+            DateTimeOffset t;
+            if (!DateTimeOffset.TryParseExact(s.Substring(0, 19) + s.Substring(s.Length - 6), "yyyy-MM-dd HH:mm:sszzz", CultureInfo.InvariantCulture, DateTimeStyles.None, out t)) return null;
+            // A conversation that never ran is stored as year 1.
+            return t.Year < 2000 ? (DateTime?)null : t.LocalDateTime;
         }
 
         // ================================================================ Qwen Code
