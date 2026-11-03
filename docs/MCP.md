@@ -32,7 +32,7 @@ Antigravity CLI is listed when `~/.gemini/antigravity-cli` exists. Gemini CLI ha
 
 ## From the command line
 
-Claude Code, Codex and Antigravity CLI can add AI Meter with their own `mcp add` command. Under **From the command line** in **Settings → AI apps**, the **Windows** and **WSL** buttons copy the command with your paths filled in. Paste it into the matching terminal, then restart the CLI.
+Claude Code, Codex, Antigravity CLI and Hermes can add AI Meter with their own `mcp add` command. Under **From the command line** in **Settings → AI apps**, the **Windows** and **WSL** buttons copy the command with your paths filled in. Paste it into the matching terminal, then restart the CLI.
 
 AI Meter writes the relay at every start, so the path in the command exists as soon as AI Meter has run once. In the examples below, replace `<you>` with your Windows user name.
 
@@ -42,6 +42,7 @@ AI Meter writes the relay at every start, so the path in the command exists as s
 claude mcp add --scope user ai-meter '--' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 codex mcp add ai-meter '--' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 agy mcp add ai-meter 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' '--' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
+hermes mcp add ai-meter --command 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' --args -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 ```
 
 The quotes around `'--'` matter. When a CLI is installed with npm, PowerShell runs its `.ps1` shim and drops a bare `--`. The CLI would then read `-NoProfile` as one of its own options.
@@ -52,14 +53,16 @@ The quotes around `'--'` matter. When a CLI is installed with npm, PowerShell ru
 claude mcp add --scope user ai-meter -- /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 codex mcp add ai-meter -- /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 agy mcp add ai-meter /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -- -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
+hermes mcp add ai-meter --command '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' --args -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 ```
 
 Each command needs the right argument order:
 - **Claude Code and Codex** take the whole server command after `--`.
 - **Antigravity CLI** takes the program before `--` and its arguments after it. Its options go before the name `ai-meter`.
+- **Hermes** takes the program with `--command` and its arguments with `--args`, which must come last: it keeps every following word, dashes included. Hermes tries the server before saving it in `config.yaml`, and asks before replacing an existing `ai-meter` entry. In a running Hermes, `/reload-mcp` loads it without a restart.
 - `--scope user` makes the server available in every project. Without it, Claude Code adds it to the current project only. Antigravity CLI has no scope: its servers apply everywhere.
 
-Check the connection with `claude mcp list`, `codex mcp get ai-meter` or `agy mcp list`. Remove it with `claude mcp remove --scope user ai-meter`, `codex mcp remove ai-meter` or `agy mcp remove ai-meter`.
+Check the connection with `claude mcp list`, `codex mcp get ai-meter`, `agy mcp list` or `hermes mcp test ai-meter`. Remove it with `claude mcp remove --scope user ai-meter`, `codex mcp remove ai-meter`, `agy mcp remove ai-meter` or `hermes mcp remove ai-meter`.
 
 Other apps:
 - **Visual Studio Code** has its own command. From `cmd`, run `code --add-mcp "{\"name\":\"ai-meter\",\"type\":\"stdio\",\"command\":\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\",\"args\":[\"-NoProfile\",\"-NonInteractive\",\"-ExecutionPolicy\",\"Bypass\",\"-File\",\"C:\\Users\\<you>\\AppData\\Roaming\\AIMeter\\mcp.ps1\"]}"`. The switch in Settings is simpler.
@@ -154,7 +157,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 
   | `reason` | Meaning |
   |---|---|
-  | `no_dispatch` | Delegation does not support this agent (Codex, Claude Code, Gemini CLI, Antigravity CLI, Cursor Agent, Crush) |
+  | `no_dispatch` | Delegation does not support this agent (Codex, Claude Code, Gemini CLI, Antigravity CLI, Cursor Agent, Crush, Hermes) |
   | `place_not_verified` | It supports the agent, but not in this place (Pi on Windows) |
   | `program_not_found` | Its settings folder is here, but its program is not in the usual folders |
   | `not_set_up` | Its program is here, but it has no settings folder yet |
@@ -280,7 +283,7 @@ The coding agents AI Meter knows are data, like services: `agents/*.json`, built
 | `order` | Position in key discovery and lists, lower first (default 1000) |
 | `programs` | Program names per place (`windows`, `wsl`), without an extension. On Windows `.exe`, `.cmd`, `.bat` and `.ps1` are tried, in that order |
 | `folders` | Settings folders relative to the home: any one shows the agent is set up |
-| `keys` | Where the agent keeps API keys: a home-relative `file` and a JSON `path`, with `{id}` for the service's aliases (`auth.ids` in its service definition) |
+| `keys` | Where the agent keeps API keys: a home-relative `file` and a JSON `path`, with `{id}` for the service's aliases (`auth.ids` in its service definition), or a `file` with `"format": "env"`, a dotenv file of `NAME=value` lines read by the variable names in the service's `auth.env` (Hermes keeps its keys this way) |
 | `package` | npm package, to read the version without running the agent; an agent npm installed in WSL also needs `node` |
 | `models` | The agent's own model list, for [best-effort candidates](#best-effort-candidates): `format` (`pi` or `models.dev`), `file` under `{home}/` or `{package}/` with `{provider}` for the service's alias, and optional `versions` whose layout was checked. Pi: `{package}/node_modules/@earendil-works/pi-ai/dist/providers/data/{provider}.json` for 1.x; OpenCode: `{home}/.cache/opencode/models.json` |
 | `dispatch` | How a plugin starts it. Without it, the agent is reported in `runtimes.unsupported` |
