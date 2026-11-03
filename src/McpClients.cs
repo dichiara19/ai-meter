@@ -109,7 +109,7 @@ namespace AIMeter
         public static bool IsConnected(Client c)
         {
             if (!File.Exists(c.ConfigPath)) return false;
-            if (c.Format == Format.CodexToml) return TomlHeader.IsMatch(File.ReadAllText(c.ConfigPath, Encoding.UTF8));
+            if (c.Format == Format.CodexToml) return HasTomlEntry(File.ReadAllText(c.ConfigPath, Encoding.UTF8));
             var doc = Json.Parse(File.ReadAllText(c.ConfigPath, Encoding.UTF8));
             var servers = Json.Obj(doc, ServersKey(c.Format));
             return servers != null && servers.ContainsKey(EntryName);
@@ -217,9 +217,40 @@ namespace AIMeter
 
         // ------------------------------------------------------------ Codex TOML
 
-        // [mcp_servers.ai-meter] and its sub-tables, such as [mcp_servers.ai-meter.env], with or without quotes.
+        // Codex's config is edited line by line, not parsed and rewritten, so that comments and formatting stay as the
+        // user wrote them. ScanToml follows strings, comments, arrays and inline tables across lines, so that only a real
+        // table header starts or ends AI Meter's section; a file it cannot follow is refused, and every edited text is
+        // scanned again before it is written.
+
+        internal const string UnreadableToml = "Codex's config.toml contains text that AI Meter cannot follow safely, such as an unclosed string or array, or AI Meter's entry written in another form. Edit the file by hand with the configuration below.";
+        internal const string UncheckedToml = "AI Meter's edit of Codex's config.toml did not pass its own check, so the file was left as it was. Edit it by hand with the configuration below.";
+
+        // [mcp_servers.ai-meter] and its sub-tables, such as [mcp_servers.ai-meter.env]. Only a fallback for showing the
+        // state of a file ScanToml cannot follow: unlike the scanner, it is fooled by such a line inside a string.
         private static readonly Regex TomlHeader = new Regex(@"^\s*\[\s*mcp_servers\s*\.\s*(ai-meter|""ai-meter"")\s*(\.[^\]]*)?\]\s*(#.*)?$", RegexOptions.Multiline);
-        private static readonly Regex AnyHeader = new Regex(@"^\s*\[");
+
+        /// <summary>Table headers found by ScanToml, by line.</summary>
+        private sealed class TomlScan
+        {
+            public bool[] Headers;       // Lines that are [table] or [[array.of.tables]] headers.
+            public bool[] Own;           // Header lines of AI Meter's table or of its sub-tables.
+            public int OwnTables;        // [mcp_servers.ai-meter] headers themselves.
+            public int OwnSubTables;     // Headers below it, such as [mcp_servers.ai-meter.env].
+        }
+
+        /// <summary>Where the scan is between lines.</summary>
+        private sealed class TomlState
+        {
+            public char Quote;           // '"' inside a """ string, '\'' inside a ''' string, otherwise '\0'.
+            public int Depth;            // Arrays and inline tables still open.
+        }
+
+        /// <summary>Whether the text has AI Meter's table or one of its sub-tables.</summary>
+        internal static bool HasTomlEntry(string text)
+        {
+            var scan = ScanToml(TomlLines(text));
+            return scan != null ? scan.OwnTables + scan.OwnSubTables > 0 : TomlHeader.IsMatch(text);
+        }
 
         internal static string WithToml(string text, string command, List<string> args)
         {
@@ -229,23 +260,233 @@ namespace AIMeter
             sb.Append("[mcp_servers.").Append(EntryName).Append("]\n");
             sb.Append("command = ").Append(TomlString(command)).Append('\n');
             sb.Append("args = [").Append(string.Join(", ", args.Select(TomlString))).Append("]\n");
+            string result = sb.ToString();
+            CheckToml(result, true);
+            return result;
+        }
+
+        /// <summary>
+        /// The text without AI Meter's tables, or null when there were none. Throws ConfigException for a file the
+        /// scanner cannot follow, even when there is nothing to remove, since WithToml relies on that check.
+        /// </summary>
+        internal static string WithoutToml(string text)
+        {
+            var lines = TomlLines(text);
+            var scan = ScanToml(lines);
+            if (scan == null) throw new ConfigException(L.T(UnreadableToml));
+            var kept = new List<string>();
+            bool inOwn = false, removed = false;
+            for (int n = 0; n < lines.Length; n++)
+            {
+                if (scan.Headers[n]) inOwn = scan.Own[n];
+                if (inOwn) { removed = true; continue; }
+                kept.Add(lines[n]);
+            }
+            if (!removed) return null;
+            string result = string.Join("\n", kept).TrimEnd('\n') + "\n";
+            CheckToml(result, false);
+            return result;
+        }
+
+        /// <summary>Refuse an edited text that the scanner cannot follow, or that lacks exactly one AI Meter table (none when disconnected).</summary>
+        private static void CheckToml(string text, bool connected)
+        {
+            var scan = ScanToml(TomlLines(text));
+            if (scan == null || scan.OwnTables != (connected ? 1 : 0) || scan.OwnSubTables != 0) throw new ConfigException(L.T(UncheckedToml));
+        }
+
+        private static string[] TomlLines(string text)
+        {
+            return text.Replace("\r\n", "\n").Split('\n');
+        }
+
+        /// <summary>
+        /// Find the table headers, or return null for anything this scanner cannot classify: an unclosed string, array
+        /// or inline table, a line that is neither a header nor a key/value pair, or AI Meter's entry defined in a form
+        /// the edit would clash with (dotted keys, an inline table, an array of tables). It is not a full TOML parser:
+        /// values are only followed far enough to know where strings, comments and brackets end.
+        /// </summary>
+        private static TomlScan ScanToml(string[] lines)
+        {
+            var scan = new TomlScan { Headers = new bool[lines.Length], Own = new bool[lines.Length] };
+            var state = new TomlState();
+            var table = new List<string>();
+            bool inOwn = false;
+            for (int n = 0; n < lines.Length; n++)
+            {
+                string line = lines[n];
+                int i = 0;
+                if (state.Quote == '\0' && state.Depth == 0)
+                {
+                    // At top level a line starts a statement: a header, a key/value pair, a comment or nothing.
+                    i = SkipTomlSpace(line, 0);
+                    if (i == line.Length || line[i] == '#') continue;
+                    if (line[i] == '[')
+                    {
+                        bool array = i + 1 < line.Length && line[i + 1] == '[';
+                        i += array ? 2 : 1;
+                        var path = ReadTomlKey(line, ref i);
+                        string close = array ? "]]" : "]";
+                        if (path == null || string.CompareOrdinal(line, i, close, 0, close.Length) != 0) return null;
+                        i = SkipTomlSpace(line, i + close.Length);
+                        if (i < line.Length && line[i] != '#') return null;
+                        if (array && ClashesWithOwn(path)) return null;
+                        bool own = path.Count >= 2 && path[0] == "mcp_servers" && path[1] == EntryName;
+                        scan.Headers[n] = true;
+                        scan.Own[n] = own;
+                        if (own && path.Count == 2) scan.OwnTables++;
+                        else if (own) scan.OwnSubTables++;
+                        table = path;
+                        inOwn = own;
+                        continue;
+                    }
+                    var key = ReadTomlKey(line, ref i);
+                    if (key == null || i == line.Length || line[i] != '=') return null;
+                    if (!inOwn && ClashesWithOwn(table.Concat(key).ToList())) return null;
+                    i++;
+                }
+                if (!ScanTomlValue(line, i, state)) return null;
+            }
+            return state.Quote == '\0' && state.Depth == 0 ? scan : null;
+        }
+
+        /// <summary>
+        /// Whether a key defined outside AI Meter's tables, or an array of tables, would clash with [mcp_servers.ai-meter]:
+        /// mcp_servers itself (as an inline table or another value) or anything at or below mcp_servers.ai-meter.
+        /// </summary>
+        private static bool ClashesWithOwn(List<string> path)
+        {
+            return path.Count >= 1 && path[0] == "mcp_servers" && (path.Count == 1 || path[1] == EntryName);
+        }
+
+        /// <summary>
+        /// Follow the rest of a line from i, updating whether a multi-line string, an array or an inline table is still
+        /// open; false for a single-line string left unclosed or a closing bracket with nothing open.
+        /// </summary>
+        private static bool ScanTomlValue(string line, int i, TomlState state)
+        {
+            while (i < line.Length)
+            {
+                char ch = line[i];
+                if (state.Quote != '\0')
+                {
+                    // An escape in a """ string, including \""" and a line-ending backslash, never closes it.
+                    if (ch == '\\' && state.Quote == '"') { i += 2; continue; }
+                    int run = TomlRun(line, i, state.Quote);
+                    if (run >= 3)
+                    {
+                        if (run > 5) return false;   // Up to two quotes may stand just before the closing three.
+                        state.Quote = '\0';
+                    }
+                    i += Math.Max(run, 1);
+                    continue;
+                }
+                if (ch == '#') return true;   // A comment runs to the end of the line.
+                if (ch == '"' || ch == '\'')
+                {
+                    if (TomlRun(line, i, ch) >= 3) { state.Quote = ch; i += 3; continue; }
+                    i = EndOfTomlString(line, i);
+                    if (i < 0) return false;
+                    continue;
+                }
+                if (ch == '[' || ch == '{') state.Depth++;
+                else if ((ch == ']' || ch == '}') && --state.Depth < 0) return false;
+                i++;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Read a dotted key, such as mcp_servers."ai-meter".env, from i, leaving i after it and the spaces that follow;
+        /// null when there is none. Quoted parts are unescaped, so that "ai-meter" is recognised as ai-meter.
+        /// </summary>
+        private static List<string> ReadTomlKey(string line, ref int i)
+        {
+            var path = new List<string>();
+            while (true)
+            {
+                i = SkipTomlSpace(line, i);
+                if (i == line.Length) return null;
+                char ch = line[i];
+                string part;
+                if (ch == '"' || ch == '\'')
+                {
+                    int end = EndOfTomlString(line, i);
+                    if (end < 0) return null;
+                    part = line.Substring(i + 1, end - i - 2);
+                    if (ch == '"') part = UnescapeToml(part);
+                    if (part == null) return null;
+                    i = end;
+                }
+                else
+                {
+                    int start = i;
+                    while (i < line.Length && IsBareKeyChar(line[i])) i++;
+                    if (i == start) return null;
+                    part = line.Substring(start, i - start);
+                }
+                path.Add(part);
+                i = SkipTomlSpace(line, i);
+                if (i == line.Length || line[i] != '.') return path;
+                i++;
+            }
+        }
+
+        private static bool IsBareKeyChar(char ch)
+        {
+            return ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-';
+        }
+
+        /// <summary>A basic string's content with its escapes resolved, or null for an escape TOML does not define.</summary>
+        private static string UnescapeToml(string s)
+        {
+            if (s.IndexOf('\\') < 0) return s;
+            var sb = new StringBuilder();
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (s[i] != '\\') { sb.Append(s[i]); continue; }
+                if (++i == s.Length) return null;
+                int simple = "btnfre\"\\".IndexOf(s[i]);
+                if (simple >= 0) { sb.Append("\b\t\n\f\r\u001B\"\\"[simple]); continue; }
+                int digits = s[i] == 'x' ? 2 : s[i] == 'u' ? 4 : s[i] == 'U' ? 8 : 0;
+                if (digits == 0 || i + digits >= s.Length) return null;
+                long code = 0;
+                for (int k = 1; k <= digits; k++)
+                {
+                    if (!Uri.IsHexDigit(s[i + k])) return null;
+                    code = code * 16 + Convert.ToInt32(s[i + k].ToString(), 16);
+                }
+                if (code > 0x10FFFF || code >= 0xD800 && code <= 0xDFFF) return null;
+                sb.Append(char.ConvertFromUtf32((int)code));
+                i += digits;
+            }
             return sb.ToString();
         }
 
-        /// <summary>The text without AI Meter's tables, or null when there were none.</summary>
-        internal static string WithoutToml(string text)
+        /// <summary>The index just after a single-line string that starts at i, or -1 when it is not closed on the line.</summary>
+        private static int EndOfTomlString(string line, int i)
         {
-            var lines = text.Replace("\r\n", "\n").Split('\n');
-            var kept = new List<string>();
-            bool inOwn = false, removed = false;
-            foreach (var line in lines)
+            char quote = line[i];
+            for (int j = i + 1; j < line.Length; j++)
             {
-                if (AnyHeader.IsMatch(line)) inOwn = TomlHeader.IsMatch(line);
-                if (inOwn) { removed = true; continue; }
-                kept.Add(line);
+                if (quote == '"' && line[j] == '\\') j++;
+                else if (line[j] == quote) return j + 1;
             }
-            if (!removed) return null;
-            return string.Join("\n", kept).TrimEnd('\n') + "\n";
+            return -1;
+        }
+
+        /// <summary>How many times ch repeats from i.</summary>
+        private static int TomlRun(string line, int i, char ch)
+        {
+            int j = i;
+            while (j < line.Length && line[j] == ch) j++;
+            return j - i;
+        }
+
+        private static int SkipTomlSpace(string line, int i)
+        {
+            while (i < line.Length && (line[i] == ' ' || line[i] == '\t')) i++;
+            return i;
         }
 
         private static string TomlString(string s)
@@ -255,19 +496,44 @@ namespace AIMeter
 
         // ------------------------------------------------------------ files
 
-        /// <summary>Write the new text through a temporary file, keeping the previous content as a backup.</summary>
+        /// <summary>
+        /// Write the new text through a temporary file, keeping the previous content as a backup. Whatever fails, the
+        /// temporary file is removed and the previous content survives, in the file itself or in the backup.
+        /// </summary>
         private static void Save(Client c, string text)
         {
             if (text == null) return;   // Nothing to change.
             if (c.Wsl) text = text.Replace("\r\n", "\n");
             else text = text.Replace("\r\n", "\n").Replace("\n", "\r\n");
             Directory.CreateDirectory(Path.GetDirectoryName(c.ConfigPath));
-            string temporary = c.ConfigPath + ".aimeter-new";
-            File.WriteAllText(temporary, text, new UTF8Encoding(false));
-            if (File.Exists(c.ConfigPath)) File.Copy(c.ConfigPath, c.ConfigPath + ".aimeter-backup", true);
-            // Copying over the file, rather than moving, keeps its links and WSL permissions.
-            File.Copy(temporary, c.ConfigPath, true);
-            File.Delete(temporary);
+            string temporary = c.ConfigPath + ".aimeter-new", backup = c.ConfigPath + ".aimeter-backup";
+            try
+            {
+                File.WriteAllText(temporary, text, new UTF8Encoding(false));
+                bool backedUp = File.Exists(c.ConfigPath);
+                if (backedUp) File.Copy(c.ConfigPath, backup, true);
+                // Copying over the file, rather than moving, keeps its links and WSL permissions. A copy that fails part
+                // way may leave the file truncated, so the backup is put back, when possible, before the error goes on.
+                try { File.Copy(temporary, c.ConfigPath, true); }
+                catch
+                {
+                    if (backedUp) TryCopy(backup, c.ConfigPath);
+                    throw;
+                }
+            }
+            finally
+            {
+                try { File.Delete(temporary); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        private static void TryCopy(string source, string target)
+        {
+            try { File.Copy(source, target, true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 

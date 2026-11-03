@@ -26,6 +26,9 @@ namespace AIMeter
             test("A client that disconnects abruptly leaves the MCP pipe serving", AbruptDisconnect);
             test("Connecting an app adds only AI Meter's JSON entry and keeps the rest", JsonEdits);
             test("Codex TOML gains and loses only AI Meter's tables", TomlEdits);
+            test("Codex TOML headers inside strings, comments and multi-line arrays are left alone", TomlLexical);
+            test("Codex TOML that the editor cannot follow is refused, not rewritten", TomlRefusals);
+            test("A save that fails keeps the previous file and removes the temporary one", FailedSave);
             test("Antigravity CLI is found by its own folder and its empty MCP file is connected", AntigravityCli);
             test("Command-line installation quotes paths and places -- for each agent", Commands);
             test("A copy button confirms the copy on itself, then returns to its label", CopiedFeedback);
@@ -411,6 +414,122 @@ namespace AIMeter
             Assert(!removed.Contains("ai-meter") && removed.Contains("model = \"gpt-6\"") && removed.Contains("[profiles.fast]"), "Disconnecting removed the wrong tables.");
             Assert(McpClients.WithoutToml(removed) == null, "Disconnecting changed a file without AI Meter.");
             Assert(McpClients.WithToml(null, "ps.exe", args).StartsWith("[mcp_servers.ai-meter]\n", StringComparison.Ordinal), "A new file is wrong.");
+        }
+
+        private static void TomlLexical()
+        {
+            var args = McpClients.Arguments(@"C:\x\mcp.ps1");
+            Func<string, int> ownLines = t => t.Split('\n').Count(l => l == "[mcp_servers.ai-meter]");
+
+            // A table shown inside a """ string is text: it stays as it is, and the real table goes after the string.
+            string instructions = "model = \"gpt-6\"\ndeveloper_instructions = \"\"\"\nTo connect, add:\n[mcp_servers.ai-meter]\ncommand = \"fake\"\n\"\"\"\n\n[profiles.fast]\nmodel = \"mini\"\n";
+            Assert(McpClients.WithoutToml(instructions) == null && !McpClients.HasTomlEntry(instructions), "A header inside a \"\"\" string counts as AI Meter's table.");
+            string added = McpClients.WithToml(instructions, "ps.exe", args);
+            Assert(added.StartsWith(instructions.TrimEnd('\n') + "\n\n[mcp_servers.ai-meter]\ncommand = \"ps.exe\"\n", StringComparison.Ordinal) && ownLines(added) == 2, "The \"\"\" string changed or the entry was not appended.");
+            Assert(McpClients.HasTomlEntry(added) && McpClients.WithoutToml(added) == instructions, "Disconnecting did not restore the file around a \"\"\" string.");
+
+            // Headers inside ''' strings, after \""", across a line-ending backslash and after closing quotes.
+            const string kept = "[profiles.fast]\nmodel = \"mini\"\n";
+            foreach (var body in new[]
+            {
+                "notes = '''\n[profiles.fast]\nmodel = \"inside\"\n'''\n",
+                "notes = \"\"\"quote \\\"\"\" still open \\\n[profiles.fast]\n\"\"\"\n",
+                "notes = \"\"\"ends with two quotes\"\"\"\"\"\nsingle = 'C:\\x [profiles.fast]'\n",
+            })
+            {
+                string text = "[mcp_servers.ai-meter]\ncommand = \"old\"\n" + body + "\n" + kept;
+                Assert(McpClients.WithoutToml(text) == kept, "A string ended AI Meter's table early: " + body);
+            }
+
+            // Comments are not structure, nor is # or [ inside a string.
+            string comments = "# [mcp_servers.ai-meter]\nx = \"a # [b]\" # [mcp_servers.ai-meter]\n  # [mcp_servers.ai-meter]\n";
+            Assert(McpClients.WithoutToml(comments) == null && !McpClients.HasTomlEntry(comments), "A commented header counts as AI Meter's table.");
+            Assert(McpClients.WithoutToml(McpClients.WithToml(comments, "ps.exe", args)) == comments, "Comments were changed.");
+
+            // Lines that start with [ inside multi-line arrays, nested arrays and inline tables are values.
+            string others = "[mcp_servers.other]\ncommand = \"node\"\nargs = [\n  \"[x]\",\n[\"nested\"],\n]\n\n";
+            string arrays = others + "[mcp_servers.ai-meter]\ncommand = \"old\"\nargs = [\n[1, 2],\n  [3], # [profiles.fast]\n]\nenv = { A = \"[1]\", B = \"}\" }\n\n" + kept;
+            Assert(McpClients.WithoutToml(arrays) == others + kept, "A line in a multi-line array was taken for a header.");
+            Assert(ownLines(McpClients.WithToml(arrays, "ps.exe", args)) == 1, "Reconnecting around multi-line arrays duplicated the entry.");
+
+            // An array of tables after AI Meter's table ends it.
+            string hooks = "[[hooks.start]]\nname = \"a\"\n[[hooks.start]]\nname = \"b\"\n";
+            Assert(McpClients.WithoutToml("[mcp_servers.ai-meter]\ncommand = \"old\"\n" + hooks) == hooks, "An array of tables was removed with AI Meter's table.");
+
+            // Quoted and spaced forms of AI Meter's headers are recognised; similar names and Windows path keys are kept.
+            string rest = "[mcp_servers.\"ai-meter-2\"]\ncommand = \"x\"\n[projects.'C:\\Users\\x']\ntrust_level = \"trusted\"\n[projects.\"C:\\\\Users\\\\y\"]\ntrust_level = \"trusted\"\n";
+            foreach (var header in new[] { "[\"mcp_servers\".\"ai-meter\"]", "[ mcp_servers . 'ai-meter' ]  # ours", "[mcp_servers.\"ai\\u002Dmeter\"]", "[\"mcp_servers\".ai-meter.env]" })
+            {
+                string text = "a = 1\n" + header + "\ncommand = \"old\"\n" + rest;
+                Assert(McpClients.HasTomlEntry(text) && McpClients.WithoutToml(text) == "a = 1\n" + rest, "A quoted header was not recognised: " + header);
+            }
+            Assert(McpClients.WithoutToml("a = 1\n" + rest) == null, "A similar name or a path key was taken for AI Meter's table.");
+        }
+
+        private static void TomlRefusals()
+        {
+            var args = McpClients.Arguments(@"C:\x\mcp.ps1");
+            foreach (var broken in new[]
+            {
+                "x = \"\"\"\nnever closed\n[mcp_servers.ai-meter]\ncommand = \"old\"\n",
+                "x = '''\nnever closed\n",
+                "x = \"never closed\n[profiles.fast]\n",
+                "args = [\n  \"a\",\n",
+                "x = ]\n",
+                "x = \"\"\"too many quotes\"\"\"\"\"\"\n",
+                "mcp_servers.ai-meter.command = \"x\"\n",
+                "[mcp_servers]\nai-meter = { command = \"x\" }\n",
+                "mcp_servers = { other = { command = \"x\" } }\n",
+                "[[mcp_servers.ai-meter]]\ncommand = \"x\"\n",
+                "[profiles.fast] model = \"mini\"\n",
+                "just some words\n",
+                "[\"bad \\q escape\"]\n",
+            })
+            {
+                bool refusedAdd = false, refusedRemove = false;
+                try { McpClients.WithToml(broken, "ps.exe", args); }
+                catch (McpClients.ConfigException) { refusedAdd = true; }
+                try { McpClients.WithoutToml(broken); }
+                catch (McpClients.ConfigException) { refusedRemove = true; }
+                Assert(refusedAdd && refusedRemove, "A file the editor cannot follow was edited: " + broken);
+            }
+
+            try
+            {
+                foreach (var lang in new[] { "it", "es", "fr", "de", "pt" })
+                {
+                    L.Init(lang);
+                    foreach (var key in new[] { McpClients.UnreadableToml, McpClients.UncheckedToml })
+                        Assert(L.T(key) != key, "Missing TOML refusal translation for " + lang + ": " + key);
+                }
+            }
+            finally { L.Init("en"); }
+        }
+
+        private static void FailedSave()
+        {
+            string folder = Path.Combine(Path.GetTempPath(), "aimeter-save-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(folder);
+            try
+            {
+                var codex = new McpClients.Client { Id = "codex", Name = "Codex", Where = "Windows", Format = McpClients.Format.CodexToml, ConfigPath = Path.Combine(folder, "config.toml") };
+                const string previous = "model = \"gpt-6\"\r\n";
+                File.WriteAllText(codex.ConfigPath, previous);
+                bool failed = false;
+                // Another program holding the file open for reading only lets AI Meter read it, not write over it.
+                using (new FileStream(codex.ConfigPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    try { McpClients.Connect(codex, @"C:\x\mcp.ps1"); }
+                    catch (IOException) { failed = true; }
+                }
+                Assert(failed, "Writing over a locked file did not fail.");
+                Assert(File.ReadAllText(codex.ConfigPath) == previous && File.ReadAllText(codex.ConfigPath + ".aimeter-backup") == previous, "The previous content was lost.");
+                Assert(!File.Exists(codex.ConfigPath + ".aimeter-new"), "The temporary file was left behind.");
+
+                McpClients.Connect(codex, @"C:\x\mcp.ps1");
+                Assert(McpClients.IsConnected(codex) && !File.Exists(codex.ConfigPath + ".aimeter-new"), "Connecting after the failure did not work.");
+            }
+            finally { Directory.Delete(folder, true); }
         }
 
         private static void AntigravityCli()
