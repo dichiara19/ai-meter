@@ -63,6 +63,14 @@ namespace AIMeter
             Assert(oc.Environment["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1" && oc.Environment["OPENCODE_CONFIG_CONTENT"].Contains("openrouter/" + Model),
                 "OpenCode is not isolated, or its small model is not the free model.");
             Assert(oc.Notes.Any(n => n.Contains("stdin")), "The stdin warning is missing.");
+            // read_only must not rest on the plan agent's defaults or the user's config; the last matching rule wins.
+            var agents = Json.Obj(Json.Parse(oc.Environment["OPENCODE_CONFIG_CONTENT"]), "agent");
+            var plan = Json.Obj(Json.Obj(agents, "plan"), "permission");
+            var buildRead = Json.Obj(Json.Obj(Json.Obj(agents, "build"), "permission"), "read");
+            Assert(Json.Str(plan, "*") == "deny" && plan.Keys.First() == "*" && Json.Str(plan, "glob") == "allow" && Json.Str(plan, "bash") == null,
+                "OpenCode's read-only agent does not deny every tool but reading.");
+            Assert(Json.Obj(plan, "read").Keys.SequenceEqual(new[] { "*", "*.env", "*.env.*", "*.env.example" }) && Json.Str(buildRead, "*.env") == "deny",
+                "OpenCode may read .env files, or its read rules lost their order.");
             var build = Dispatch.Describe(Access("opencode", "windows"), Model, Dispatch.Modify, null, "windows", null, "1.19.5");
             Assert(build.Arguments[build.Arguments.IndexOf("--agent") + 1] == "build" && build.Arguments.Contains("{workspace}"), "Modify mode or the workspace placeholder is wrong.");
 
@@ -70,6 +78,14 @@ namespace AIMeter
             var ocWsl = Dispatch.Describe(Access("opencode", "wsl"), Model, null, @"C:\w", "windows", "Ubuntu-24.04", "1.19.5");
             Assert(ocWsl.Environment.Count == 0 && ocWsl.Arguments.Any(a => a.StartsWith("OPENCODE_CONFIG_CONTENT=", StringComparison.Ordinal)), "OpenCode's variables do not reach WSL.");
             Assert(ocWsl.Arguments[ocWsl.Arguments.IndexOf("--dir") + 1] == "." && ocWsl.Arguments.Contains(@"C:\w"), "A Windows folder was given to OpenCode inside WSL.");
+
+            // A key exported only in a WSL shell profile: an agent started from a shell in WSL has it, one started
+            // through wsl.exe -e does not, and the key is never passed along instead.
+            var profileKey = Access("pi", "wsl");
+            profileKey.KeyFromProfile = true;
+            var fromWindows = Dispatch.Describe(profileKey, Model, null, @"C:\w", "windows", "Ubuntu-24.04", "1.4.0");
+            Assert(!fromWindows.Supported && fromWindows.Reason.Contains("shell profile"), "An agent was started from Windows without the key its profile exports.");
+            Assert(Dispatch.Describe(profileKey, Model, null, "/home/me/w", "wsl", "Ubuntu-24.04", "1.4.0").Supported, "From WSL, a profile key reaches the agent.");
 
             // The provider is the alias the agent keeps the key under.
             var gemini = Dispatch.Describe(Access("pi", "wsl", "google"), "gemini-2.5-flash", null, null, "wsl", "Ubuntu-24.04", "1.4.0");

@@ -64,6 +64,20 @@ namespace AIMeter
             return def;
         }
 
+        /// <summary>
+        /// The part of a value for an extra key (a "keys" entry) that matches its "pattern", ignoring case, such as the
+        /// account ID inside a dashboard address pasted whole; the trimmed value when the entry has no pattern, and null
+        /// when the value is empty or does not match.
+        /// </summary>
+        public static string SlotText(Dictionary<string, object> spec, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            string pattern = Json.Str(spec, "pattern");
+            if (pattern == null) return value.Trim();
+            var m = Regex.Match(value, pattern, RegexOptions.IgnoreCase);
+            return m.Success ? m.Value : null;
+        }
+
         private static bool ParseColour(string s, out uint c)
         {
             c = 0;

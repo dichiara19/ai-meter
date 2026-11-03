@@ -32,7 +32,7 @@ Antigravity CLI is listed when `~/.gemini/antigravity-cli` exists. Gemini CLI ha
 
 ## From the command line
 
-Claude Code, Codex and Antigravity CLI can add AI Meter with their own `mcp add` command. Under **From the command line** in **Settings → AI apps**, the **Windows** and **WSL** buttons copy the command with your paths filled in. Paste it into the matching terminal, then restart the CLI.
+Claude Code, Codex, Antigravity CLI and Hermes can add AI Meter with their own `mcp add` command. Under **From the command line** in **Settings → AI apps**, the **Windows** and **WSL** buttons copy the command with your paths filled in. Paste it into the matching terminal, then restart the CLI.
 
 AI Meter writes the relay at every start, so the path in the command exists as soon as AI Meter has run once. In the examples below, replace `<you>` with your Windows user name.
 
@@ -42,6 +42,7 @@ AI Meter writes the relay at every start, so the path in the command exists as s
 claude mcp add --scope user ai-meter '--' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 codex mcp add ai-meter '--' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 agy mcp add ai-meter 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' '--' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
+hermes mcp add ai-meter --command 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' --args -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 ```
 
 The quotes around `'--'` matter. When a CLI is installed with npm, PowerShell runs its `.ps1` shim and drops a bare `--`. The CLI would then read `-NoProfile` as one of its own options.
@@ -52,14 +53,16 @@ The quotes around `'--'` matter. When a CLI is installed with npm, PowerShell ru
 claude mcp add --scope user ai-meter -- /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 codex mcp add ai-meter -- /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 agy mcp add ai-meter /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -- -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
+hermes mcp add ai-meter --command '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe' --args -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\Users\<you>\AppData\Roaming\AIMeter\mcp.ps1'
 ```
 
 Each command needs the right argument order:
 - **Claude Code and Codex** take the whole server command after `--`.
 - **Antigravity CLI** takes the program before `--` and its arguments after it. Its options go before the name `ai-meter`.
+- **Hermes** takes the program with `--command` and its arguments with `--args`, which must come last: it keeps every following word, dashes included. Hermes tries the server before saving it in `config.yaml`, and asks before replacing an existing `ai-meter` entry. In a running Hermes, `/reload-mcp` loads it without a restart.
 - `--scope user` makes the server available in every project. Without it, Claude Code adds it to the current project only. Antigravity CLI has no scope: its servers apply everywhere.
 
-Check the connection with `claude mcp list`, `codex mcp get ai-meter` or `agy mcp list`. Remove it with `claude mcp remove --scope user ai-meter`, `codex mcp remove ai-meter` or `agy mcp remove ai-meter`.
+Check the connection with `claude mcp list`, `codex mcp get ai-meter`, `agy mcp list` or `hermes mcp test ai-meter`. Remove it with `claude mcp remove --scope user ai-meter`, `codex mcp remove ai-meter`, `agy mcp remove ai-meter` or `hermes mcp remove ai-meter`.
 
 Other apps:
 - **Visual Studio Code** has its own command. From `cmd`, run `code --add-mcp "{\"name\":\"ai-meter\",\"type\":\"stdio\",\"command\":\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\",\"args\":[\"-NoProfile\",\"-NonInteractive\",\"-ExecutionPolicy\",\"Bypass\",\"-File\",\"C:\\Users\\<you>\\AppData\\Roaming\\AIMeter\\mcp.ps1\"]}"`. The switch in Settings is simpler.
@@ -154,7 +157,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 
   | `reason` | Meaning |
   |---|---|
-  | `no_dispatch` | Delegation does not support this agent (Codex, Claude Code, Gemini CLI, Antigravity CLI, Cursor Agent, Crush) |
+  | `no_dispatch` | Delegation does not support this agent (Codex, Claude Code, Gemini CLI, Antigravity CLI, Cursor Agent, Crush, Hermes) |
   | `place_not_verified` | It supports the agent, but not in this place (Pi on Windows) |
   | `program_not_found` | Its settings folder is here, but its program is not in the usual folders |
   | `not_set_up` | Its program is here, but it has no settings folder yet |
@@ -205,7 +208,7 @@ With `include_best_effort: true`, `list_candidates` also returns **`best_effort`
 - **What each entry adds:**
   - `warnings` starting with `best_effort`;
   - `estimated`, which gives `source` (`agent:pi`), the agent's `tools`, `reasoning`, `context_tokens`, `max_output_tokens` and `price_per_million`, and `unverified`: what rests on the agent's word (`price`, `tools`, `context`, `output`, and `limits` when the service states none).
-- **The agent must list the model at no price.** A model the agent prices is excluded as `agent_lists_price`, because the plugin stops an agent at its first priced request. For example, Pi prices Gemini Flash at its paid-tier rate, whatever the project's tier.
+- **The agent must list the model at no price.** A model the agent prices is excluded as `agent_lists_price`, because the plugin stops an agent at its first priced request, after it was paid. For example, Pi prices Gemini Flash at its paid-tier rate, whatever the project's tier. The same holds for ordinary candidates: a model the service lists as free is not offered through an agent whose own list prices it, and is excluded as `agent_lists_price` when no agent with a key lists it at no price.
 - **A zero price in an agent's list is not proof that the model is free.** It means only that the agent will not stop it as paid.
 
 Checked on 2026-11-02 against public lists:
@@ -229,7 +232,8 @@ The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code 
 - Before that, an `error` says which of these went wrong: an unknown `runtime` (with the ids AI Meter knows); AI Meter still reading its first data; a model not in the service's current list; an agent delegation does not support; no usable agent set up here; key discovery turned off; or an agent without a key of its own for the service.
 - `version_verified` and `notes` flag an agent version outside the verified range.
 - **On Windows**, the agent's native program is started directly: the `.exe` found on the PATH, or the one inside its npm package (OpenCode). Never a `.cmd` or `.ps1`, which need a shell: without a native program the answer is `supported: false`.
-- **In WSL, from Windows**, it is `wsl.exe -d <distro> -e env PATH=… <agent>`, in the candidate's own distribution. `wsl.exe --` is never used, because it would hand the arguments to a Linux shell. The PATH holds the agent's folder, then the folder of the `node` it needs when that is elsewhere (an nvm install, say), then the system folders. An agent npm installed whose `node` cannot be found answers `supported: false`.
+- **In WSL, from Windows**, it is `wsl.exe -d <distro> -e env PATH=… <agent>`, in the candidate's own distribution. `wsl.exe --` is never used, because it would hand the arguments to a Linux shell. The PATH holds the agent's folder, then the folder of the `node` it needs when that is elsewhere (an nvm install, say), then the system folders. An agent npm installed whose `node` cannot be found answers `supported: false`. So does an agent whose key is only exported in a WSL shell profile: `env` reads no profile, and the key is never passed on the command line instead.
+- **In WSL, from WSL**, the agent's Linux path is started directly. It means something only in the plugin's own distribution, so the plugin skips candidates in other distributions.
 - **OpenCode is isolated** from the user's skills and project configuration, and its title model is set to the same free model. Otherwise it would call a paid one.
 - **`output`** says how to tell the end, the outcome (Pi's exit code stays 0 on errors), the requests, the tokens, the rate limits and `cost`: where the agent reports each request's price (Pi: `usage.cost.total` of assistant messages; OpenCode: `step_finish.part.cost`). Both agents price requests from their own model list, so a value above zero means a paid request and the plugin should stop; zero does not prove the request was free, as an agent cannot see a BYOK fallback billed by the provider.
 - **`warnings`** repeats the candidate's warnings, such as `openrouter_byok_fallback`.
@@ -280,12 +284,12 @@ The coding agents AI Meter knows are data, like services: `agents/*.json`, built
 | `order` | Position in key discovery and lists, lower first (default 1000) |
 | `programs` | Program names per place (`windows`, `wsl`), without an extension. On Windows `.exe`, `.cmd`, `.bat` and `.ps1` are tried, in that order |
 | `folders` | Settings folders relative to the home: any one shows the agent is set up |
-| `keys` | Where the agent keeps API keys: a home-relative `file` and a JSON `path`, with `{id}` for the service's aliases (`auth.ids` in its service definition) |
+| `keys` | Where the agent keeps API keys: a home-relative `file` and a JSON `path`, with `{id}` for the service's aliases (`auth.ids` in its service definition), or a `file` with `"format": "env"`, a dotenv file of `NAME=value` lines read by the variable names in the service's `auth.env` (Hermes keeps its keys this way) |
 | `package` | npm package, to read the version without running the agent; an agent npm installed in WSL also needs `node` |
 | `models` | The agent's own model list, for [best-effort candidates](#best-effort-candidates): `format` (`pi` or `models.dev`), `file` under `{home}/` or `{package}/` with `{provider}` for the service's alias, and optional `versions` whose layout was checked. Pi: `{package}/node_modules/@earendil-works/pi-ai/dist/providers/data/{provider}.json` for 1.x; OpenCode: `{home}/.cache/opencode/models.json` |
 | `dispatch` | How a plugin starts it. Without it, the agent is reported in `runtimes.unsupported` |
 | `dispatch.places` | The verified places, each with `versions` (`"1.x"` matches every 1.* version, `"1.4.0"` only that one), optional `executables` (native Windows programs inside the npm package) and optional own `arguments` and `environment` |
-| `dispatch.arguments` | The argument list per mode, `read_only` and `modify` |
+| `dispatch.arguments` | The argument list per mode, `read_only` and `modify`. `read_only` must be enforced by what the agent is given, such as Pi's `--tools` list or OpenCode's per-agent `permission` in `OPENCODE_CONFIG_CONTENT` (see `agents/opencode.json`), never by an agent's name and defaults alone |
 | `dispatch.environment` | Variables to set. A value written as a JSON object is serialised after its placeholders are filled, so a model id cannot change its structure |
 | `dispatch.output`, `dispatch.notes` | Returned as they are in `describe_dispatch` |
 

@@ -2,7 +2,8 @@
 // to FAKE_METER_LOG (JSONL). FAKE_METER_SCENARIO (JSON) sets the candidates, the agents it cannot describe
 // ("runtime@where"), the describe_dispatch errors by "runtime@where", the pools that refuse leases, the warnings,
 // the runtimes found and unsupported, the best-effort candidates (returned only with include_best_effort, counted
-// otherwise), and how each fake agent behaves.
+// otherwise), the tools it never answers (`silent`, as a relay that stays up but hangs), and how each fake agent
+// behaves.
 
 import { appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -61,6 +62,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (id === undefined) return;
   if (method === "initialize") return send({ id, result: { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "fake-meter" } } });
   if (process.env.FAKE_METER_LOG) appendFileSync(process.env.FAKE_METER_LOG, JSON.stringify({ tool: params.name, arguments: params.arguments }) + "\n");
+  if ((scenario.silent || []).includes(params.name)) return;
   const result = tools[params.name](params.arguments);
   send({ id, result: { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result, isError: Boolean(result.error) } });
 });

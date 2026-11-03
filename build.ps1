@@ -94,7 +94,7 @@ $bw.Flush()
   <startup><supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.8"/></startup>
   <runtime>
     <gcConcurrent enabled="false"/>
-    <AppContextSwitchOverrides value="Switch.System.Windows.DoNotScaleForDpiChanges=false"/>
+    <AppContextSwitchOverrides value="Switch.System.Windows.DoNotScaleForDpiChanges=false;Switch.System.Windows.Input.Stylus.EnablePointerSupport=true"/>
   </runtime>
 </configuration>
 '@ | Set-Content (Join-Path $bin 'AIMeter.exe.config') -Encoding UTF8
@@ -106,7 +106,8 @@ function Invoke-Csc([string]$out, [string[]]$extra = @()) {
         "$fw\System.Xaml.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll",
         "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
     ) | ForEach-Object { "/r:$_" }
-    $res = @('app.ico', 'antigravity.png' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
+    # The app icon and the official logos bundled for built-in services whose app may be missing.
+    $res = @('app.ico', 'antigravity.png', 'openai.png', 'openai-dark.png', 'copilot.png', 'copilot-dark.png' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
     # Service definitions and their logos embedded in the executable (when running from source they are read from the providers folder).
     $res += @(Get-ChildItem (Join-Path $root 'providers\*') -Include *.json, *.png | ForEach-Object { "/resource:$($_.FullName),providers.$($_.Name)" })
     # Coding agent definitions, likewise (read from the agents folder when running from source).
@@ -254,12 +255,7 @@ if ($Mode -eq 'exe') {
     $target = Join-Path $dest 'AIMeter.exe'; $arguments = ''
 }
 else {
-    New-Item -ItemType Directory -Force (Join-Path $dest 'src'), (Join-Path $dest 'assets'), (Join-Path $dest 'providers'), (Join-Path $dest 'agents') | Out-Null
-    Copy-Item (Join-Path $root 'src\*.cs') (Join-Path $dest 'src') -Force
-    Copy-Item (Join-Path $root 'providers\*') (Join-Path $dest 'providers') -Include *.json, *.png -Force
-    Copy-Item (Join-Path $root 'agents\*.json') (Join-Path $dest 'agents') -Force
-    Copy-Item (Join-Path $root 'assets\app.ico'), (Join-Path $root 'assets\antigravity.png') (Join-Path $dest 'assets') -Force
-    Copy-Item (Join-Path $root 'AIMeter.ps1') $dest -Force
+    & (Join-Path $root 'tools\copy-script-app.ps1') -Destination $dest
     $target = Join-Path $env:WINDIR 'System32\conhost.exe'
     $arguments = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File `"$(Join-Path $dest 'AIMeter.ps1')`""
 }

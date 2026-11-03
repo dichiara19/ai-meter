@@ -56,6 +56,7 @@ namespace AIMeter
             Test("Running Pi processes name their session folders, also inside a sandbox", RunningPiFolders);
             Test("Pi sessions record their provider and move to that service's card", PiSessionsByService);
             Test("Antigravity CLI sessions give title, status and the latest model from agy's databases", AntigravitySessions);
+            Test("The file cache ages out entries no scan reads, WSL ones included, without touching their files", CacheAging);
             StartupRegressionTests.Register(Test);
             HistoryRegressionTests.Register(Test);
             ConsumptionTests.Register(Test);
@@ -66,6 +67,11 @@ namespace AIMeter
             WindowsInstallTests.Register(Test);
             AgentTests.Register(Test);
             UpdateTests.Register(Test);
+            ValueTests.Register(Test);
+            LogoTests.Register(Test);
+            TouchTests.Register(Test);
+            CloudflareTests.Register(Test);
+            HermesTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 
@@ -104,6 +110,22 @@ namespace AIMeter
         private static void Record(string scope, double? total, double? balance, DateTime at)
         {
             SpendTracker.Record(scope, total, balance, at);
+        }
+
+        private static void CacheAging()
+        {
+            var probe = new Probe(Settings.Current);
+            string wsl = @"\\wsl.localhost\Missing\home\me\.pi\agent\sessions\s.jsonl";
+            probe.Once("wsl:" + wsl, () => "kept while read");
+            probe.Once("wsl:" + wsl + ".old", () => "no longer read");
+            probe.AgeCacheEntry("wsl:" + wsl + ".old", TimeSpan.FromHours(2));
+            probe.Trim();
+            Assert(probe.CacheCount == 1 && probe.Once<string>("wsl:" + wsl, () => "reloaded") == "kept while read", "Trim dropped a used WSL entry, or kept an unused one.");
+
+            probe.AgeCacheEntry("wsl:" + wsl, TimeSpan.FromMinutes(1));   // Older than the entries below, but not unused.
+            for (int i = 0; i < 4100; i++) probe.Once("k:" + i, () => "x");
+            probe.Trim();
+            Assert(probe.CacheCount == 4000 && probe.Once<string>("wsl:" + wsl, () => "reloaded") == "reloaded", "The cache grew past its limit, or kept its oldest entries.");
         }
 
         private static void FirstSample()
@@ -534,6 +556,9 @@ namespace AIMeter
                 Assert(L.T("Last updated {0}") != "Last updated {0}", "Missing cached-data translation for " + lang);
                 foreach (var key in new[] { "Welcome to AI Meter", "Show in the taskbar", "Preview with sample data", "Sample data", "Leave sample data", "Showing sample data", "Free models", "free until {0}", "{0} free models", "Click a model to copy its ID for Pi, OpenCode or your scripts.", "Click to copy {0}", "Copied", "AI apps", "Connected apps and coding agents can ask AI Meter, through MCP, how much room your limits have, which sessions are running, which models are free and what you spent today. They only read: AI Meter never shares keys or tokens.", "Needs the pi-mcp-adapter extension: pi install npm:pi-mcp-adapter", "No supported apps found", "Use the configuration below in any app that can start a local MCP server.", "Restart an app after connecting it, so it loads AI Meter's tools. Apps in WSL are listed while WSL is running.", "Other apps", "Copy the configuration for apps that are not listed, such as the ChatGPT app when it accepts local servers.", "Copy configuration", "From the command line", "Prefer a terminal? Copy the command for your CLI, paste it into PowerShell on Windows or into a WSL shell, then restart the CLI.", "Share session titles", "Titles often repeat your first request. When off, apps see only the agent, status, model and provider of each session.", "{0} was not changed.", "{0} could not be read as plain JSON (it may contain comments). Add AI Meter by hand with the configuration below." })
                     Assert(L.T(key) != key, "Missing welcome translation for " + lang + ": " + key);
+                foreach (var key in new[] { "Claude Code was not found on this PC.", "AI Meter reads real-time limits through the Claude Code sign-in. If you use Claude Code only in the Claude app, open its Code tab once so that the app downloads it, or install Claude Code; then try again.", "How to install Claude Code", "Try again", "Sign in to your Claude account on the page that opens in the browser. AI Meter uses the Claude Code sign-in only to read your limits; it stays on this PC.", "Opening the sign-in page…", "Open the sign-in page", "Waiting for you to sign in in the browser…", "If the page shows a code, paste it here:", "Send", "Checking the code…", "Sign-in did not complete. Try again.",
+                    "API credits", "{0} spent on the Claude API in this cycle", "The Admin key for API credits was refused: check it in Settings", "Set the amount and renewal day of your API credits in Settings", "Plan API credits", "Admin key", "Monthly API credits", "Renewal day…", "renews on day {0}", "Max, Ultra and Team plans include monthly credits for the Claude API in a linked Console organisation. Add an Admin key of that organisation to see how much of them you have used.", "An Admin key (sk-ant-admin01-…) of the Console organisation linked to your plan. Only an organisation admin can create it.", "The amount in US dollars and the day of the month it renews, as shown on the Billing page of the Console. Anthropic reports costs rather than the remaining credit, so AI Meter compares this cycle's API costs with the amount." })
+                    Assert(L.T(key) != key, "Missing Claude sign-in translation for " + lang + ": " + key);
             }
             L.Init("en");
         }

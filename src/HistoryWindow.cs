@@ -66,6 +66,7 @@ namespace AIMeter
             status.Margin = new Thickness(0, 10, 0, 12); DockPanel.SetDock(status, Dock.Bottom); body.Children.Add(status);
             AddTab("Overview", overview); AddTab("Sessions", sessions); AddTab("Quota cycles", quotas); AddTab("Daily activity", activity);
             body.Children.Add(tabs); root.Children.Add(body); Content = root;
+            Ui.ToolTipsOnHold(this);
             period.SelectionChanged += (sender, args) => Reload(); provider.SelectionChanged += (sender, args) => Reload();
             SystemParameters.StaticPropertyChanged += OnSystemParametersChanged;
             Loaded += (sender, args) => Reload();
@@ -115,7 +116,7 @@ namespace AIMeter
 
         private void AddTab(string label, StackPanel content)
         {
-            var scroll = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(24) };
+            var scroll = Ui.TouchScroll(new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(24) });
             var layer = new Border { Child = scroll, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1) };
             layer.SetResourceReference(Border.BackgroundProperty, "Layer"); layer.SetResourceReference(Border.BorderBrushProperty, "CardStroke");
             var tab = new TabItem { Header = L.T(label), Content = layer };
@@ -355,6 +356,9 @@ namespace AIMeter
             }
             var list = new ListBox { MaxHeight = 380, MinHeight = 120, BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0) };
             ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
+            // The list scrolls inside the tab with a finger too; the window stays still at its ends.
+            ScrollViewer.SetPanningMode(list, PanningMode.VerticalOnly);
+            list.ManipulationBoundaryFeedback += (o, e) => e.Handled = true;
             list.ItemContainerStyle = (Style)System.Windows.Markup.XamlReader.Parse(@"
               <Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ListBoxItem'>
                 <Setter Property='Foreground' Value='{DynamicResource Text}'/><Setter Property='HorizontalContentAlignment' Value='Stretch'/>

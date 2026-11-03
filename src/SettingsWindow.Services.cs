@@ -54,7 +54,7 @@ namespace AIMeter
             if (catalogues.Count > 0)
             {
                 Section(L.T("Model catalogues for AI apps"));
-                Hint(L.T("These services list their models but do not let a key read your limits, so they are not on the taskbar or in the panel. The apps you connect under AI apps use them to find free models and to delegate tasks."));
+                Hint(L.T("These services list their models but do not let a key read your limits, so they are not on the taskbar or in the panel. The apps you connect under AI apps use them to find free models and to delegate tasks."), L.T("AI apps"), "apps");
                 foreach (var s in catalogues) ServiceLink(s);
             }
             Hint(L.T("API keys can come from the programs that already use them, so you don't have to paste them again:"));
@@ -101,9 +101,9 @@ namespace AIMeter
             }
             var w = Ui.Primary(p);
             string plan = p.Plan != null ? L.F("{0} plan", p.Plan.ToUpperInvariant()) + " · " : "";
-            if (w != null) return plan + L.F("{0}% left · {1}", Math.Round(p.Usage.Room(w)), Ui.LabelOf(w));
-            var bal = p.Usage == null ? null : p.Usage.Windows.FirstOrDefault(x => x.NoBar && x.RightText != null);
-            if (bal != null) return plan + Ui.LabelOf(bal) + ": " + bal.RightText;
+            if (w != null) return plan + Ui.Value(w, p.Usage, Ui.ValueStyle.Long) + " · " + Ui.LabelOf(w);
+            var bal = Ui.Balance(p);
+            if (bal != null) return plan + Ui.LabelOf(bal) + ": " + Ui.Value(bal, p.Usage, Ui.ValueStyle.Long);
             if (!string.IsNullOrEmpty(p.Notice)) return p.Notice;
             return L.T("On");
         }
@@ -136,7 +136,7 @@ namespace AIMeter
             if (usage.SpendNote != null || credits)
                 vis.Add(Row(null, L.T("Spend today, this week and this month"), null, RowToggle(s.Id, "*spend")));
             if (usage.TodayModels != null || credits)
-                vis.Add(Row(null, L.T("Models used today"), L.T("From OpenCode and Pi, with the cost they computed."), RowToggle(s.Id, "*models")));
+                vis.Add(Row(null, L.T("Models used today"), L.T("From OpenCode, Pi, Kilo and Hermes, with the cost they computed."), RowToggle(s.Id, "*models")));
             if (prov.Catalogue != null || (def != null && Json.Obj(def.Raw, "freeModels") != null))
                 vis.Add(Row(null, L.T("Free models"), L.T("From the service's public model list, with the date each one stops being free when announced."), RowToggle(s.Id, "*free")));
             if (vis.Count == 0) return;
@@ -186,6 +186,13 @@ namespace AIMeter
                     rows.Add(Row(null, L.T("Real-time limits"),
                         L.T("Reads your account usage with your Claude Code login (WSL or Windows). The token stays on this PC and is refreshed by the CLI."),
                         Pair(Button(L.T("Sign in…"), () => C.LoginClaude(), false), Toggle(S.ClaudeLiveUsage, v => { S.ClaudeLiveUsage = v; Changed(); C.RefreshNow(); }))));
+                    bool admin = ApiKeys.Has(ClaudeProvider.AdminKeyId);
+                    rows.Add(Row(null, L.T("Plan API credits"),
+                        admin ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.")
+                              : L.T("Max, Ultra and Team plans include monthly credits for the Claude API in a linked Console organisation. Add an Admin key of that organisation to see how much of them you have used."),
+                        admin ? Button(L.T("Remove"), () => { ApiKeys.Remove(ClaudeProvider.AdminKeyId); C.RefreshNow(); Build(); }, false)
+                              : Button(L.T("Add key…"), () => C.EnterClaudeAdminKey(), false)));
+                    if (admin) rows.Add(ApiCreditRow());
                     rows.Add(Row(null, L.T("Claude Code sessions"), L.T("Desktop, CLI (also in WSL) and VS Code, with title, model and status."), Toggle(S.ClaudeShowCode, v => { S.ClaudeShowCode = v; Changed(); })));
                     rows.Add(Row(null, L.T("Cowork tasks"), L.T("Cowork tasks running in the last 30 minutes."), Toggle(S.ClaudeShowCowork, v => { S.ClaudeShowCowork = v; Changed(); })));
                     rows.Add(Row(null, L.T("Claude app open"), L.T("Individual chats leave no trace on the PC: you only see whether the app is open."), Toggle(S.ClaudeShowChat, v => { S.ClaudeShowChat = v; Changed(); })));
@@ -230,6 +237,13 @@ namespace AIMeter
             rows.Add(Row(null, L.T("API key"), text,
                 ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false)
                                   : Button(found != null ? L.T("Use another key…") : L.T("Add key…"), () => C.EnterApiKey(d), found == null)));
+            // Whether the service accepted what is saved, so that a key or value just entered is not taken on trust.
+            // The page is rebuilt when the notice changes.
+            var state = LastState(d.Id);
+            if (ApiKeys.Has(d.Id) || found != null)
+                rows.Add(Row(null, L.T("Connection"),
+                    state != null && state.NeedsLogin && !string.IsNullOrEmpty(state.Notice) ? state.Notice
+                    : state != null && (state.Usage != null || state.Catalogue != null) ? L.T("Connected") : L.T("Waiting for the first update"), null));
             // Offer extra credentials only when needed or already saved.
             var keys = Json.Obj(d.Raw, "keys");
             if (keys != null)
@@ -287,6 +301,53 @@ namespace AIMeter
                 L.T("An amount per day, week or month: the pill and the panel show how much of it is used, with a notification at 80% and 95%. Leave it empty for no budget.") + " "
                 + L.T("Estimated spending is shown without remaining credit, forecasts or threshold alerts."),
                 Pair(frame, per));
+        }
+
+        /// <summary>
+        /// Edit the plan's monthly API credit amount and its renewal day, stored as amount|day. The amount box shows
+        /// the plan's documented amount as a placeholder value; leaving it unchanged keeps following the plan.
+        /// </summary>
+        private FrameworkElement ApiCreditRow()
+        {
+            var claude = LastState("claude");
+            string planAmount = ClaudeProvider.PlanApiCredit(claude != null ? claude.Plan : null).ToString("0.##", L.Culture);
+            var parts = (S.ClaudeApiCredits ?? "|").Split('|');
+            string amount = parts[0], day = parts.Length > 1 ? parts[1] : "";
+            double stored;
+            var box = new TextBox
+            {
+                Width = 80, FontSize = 14, BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0),
+                Text = double.TryParse(amount, NumberStyles.Float, CultureInfo.InvariantCulture, out stored) ? stored.ToString("0.##", L.Culture) : planAmount != "0" ? planAmount : "",
+            };
+            box.SetResourceReference(Control.ForegroundProperty, "Text");
+            box.SetResourceReference(TextBox.CaretBrushProperty, "Text");
+            System.Windows.Automation.AutomationProperties.SetName(box, L.T("Monthly API credits"));
+            var frame = new Border { CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1, 1, 1, 2), Padding = new Thickness(10, 5, 10, 5), Child = box };
+            frame.SetResourceReference(Border.BackgroundProperty, "Control");
+            frame.SetResourceReference(Border.BorderBrushProperty, "ControlStroke");
+            box.GotKeyboardFocus += (o, e) => frame.SetResourceReference(Border.BorderBrushProperty, "Accent");
+            box.LostKeyboardFocus += (o, e) => frame.SetResourceReference(Border.BorderBrushProperty, "ControlStroke");
+            Action save = () =>
+            {
+                double a;
+                string t = box.Text.Trim().Replace("$", "");
+                bool ok = double.TryParse(t, NumberStyles.Float, L.Culture, out a) || double.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out a);
+                // The plan's own amount is not stored, so that a later change of plan is followed.
+                amount = ok && a > 0 && !double.IsInfinity(a) && t != planAmount ? a.ToString("R", CultureInfo.InvariantCulture) : "";
+                string after = amount + "|" + day;
+                if (after == (S.ClaudeApiCredits ?? "|")) return;
+                S.ClaudeApiCredits = after;
+                Changed();
+                C.RefreshNow();
+            };
+            box.LostFocus += (o, e) => save();
+            box.KeyDown += (o, e) => { if (e.Key == Key.Enter) save(); };
+            var days = new List<Tuple<string, string>> { Tuple.Create("", L.T("Renewal day…")) };
+            for (int d = 1; d <= 31; d++) days.Add(Tuple.Create(d.ToString(CultureInfo.InvariantCulture), L.F("renews on day {0}", d)));
+            var renewal = Combo(days.ToArray(), day, v => { day = v; save(); });
+            return Row(null, L.T("Monthly API credits"),
+                L.T("The amount in US dollars and the day of the month it renews, as shown on the Billing page of the Console. Anthropic reports costs rather than the remaining credit, so AI Meter compares this cycle's API costs with the amount."),
+                Pair(frame, renewal));
         }
 
         private string ClaudeStatus(ProviderState p)

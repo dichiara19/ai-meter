@@ -26,12 +26,14 @@ export function full(job, jobsFolder) {
   if (job.estimated) report.estimated = job.estimated;
   if (job.best_effort_available) report.best_effort_available = job.best_effort_available;
   if (job.worktree) report.worktree = job.worktree;
+  if (job.snapshot?.secrets_left_out?.length) report.secret_files_left_out = job.snapshot.secrets_left_out;
   if (job.skipped?.length) report.skipped = job.skipped;
   if (job.excluded) report.excluded = job.excluded;
   if (job.runtimes) report.runtimes = job.runtimes;
   if (job.notes?.length) report.notes = job.notes;
   if (job.version) report.agent_version = job.version;
   if (job.release_error) report.release_error = job.release_error;
+  if (job.dropped_lines) report.dropped_lines = job.dropped_lines;
   if (job.status !== "queued" && job.status !== "starting") report.logs = { events: join(jobsFolder, job.id, "events.jsonl"), stderr: join(jobsFolder, job.id, "stderr.txt") };
   return report;
 }

@@ -219,7 +219,6 @@ namespace AIMeter
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern IntPtr GetShellWindow();
         [DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder sb, int max);
 
         public const int GWL_EXSTYLE = -20;
         public const int GWL_STYLE = -16;
@@ -255,7 +254,8 @@ namespace AIMeter
 
         public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time);
         [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr mod, WinEventProc proc, uint pid, uint tid, uint flags);
-        public const uint EVENT_SYSTEM_FOREGROUND = 3;
+        [DllImport("user32.dll")] public static extern bool UnhookWinEvent(IntPtr hook);
+        public const uint EVENT_SYSTEM_FOREGROUND = 3, EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
 
         // --- notification area ----------------------------------------------------
         [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
@@ -280,6 +280,7 @@ namespace AIMeter
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
         [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
         public const int WS_CHILD = 0x40000000, WS_VISIBLE = 0x10000000, WS_CLIPSIBLINGS = 0x04000000;
+        public const int WS_POPUP = unchecked((int)0x80000000);
 
         /// <summary>The primary monitor's taskbar.</summary>
         public static IntPtr FindTaskbar() { return FindWindowW("Shell_TrayWnd", null); }
@@ -461,16 +462,17 @@ namespace AIMeter
             catch (InvalidCastException) { }
         }
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetCurrentPackageFullName(ref int length, StringBuilder name);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetCurrentPackagePath(ref int length, StringBuilder path);
 
-        private static int packaged = -1;
+        private const int NoPackage = 0, OwnPackage = 1, ForeignPackage = 2;
+        private static int packageIdentity = -1;
 
 #if AIMETER_TEST
         /// <summary>Test seam: when set, replaces the package-identity check so tests can exercise the packaged branches.</summary>
         internal static bool? PackagedOverride;
 #endif
 
-        /// <summary>True if the app runs from the MSIX package (Microsoft Store), i.e. it has a package identity.</summary>
+        /// <summary>True if the app runs from its own MSIX package (Microsoft Store).</summary>
         public static bool IsPackaged
         {
             get
@@ -478,18 +480,59 @@ namespace AIMeter
 #if AIMETER_TEST
                 if (PackagedOverride.HasValue) return PackagedOverride.Value;
 #endif
-                if (packaged < 0)
+                return PackageIdentity == OwnPackage;
+            }
+        }
+
+        /// <summary>
+        /// True if this copy of AI Meter, installed outside any package, was started inside another app's package, such
+        /// as the Claude app's. It then has that package's identity and file-system virtualisation.
+        /// </summary>
+        public static bool InForeignPackage
+        {
+            get
+            {
+#if AIMETER_TEST
+                if (PackagedOverride.HasValue) return false;
+#endif
+                return PackageIdentity == ForeignPackage;
+            }
+        }
+
+        /// <summary>
+        /// The package identity of this process. A process has one when it runs from a package, or when a packaged app
+        /// started it inside its package; only in the first case is AI Meter's own code in the package's folder.
+        /// </summary>
+        private static int PackageIdentity
+        {
+            get
+            {
+                if (packageIdentity >= 0) return packageIdentity;
+                try
                 {
                     int n = 0;
-                    try { packaged = GetCurrentPackageFullName(ref n, null) == 15700 /* APPMODEL_ERROR_NO_PACKAGE */ ? 0 : 1; }
-                    catch (EntryPointNotFoundException) { packaged = 0; }
+                    if (GetCurrentPackagePath(ref n, null) == 15700 /* APPMODEL_ERROR_NO_PACKAGE */) return packageIdentity = NoPackage;
+                    var path = new StringBuilder(n);
+                    if (GetCurrentPackagePath(ref n, path) != 0) return packageIdentity = ForeignPackage;
+                    string folder = path.ToString().TrimEnd('\\') + "\\";
+                    return packageIdentity = AppDomain.CurrentDomain.BaseDirectory.StartsWith(folder, StringComparison.OrdinalIgnoreCase) ? OwnPackage : ForeignPackage;
                 }
-                return packaged == 1;
+                catch (EntryPointNotFoundException) { return packageIdentity = NoPackage; }
             }
         }
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string title);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT r);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
+
+        /// <summary>Screen rectangle of a window (physical pixels), empty if it cannot be read.</summary>
+        public static RECT WindowRect(IntPtr h)
+        {
+            RECT r;
+            return GetWindowRect(h, out r) ? r : default(RECT);
+        }
+
+        /// <summary>The thread that created a window, and its process.</summary>
+        public static uint WindowThread(IntPtr h, out uint pid) { return GetWindowThreadProcessId(h, out pid); }
 
         /// <summary>Position and size of a window as text, to detect whether it has changed.</summary>
         public static string RectKey(IntPtr h)
@@ -507,23 +550,14 @@ namespace AIMeter
             return tray != IntPtr.Zero && GetWindowRect(tray, out r) && r.Right > r.Left ? r.Left : 0;
         }
 
-        /// <summary>True if the window is a taskbar (primary or secondary).</summary>
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
 
+        /// <summary>True if the window belongs to this process.</summary>
         public static bool IsOwnWindow(IntPtr hwnd)
         {
             uint pid;
             GetWindowThreadProcessId(hwnd, out pid);
             return pid == (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
-        }
-
-        public static bool IsTaskbar(IntPtr hwnd)
-        {
-            if (hwnd == IntPtr.Zero) return false;
-            var sb = new StringBuilder(64);
-            GetClassNameW(hwnd, sb, sb.Capacity);
-            string c = sb.ToString();
-            return c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd";
         }
 
         /// <summary>Taskbar edge: 0 left, 1 top, 2 right, 3 bottom.</summary>

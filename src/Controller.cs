@@ -47,6 +47,7 @@ namespace AIMeter
         private string lastSignature;
         private string limitKeys;
         private DateTime flyoutHiddenAt;
+        private DateTime pillPressedAt;
         private readonly DispatcherTimer hideDetails = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         private Native.WinEventProc foregroundProc;   // Keep the delegate alive whilst the hook can call it.
         private bool fullscreenBusy;
@@ -201,8 +202,10 @@ namespace AIMeter
         {
             Last = s;
             Notify(s);
-            // Rebuild settings when the available service limits change.
-            string keys = string.Join(",", s.Providers.Where(p => p.Usage != null).SelectMany(p => p.Usage.Windows.Where(w => w.HasPercent).Select(w => p.Id + "|" + w.Key)));
+            // Rebuild settings when the available service limits or a service's notice change, so that a key or value
+            // just saved there shows whether the service accepted it.
+            string keys = string.Join(",", s.Providers.Where(p => p.Usage != null).SelectMany(p => p.Usage.Windows.Where(w => w.HasPercent).Select(w => p.Id + "|" + w.Key)))
+                        + "#" + string.Join(",", s.Providers.Where(p => p.Notice != null).Select(p => p.Id + "|" + p.Notice));
             if (keys != limitKeys)
             {
                 limitKeys = keys;
@@ -327,6 +330,8 @@ namespace AIMeter
         {
             stopping = true;
             wake.Set();
+            // Close the MCP pipe now, so connected apps see AI Meter leave and a new copy can take the pipe name at once.
+            if (mcpHost != null) mcpHost.Stop();
             SystemEvents.SessionSwitch -= OnSessionSwitch;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;

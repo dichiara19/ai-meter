@@ -58,19 +58,25 @@ namespace AIMeter
     }
 
     /// <summary>
-    /// Pill inside the taskbar. Windows 11 no longer has "deskbands", so the pill becomes a child window of the
-    /// taskbar (Shell_TrayWnd): it rises and falls with an auto-hiding taskbar, disappears with it in full screen
-    /// and never ends up beneath the taskbar when clicked. It is recreated if File Explorer restarts.
-    /// Uses the Windows colour mode (the taskbar's), not the app mode.
+    /// Pill on the taskbar. Windows 11 no longer has "deskbands", so the pill is a borderless window owned by the
+    /// taskbar (Shell_TrayWnd): an owned window always stays above its owner, so it never ends up beneath the taskbar
+    /// when the taskbar is clicked, and it goes behind a full-screen app with the taskbar. It is not a child window
+    /// of the taskbar: Windows delivers touch on the taskbar to the taskbar itself, never to another process's child
+    /// window, so a finger could not press it. It follows an auto-hiding taskbar as the taskbar moves, and is
+    /// recreated if File Explorer restarts. Uses the Windows colour mode (the taskbar's), not the app mode.
     /// </summary>
     internal sealed class TaskbarPill
     {
         private readonly Controller C;
-        private readonly Border root = new Border { Background = Brushes.Transparent };
+        // Almost transparent rather than transparent: Windows passes clicks and touches on a layered window's fully
+        // transparent pixels through to the taskbar beneath, so only the text and bars would respond.
+        private readonly Border root = new Border { Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)) };
         private readonly Button chip = new Button { Padding = new Thickness(10, 0, 10, 0), Cursor = Cursors.Hand, Focusable = false };
         private readonly DispatcherTimer reconcile = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         private HwndSource source;
         private IntPtr bar;
+        private IntPtr moveHook;
+        private Native.WinEventProc moveProc;   // Referenced here so the collector keeps it while the hook calls it.
         private Native.RECT lastRect;
         private string placedKey;      // Taskbar, notification area and side at the last placement.
         private int px, py, pw, ph;    // Last applied position.
@@ -86,10 +92,14 @@ namespace AIMeter
             root.Child = chip;
             TextOptions.SetTextFormattingMode(root, TextFormattingMode.Display);
             ApplySystemTheme();
-            // A real button, with hover highlighting like the taskbar buttons.
+            // A real button, with hover highlighting like the taskbar buttons. A finger taps it like a click, and a
+            // press and hold acts as a right-click (WPF's pointer-based touch support, turned on in Entry.Run).
             chip.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
             chip.FontFamily = Theme.Font;
             AutomationProperties.SetName(chip, L.T("AI Meter: open the panel"));
+            // WPF raises the mouse press for a tap only when the finger lifts: a touch counts from the contact.
+            chip.PreviewStylusDown += (o, e) => C.PillPressed();
+            chip.PreviewMouseLeftButtonDown += (o, e) => { if (e.StylusDevice == null) C.PillPressed(); };
             chip.Click += (o, e) => C.ToggleFlyoutFromTaskbar(this);
             chip.MouseRightButtonUp += (o, e) => { C.ShowMenu(null); e.Handled = true; };
             // Lightweight check: taskbar recreated (File Explorer restarted), moved or resized.
@@ -108,6 +118,7 @@ namespace AIMeter
         public void Close()
         {
             reconcile.Stop();
+            if (moveHook != IntPtr.Zero) { Native.UnhookWinEvent(moveHook); moveHook = IntPtr.Zero; }
             if (source != null) { source.RootVisual = null; source.Dispose(); source = null; }
         }
 
@@ -129,7 +140,7 @@ namespace AIMeter
             Place();
         }
 
-        /// <summary>Creates the child window inside the current taskbar (also after File Explorer restarts).</summary>
+        /// <summary>Creates the pill window over the current taskbar (also after File Explorer restarts).</summary>
         private void Attach()
         {
             Close();
@@ -137,12 +148,14 @@ namespace AIMeter
             if (bar == IntPtr.Zero) return;
             var prm = new HwndSourceParameters("AI Meter - taskbar")
             {
-                ParentWindow = bar,
-                WindowStyle = Native.WS_CHILD | Native.WS_VISIBLE | Native.WS_CLIPSIBLINGS,
-                UsesPerPixelTransparency = true,   // Layered child window: transparent background over the taskbar.
+                ParentWindow = bar,   // With WS_POPUP the taskbar becomes the owner, not the parent.
+                WindowStyle = Native.WS_POPUP | Native.WS_CLIPSIBLINGS,
+                // A click or a tap leaves focus where it is (the panel then takes it), and the pill stays out of Alt+Tab.
+                ExtendedWindowStyle = Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE,
+                UsesPerPixelTransparency = true,   // Layered window: transparent background over the taskbar.
                 PositionX = 0, PositionY = 0,
             };
-            // The taskbar may refuse the child window while it is being recreated (sign-in, resume, File Explorer
+            // The taskbar may refuse the window while it is being recreated (sign-in, resume, File Explorer
             // restart): "Access denied". It is retried at the next check, 2 seconds later, without closing the app.
             try { source = new HwndSource(prm) { SizeToContent = SizeToContent.WidthAndHeight, RootVisual = root }; }
             catch (System.ComponentModel.Win32Exception ex)
@@ -154,6 +167,10 @@ namespace AIMeter
             }
             source.CompositionTarget.BackgroundColor = Colors.Transparent;
             source.SizeToContentChanged += (o, e) => Place();
+            // Follow the taskbar at once as it slides in and out when it hides automatically.
+            uint pid, thread = Native.WindowThread(bar, out pid);
+            moveProc = (hook, ev, hwnd, obj, child, t, time) => { if (hwnd == bar && obj == 0 /* OBJID_WINDOW */) Place(); };
+            moveHook = Native.SetWinEventHook(Native.EVENT_OBJECT_LOCATIONCHANGE, Native.EVENT_OBJECT_LOCATIONCHANGE, IntPtr.Zero, moveProc, pid, thread, 0);
             lastRect = default(Native.RECT);
         }
 
@@ -189,7 +206,11 @@ namespace AIMeter
             else if (info.TrayLeft > info.Rect.Left) x = info.TrayLeft - info.Rect.Left - w - gap;
             else x = info.Rect.Right - info.Rect.Left - w - (int)Math.Round(320 * scale);   // Notification area not found: conservative estimate.
             int y = (barH - h) / 2;
-            // Coordinates relative to the taskbar; on top of the taskbar's other child windows.
+            // From the taskbar's current position: an auto-hiding taskbar slides off the screen and back.
+            var at = Native.WindowRect(bar);
+            if (at.Right <= at.Left) at = info.Rect;
+            x += at.Left;
+            y += at.Top;
             if (x != px || y != py || w != pw || h != ph || placedKey == null)
             {
                 Native.SetWindowPos(source.Handle, IntPtr.Zero, x, y, w, h, Native.SWP_NOACTIVATE);

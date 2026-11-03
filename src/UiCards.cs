@@ -25,12 +25,11 @@ namespace AIMeter
         {
             var root = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
             var top = new DockPanel { LastChildFill = true };
-            // Display remaining money for monetary limits.
-            // Cap model quota by the enclosing limit's remaining room.
+            // Cap model quota by the enclosing limit's remaining room; the value says what it is ("18% left", "0.73 $ left").
             var parent = u == null ? null : u.ParentOf(w);
             bool capped = parent != null && parent.Remaining < w.Remaining;
             double room = capped ? parent.Remaining : w.Remaining;
-            string right = w.RightText != null ? L.T(w.RightText) : (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(room).ToString(It) + "%");
+            string right = Value(w, u, ValueStyle.Short);
             if (w.CachedAt.HasValue) right = L.F("{0} (cached)", right);
             var pct = Text(right, 13, "Text", FontWeights.SemiBold);
             pct.Margin = new Thickness(8, 0, 0, 0);
@@ -57,7 +56,7 @@ namespace AIMeter
                 return root;
             }
             // Draw effective room solid and the model's own remaining quota behind it.
-            var bar = Bar(room, capped ? LevelBrush(room, brand) : LevelBrush(w, brand), 4, capped ? w.Remaining : -1);
+            var bar = LimitBar(room, capped ? LevelBrush(room, brand) : LevelBrush(w, brand), 4, capped ? w.Remaining : -1);
             bar.Margin = new Thickness(0, 5, 0, 0);
             root.Children.Add(bar);
             if (capped)
@@ -261,7 +260,7 @@ namespace AIMeter
                     box.Children.Add(row);
                 }
                 if (ms.Count > 3) box.Children.Add(Text(L.F("+{0} more", ms.Count - 3), 11.5, "Text3"));
-                box.ToolTip = L.T("Models used today through this service by OpenCode and Pi, with the cost they computed:") + "\n"
+                box.ToolTip = L.T("Models used today through this service by OpenCode, Pi, Kilo and Hermes, with the cost they computed:") + "\n"
                               + string.Join("\n", ms.Select(m => L.F("{0}: {1}, {2} tokens, {3} replies", m.Model, money.Format(m.Cost), Tokens((int)Math.Min(int.MaxValue, m.Tokens)), m.Replies)));
                 stack.Children.Add(box);
             }
@@ -357,7 +356,7 @@ namespace AIMeter
                 note.Children.Add(ic);
                 if (p.NeedsLogin && p.CanSignIn && login != null)
                 {
-                    var link = new Button { Content = L.T("Sign in"), Padding = new Thickness(4, 0, 4, 1), FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
+                    var link = new Button { Content = FixLabel(p), Padding = new Thickness(4, 0, 4, 1), FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
                     link.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
                     link.Click += (o, e) => login(p.Id);
                     DockPanel.SetDock(link, Dock.Right);
@@ -369,6 +368,15 @@ namespace AIMeter
                 note.Children.Add(nt);
                 stack.Children.Add(note);
             }
+        }
+
+        /// <summary>The notice link's text: what it opens (see ProviderState.Fix), "Sign in" for a missing key or sign-in.</summary>
+        private static string FixLabel(ProviderState p)
+        {
+            if (p.Fix == "settings") return L.T("Settings");
+            var d = p.Fix != null && p.Fix.StartsWith("slot:") ? Definitions.Get(p.Id) : null;
+            string label = d != null ? Json.Str(Json.Obj(Json.Obj(d.Raw, "keys"), p.Fix.Substring(5)), "label") : null;
+            return label != null ? L.F("Add {0}", L.T(label)) : L.T("Sign in");
         }
 
         /// <summary>Open desktop apps, then agent sessions, folded behind a summary row when the caller supports it.</summary>
@@ -423,13 +431,16 @@ namespace AIMeter
         /// <summary>A clickable summary line with a chevron that shows or hides the rows below it.</summary>
         private static FrameworkElement FoldRow(string text, bool open, Action toggle, Thickness margin)
         {
-            var row = new DockPanel { Background = Brushes.Transparent, Cursor = Cursors.Hand, Margin = margin };
+            // At least 24 high, so a fingertip can hit the full-width row.
+            var row = new DockPanel { Background = Brushes.Transparent, Cursor = Cursors.Hand, Margin = margin, MinHeight = 24 };
             var chev = Glyph(open ? "" : "", 9, "Text3");
             chev.Width = 18;
             chev.HorizontalAlignment = HorizontalAlignment.Left;
             DockPanel.SetDock(chev, Dock.Left);
             row.Children.Add(chev);
-            row.Children.Add(Text(text, 11.5, "Text2"));
+            var label = Text(text, 11.5, "Text2");
+            label.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(label);
             row.MouseLeftButtonUp += (o, e) => { toggle(); e.Handled = true; };
             return row;
         }
@@ -458,9 +469,9 @@ namespace AIMeter
             if (p.Running && p.GpuTotal > 0)
             {
                 double free = 100 - Math.Min(100, p.GpuUsed * 100.0 / p.GpuTotal);
-                var w = new UsageWindow { Label = "Video memory", Used = 100 - free, RightText = L.F("{0} free", GpuMemory.Format(Math.Max(0, p.GpuTotal - p.GpuUsed))) };
+                var w = new UsageWindow { Label = "Video memory", Used = 100 - free, RightText = GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long) };
                 var row = UsageRow(w, null, "Info");
-                row.ToolTip = L.F("Video memory: {0} of {1} in use", GpuMemory.Format(p.GpuUsed), GpuMemory.Format(p.GpuTotal));
+                row.ToolTip = L.F("Video memory: {0}", GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long));
                 stack.Children.Add(row);
             }
 
