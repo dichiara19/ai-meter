@@ -254,12 +254,7 @@ if ($Mode -eq 'exe') {
     $target = Join-Path $dest 'AIMeter.exe'; $arguments = ''
 }
 else {
-    New-Item -ItemType Directory -Force (Join-Path $dest 'src'), (Join-Path $dest 'assets'), (Join-Path $dest 'providers'), (Join-Path $dest 'agents') | Out-Null
-    Copy-Item (Join-Path $root 'src\*.cs') (Join-Path $dest 'src') -Force
-    Copy-Item (Join-Path $root 'providers\*') (Join-Path $dest 'providers') -Include *.json, *.png -Force
-    Copy-Item (Join-Path $root 'agents\*.json') (Join-Path $dest 'agents') -Force
-    Copy-Item (Join-Path $root 'assets\app.ico'), (Join-Path $root 'assets\antigravity.png') (Join-Path $dest 'assets') -Force
-    Copy-Item (Join-Path $root 'AIMeter.ps1') $dest -Force
+    & (Join-Path $root 'tools\copy-script-app.ps1') -Destination $dest
     $target = Join-Path $env:WINDIR 'System32\conhost.exe'
     $arguments = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File `"$(Join-Path $dest 'AIMeter.ps1')`""
 }

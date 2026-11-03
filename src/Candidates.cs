@@ -49,8 +49,17 @@ namespace AIMeter
                     if (reason == null && room.Blocking != null) reason = room.Blocking;
                     if (reason == null)
                     {
+                        // An agent prices requests from its own list, and the plugin stops it at the first priced one,
+                        // after paying for it: a free model the agent lists at a price is never offered through it.
+                        bool offered = false;
                         foreach (var a in access)
+                        {
+                            var known = AgentModels.Find(a, m.Id);
+                            if (known != null && known.Priced) continue;
                             result.Chosen.Add(new Candidate { Provider = p, Model = m, Access = a, Room = room, Pool = pool });
+                            offered = true;
+                        }
+                        if (!offered) result.Exclude(p.Id, m.Id, "agent_lists_price", null);
                         continue;
                     }
                     if (Unstated.Contains(reason) && room.Blocking == null && EstimateFrom(result, p, m, access, req, room, ref reason)) continue;
@@ -359,11 +368,35 @@ namespace AIMeter
         /// this process's variables on Windows, shell-profile exports in WSL), and those it cannot, with the reason. Keys
         /// AI Meter keeps never count: it does not hand them to an agent. Follows the FindKeys setting, as reading these
         /// files is key discovery.
+        ///
+        /// One delegation asks for list_candidates, then describe_dispatch and claim_capacity for each candidate it
+        /// tries, and each would read every agent's files again, over the WSL file share too. A scan is therefore reused
+        /// for ScanReuse while the homes and the setting are the same; a key added meanwhile shows up after that.
         /// </summary>
         public static RuntimeScan ScanRuntimes()
         {
-            return Scan(Probe.Home, Probe.WslPlacesUp, Kinds, Settings.Current != null && Settings.Current.FindKeys);
+            var places = Probe.WslPlacesUp.ToList();
+            bool findKeys = Settings.Current != null && Settings.Current.FindKeys;
+            string inputs = Probe.Home + "|" + findKeys + "|" + string.Join("|", places.Select(p => p.Distro + "=" + p.Home));
+            lock (ScanLock)
+            {
+                if (lastScan != null && lastScanInputs == inputs && DateTime.UtcNow - lastScanAt < ScanReuse) return lastScan;
+            }
+            var scan = Scan(Probe.Home, places, Kinds, findKeys);
+            lock (ScanLock)
+            {
+                lastScan = scan;
+                lastScanInputs = inputs;
+                lastScanAt = DateTime.UtcNow;
+            }
+            return scan;
         }
+
+        private static readonly TimeSpan ScanReuse = TimeSpan.FromSeconds(15);
+        private static readonly object ScanLock = new object();
+        private static RuntimeScan lastScan;
+        private static string lastScanInputs;
+        private static DateTime lastScanAt;
 
         /// <summary>ScanRuntimes over the given homes: windowsHome (null to skip Windows) and running distributions.</summary>
         internal static RuntimeScan Scan(string windowsHome, IEnumerable<WslPlace> wsl, IList<RuntimeKind> kinds, bool findKeys)
@@ -397,10 +430,12 @@ namespace AIMeter
                 {
                     bool inWsl = f.Item2.Distro != null;
                     string alias;
-                    string key = RuntimeKey(f.Item1, d, f.Item2.Home, inWsl, out alias);
+                    bool fromProfile;
+                    string key = RuntimeKey(f.Item1, d, f.Item2.Home, inWsl, out alias, out fromProfile);
                     if (key == null) continue;
                     var access = Access(d.Id, f.Item1.Id, inWsl ? "wsl" : "windows", key);
                     access.Provider = alias ?? ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id).First();
+                    access.KeyFromProfile = fromProfile;
                     access.Distro = f.Item2.Distro;
                     string package = PackageFolder(f.Item1, f.Item2.Home, inWsl, f.Item3);
                     access.Version = PackageVersion(package);
@@ -438,13 +473,15 @@ namespace AIMeter
 
         /// <summary>
         /// The key an agent would use for a service: its own, or one from the environment it starts with. Alias is the
-        /// provider id the agent keeps it under, when it is in the agent's own files.
+        /// provider id the agent keeps it under, when it is in the agent's own files. fromProfile says the key is only
+        /// exported in a WSL shell profile, which an agent has only when started from a shell in WSL.
         /// </summary>
-        private static string RuntimeKey(RuntimeKind kind, ServiceDefinition d, string home, bool wsl, out string alias)
+        private static string RuntimeKey(RuntimeKind kind, ServiceDefinition d, string home, bool wsl, out string alias, out bool fromProfile)
         {
             alias = null;
+            fromProfile = false;
             var found = KeyFinder.SearchAll(d, home, wsl).FirstOrDefault(f => f.App == kind.Name || (wsl && f.App == "profile"));
-            if (found != null) { alias = found.Alias; return found.Key; }
+            if (found != null) { alias = found.Alias; fromProfile = found.App == "profile"; return found.Key; }
             if (wsl) return null;
             foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
             {
@@ -491,6 +528,11 @@ namespace AIMeter
         public string NodeFolder;
         /// <summary>The agent's own model list for this service's provider alias, and its format; null when it has none.</summary>
         public string ModelsFile, ModelsFormat;
+        /// <summary>
+        /// In WSL: the key is exported in a shell profile rather than kept by the agent, so an agent started from
+        /// Windows through wsl.exe, which reads no profile, would not have it.
+        /// </summary>
+        public bool KeyFromProfile;
     }
 
     /// <summary>An agent set up in one place: "windows", or "wsl" with its distribution.</summary>

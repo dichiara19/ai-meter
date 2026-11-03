@@ -327,3 +327,193 @@ test("the MCP server lists its tools and runs a delegation", async () => {
     server.kill();
   }
 });
+
+const isAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+test("cancelling a job whose worker died stops its agent, releases the lease and saves the end", async () => {
+  const { workspace, calls } = setUp({ candidates: [pi], behaviour: { pi: "hang" } });
+  const { id } = jobs.start({ task: "x", workspace });
+  await waitFor(id, "running");
+  const { worker_pid: worker, agent_pid: agent } = jobs.load(id);
+  process.kill(worker);   // The agent is left without its worker, as when the worker crashes.
+  for (let i = 0; i < 50 && isAlive(worker); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.ok(isAlive(agent), "the agent outlived its worker");
+
+  const job = await jobs.cancel(id);
+
+  assert.equal(job.status, "cancelled");
+  assert.equal(jobs.load(id).status, "cancelled", "the end is saved, not only shown");
+  assert.equal(released(calls).outcome, "cancelled");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(isAlive(agent), false, "the agent is gone");
+});
+
+test("cancelling stops the processes the agent started too", async () => {
+  const { folder, workspace } = setUp({ candidates: [openCode], behaviour: { opencode: "family" } });
+  const pidFile = join(folder, "child.pid");
+  process.env.FAKE_CHILD_PID_FILE = pidFile;
+  try {
+    const { id } = jobs.start({ task: "x", workspace });
+    await waitFor(id, "running");
+    for (let i = 0; i < 50 && !existsSync(pidFile); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    const child = Number(readFileSync(pidFile, "utf8"));
+    assert.ok(isAlive(child));
+
+    assert.equal((await jobs.cancel(id)).status, "cancelled");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(isAlive(child), false, "the agent's child is gone");
+  } finally {
+    delete process.env.FAKE_CHILD_PID_FILE;
+  }
+});
+
+test("the timeout covers choosing a candidate: a relay that never answers cannot hold a job in starting", async () => {
+  const { workspace } = setUp({ candidates: [pi], silent: ["list_candidates"] });
+  const started = Date.now();
+  const job = await jobs.wait(jobs.start({ task: "x", workspace, timeout_seconds: 5 }).id, 20);
+
+  assert.equal(job.status, "timed_out");
+  assert.match(job.error, /before the agent started/);
+  assert.ok(Date.now() - started < 12000, "it ended soon after its timeout");
+});
+
+test("cancelling while a candidate is being chosen ends the job at once", async () => {
+  const { workspace } = setUp({ candidates: [pi], silent: ["list_candidates"] });
+  const { id } = jobs.start({ task: "x", workspace });
+  await waitFor(id, "starting");
+  const started = Date.now();
+  const job = await jobs.cancel(id);
+
+  assert.equal(job.status, "cancelled");
+  assert.ok(Date.now() - started < 5000);
+});
+
+test("an answer cut off for length is a failure, not a success", async () => {
+  const { workspace } = setUp({ candidates: [pi], behaviour: { pi: "length" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.match(job.error, /cut off/);
+});
+
+test("OpenCode output with no event at all is not taken as a completed task with zero tokens", async () => {
+  const { workspace, calls } = setUp({ candidates: [openCode], behaviour: { opencode: "silent" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(job.exit_code, 0);
+  assert.equal(job.status, "failed");
+  assert.match(job.error, /without any step_finish/);
+  assert.equal(job.summary.input_tokens, null, "unknown tokens are not zero");
+  assert.equal(released(calls).input_tokens, undefined);
+});
+
+test("OpenCode that stops after a tool-calls step has not finished", async () => {
+  const { workspace } = setUp({ candidates: [openCode], behaviour: { opencode: "unfinished" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.match(job.error, /tool-calls/);
+});
+
+test("an over-long line is dropped and counted, and a last event without its newline still counts", async () => {
+  const { workspace } = setUp({ candidates: [pi], behaviour: { pi: "longline" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 30);
+
+  assert.equal(job.status, "completed");
+  assert.equal(job.dropped_lines, 1);
+  assert.equal(job.summary.answer, "echo: x");
+});
+
+test("a modify report compares with the worktree's base, so changes the agent committed are shown", async () => {
+  const { folder } = setUp({ candidates: [openCode], behaviour: { opencode: "commit" } });
+  const repository = join(folder, "repo");
+  const git = (...args) => execFileSync("git", ["-C", repository, ...args], { encoding: "utf8" });
+  execFileSync("git", ["init", "-q", repository]);
+  writeFileSync(join(repository, "a.txt"), "a\n");
+  git("add", ".");
+  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: repository, mode: "modify" }).id, 20);
+
+  assert.equal(job.status, "completed");
+  assert.equal(job.worktree.commits.length, 1);
+  assert.match(job.worktree.commits[0], /agent change/);
+  assert.deepEqual(job.worktree.files, [{ status: "M", path: "a.txt" }, { status: "??", path: "made-by-agent.txt" }]);
+  assert.match(job.worktree.diff_stat, /a\.txt/);
+  assert.match(job.worktree.review, new RegExp(job.worktree.base));
+});
+
+test("no more than the most active jobs run at once", async () => {
+  const { workspace } = setUp({ candidates: [pi], behaviour: { pi: "hang" } });
+  const ids = [];
+  try {
+    for (let i = 0; i < jobs.MAXIMUM_ACTIVE_JOBS; i++) ids.push(jobs.start({ task: "x", workspace }).id);
+    assert.throws(() => jobs.start({ task: "x", workspace }), /still running/);
+  } finally {
+    for (const id of ids) await jobs.cancel(id);
+  }
+});
+
+test("from WSL, an agent in another distribution is skipped: its Linux path means nothing here", async () => {
+  const inDebian = { ...pi, runtime: { name: "pi", where: "wsl", distro: "Debian" } };
+  const inUbuntu = { ...pi, runtime: { name: "pi", where: "wsl", distro: "Ubuntu" } };
+  const { workspace, calls } = setUp({ candidates: [inDebian, inUbuntu] });
+  process.env.AI_METER_PLACE = "wsl";
+  process.env.WSL_DISTRO_NAME = "Ubuntu";
+  try {
+    const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+    assert.equal(job.status, "completed");
+    assert.equal(job.candidate.distro, "Ubuntu");
+    assert.match(job.skipped[0].reason, /distribution Debian.*runs in Ubuntu/);
+    assert.deepEqual(calls().filter((c) => c.tool === "describe_dispatch").map((c) => c.arguments.distro), ["Ubuntu"]);
+  } finally {
+    delete process.env.WSL_DISTRO_NAME;
+  }
+});
+
+test("the MCP server answers malformed and over-long requests with errors, and keeps serving", async () => {
+  setUp({ candidates: [] });
+  const server = spawn(process.execPath, [join(here, "..", "scripts", "mcp-server.mjs")], { stdio: ["pipe", "pipe", "inherit"] });
+  const answers = [];
+  let buffer = "";
+  server.stdout.on("data", (chunk) => {
+    buffer += chunk;
+    let i;
+    while ((i = buffer.indexOf("\n")) >= 0) {
+      answers.push(JSON.parse(buffer.slice(0, i)));
+      buffer = buffer.slice(i + 1);
+    }
+  });
+  try {
+    const lines = ["null", "[]", '"text"', '{"jsonrpc":"2.0","id":1}', '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":null}', "x".repeat(2 * 1024 * 1024)];
+    for (const line of lines) server.stdin.write(line + "\n");
+    server.stdin.write('{"jsonrpc":"2.0","id":3,"method":"tools/list"}\n');
+    for (let i = 0; i < 100 && !answers.find((a) => a.id === 3); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+
+    assert.equal(server.exitCode, null, "the server is still running");
+    assert.ok(answers.find((a) => a.id === 3).result.tools.length > 0);
+    const errors = answers.filter((a) => a.error);
+    assert.ok(errors.every((a) => a.error.code === -32600), JSON.stringify(errors));
+    assert.deepEqual(errors.map((a) => a.id), [null, null, null, 1, 2, null]);
+  } finally {
+    server.stdin.end();
+    server.kill();
+  }
+});
+
+test("the plugin's version lives in its manifests only, and they agree", async () => {
+  const manifest = (path) => JSON.parse(readFileSync(join(here, "..", path), "utf8"));
+  const { VERSION } = await import("../scripts/lib/version.mjs");
+  assert.equal(manifest("plugin.json").version, manifest(".claude-plugin/plugin.json").version);
+  assert.equal(VERSION, manifest("plugin.json").version);
+  for (const file of ["scripts/mcp-server.mjs", "scripts/lib/meter.mjs"]) assert.doesNotMatch(readFileSync(join(here, "..", file), "utf8"), /"\d+\.\d+\.\d+"/, file + " has a version of its own");
+  for (const file of ["mcp.json", ".mcp.json"]) assert.ok(manifest(file).mcpServers["ai-meter-delegate"].args[0].endsWith("scripts/mcp-server.mjs"), file);
+});

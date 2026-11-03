@@ -89,15 +89,32 @@ export function createWorktree(workspace, jobId, path) {
   };
 }
 
-/** What the agent changed in a worktree: changed and new files, and the diff size. */
+/**
+ * What the agent changed in a worktree since its base commit, committed or not: the commits it made, the changed and
+ * new files, and the diff size. Untracked files are listed with status "??"; they are not in the diff until added.
+ */
 export function describeChanges(worktree) {
-  const status = git(worktree.path, "status", "--porcelain", "--untracked-files=all");
-  const files = status ? status.split("\n").map((line) => ({ status: line.slice(0, 2).trim(), path: line.slice(3) })) : [];
+  const base = worktree.base;
+  const commits = git(worktree.path, "log", "--format=%h %s", base + "..HEAD");
+  const changed = git(worktree.path, "diff", "--name-status", "-z", base).split("\0").filter(Boolean);
+  const files = [];
+  for (let i = 0; i < changed.length; ) {
+    const status = changed[i++];
+    // A rename or copy names the old path, then the new one.
+    if (/^[RC]/.test(status)) {
+      files.push({ status: status[0], path: changed[i + 1], from: changed[i] });
+      i += 2;
+    } else {
+      files.push({ status, path: changed[i++] });
+    }
+  }
+  for (const path of git(worktree.path, "ls-files", "-z", "--others", "--exclude-standard").split("\0").filter(Boolean)) files.push({ status: "??", path });
   return {
     ...worktree,
+    commits: commits ? commits.split("\n") : [],
     files,
-    diff_stat: files.length ? git(worktree.path, "diff", "--stat", "HEAD") : "",
-    review: `git -C "${worktree.path}" diff HEAD`,
+    diff_stat: changed.length ? git(worktree.path, "diff", "--stat", base) : "",
+    review: `git -C "${worktree.path}" diff ${base}`,
     discard: `git -C "${worktree.repository}" worktree remove --force "${worktree.path}" && git -C "${worktree.repository}" branch -D ${worktree.branch}`,
   };
 }

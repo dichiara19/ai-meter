@@ -79,6 +79,14 @@ namespace AIMeter
             Assert(ocWsl.Environment.Count == 0 && ocWsl.Arguments.Any(a => a.StartsWith("OPENCODE_CONFIG_CONTENT=", StringComparison.Ordinal)), "OpenCode's variables do not reach WSL.");
             Assert(ocWsl.Arguments[ocWsl.Arguments.IndexOf("--dir") + 1] == "." && ocWsl.Arguments.Contains(@"C:\w"), "A Windows folder was given to OpenCode inside WSL.");
 
+            // A key exported only in a WSL shell profile: an agent started from a shell in WSL has it, one started
+            // through wsl.exe -e does not, and the key is never passed along instead.
+            var profileKey = Access("pi", "wsl");
+            profileKey.KeyFromProfile = true;
+            var fromWindows = Dispatch.Describe(profileKey, Model, null, @"C:\w", "windows", "Ubuntu-24.04", "1.4.0");
+            Assert(!fromWindows.Supported && fromWindows.Reason.Contains("shell profile"), "An agent was started from Windows without the key its profile exports.");
+            Assert(Dispatch.Describe(profileKey, Model, null, "/home/me/w", "wsl", "Ubuntu-24.04", "1.4.0").Supported, "From WSL, a profile key reaches the agent.");
+
             // The provider is the alias the agent keeps the key under.
             var gemini = Dispatch.Describe(Access("pi", "wsl", "google"), "gemini-2.5-flash", null, null, "wsl", "Ubuntu-24.04", "1.4.0");
             Assert(gemini.Arguments[gemini.Arguments.IndexOf("--provider") + 1] == "google", "The agent's provider alias was not used.");

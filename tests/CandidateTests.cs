@@ -21,6 +21,7 @@ namespace AIMeter
             test("list_candidates reports candidates, pools once, exclusions and runtimes", CandidatesTool);
             test("Agents' own model lists are read in Pi's and models.dev's formats, only from their home or package", AgentModelLists);
             test("Best-effort candidates come from an agent's own list, apart and only when asked for", BestEffortSelection);
+            test("A free model the agent's own list prices is not offered through that agent", PricedByAgent);
             test("list_candidates reports best-effort candidates with what rests on the agent's word", BestEffortTool);
         }
 
@@ -162,7 +163,13 @@ namespace AIMeter
             var runtimeKey = typeof(Candidates).GetMethod("RuntimeKey", BindingFlags.Static | BindingFlags.NonPublic);
             var pi = Candidates.Kinds.Single(k => k.Id == "pi");
             var openCode = Candidates.Kinds.Single(k => k.Id == "opencode");
-            Func<RuntimeKind, string, object> piKeyIn = (kind, home) => runtimeKey.Invoke(null, new object[] { kind, d, home, true, null });
+            Func<RuntimeKind, string, object> piKeyIn = (kind, home) => runtimeKey.Invoke(null, new object[] { kind, d, home, true, null, null });
+            Func<RuntimeKind, string, bool> fromProfileIn = (kind, home) =>
+            {
+                var arguments = new object[] { kind, d, home, true, null, null };
+                runtimeKey.Invoke(null, arguments);
+                return (bool)arguments[5];
+            };
             // Both apps keep a key: every key is listed with its app, in the order Find prefers.
             var both = Home(@".local\share\opencode\auth.json", "{ \"openrouter\": { \"type\": \"api\", \"key\": \"sk-or-v1-opencode-0123456789\" } }",
                             @".pi\agent\auth.json", "{ \"openrouter\": { \"type\": \"api_key\", \"key\": \"sk-or-v1-pi-0123456789\" } }");
@@ -177,6 +184,7 @@ namespace AIMeter
             var profile = Home(".bashrc", "export OPENROUTER_API_KEY=sk-or-v1-profile-0123456789\n");
             Assert((string)piKeyIn(pi, profile) == "sk-or-v1-profile-0123456789" && (string)piKeyIn(openCode, profile) == "sk-or-v1-profile-0123456789",
                 "A WSL profile export every agent inherits was not counted.");
+            Assert(fromProfileIn(pi, profile) && !fromProfileIn(pi, both), "A key from a WSL profile was not marked as such, or an agent's own key was.");
             Assert(Candidates.Kinds.Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi", "crush", "antigravity", "claude", "codex", "cursor", "gemini" }),
                 "The known agents changed without updating this test.");
             Assert(Candidates.Kinds.Where(k => k.Dispatch != null).Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi" }), "The agents delegation runs changed without updating this test.");
@@ -282,6 +290,34 @@ namespace AIMeter
                 var odd = RuntimeKind.FromJson("{ \"id\": \"odd\", \"models\": { \"format\": \"pi\", \"file\": \"" + file + "\" } }", "test");
                 Assert(odd != null && odd.Models == null, "A model list outside the agent's home or package was accepted: " + file);
             }
+        }
+
+        /// <summary>
+        /// The service lists the model as free, but the agent prices it from its own list: the plugin would stop the
+        /// agent at the first request, after paying for it (seen live with Experiential Labs through OpenCode).
+        /// </summary>
+        private static void PricedByAgent()
+        {
+            NetworkBackoff.Clear();
+            var scan = Pi();
+            var home = Home(@"lists\experientiallabs.json", "{ \"experientiallabs\": { \"chat:luna\": { \"type\": \"chat\", \"id\": \"luna\", \"provider\": \"experientiallabs\", " +
+                "\"contextWindow\": 131072, \"maxTokens\": 8192, \"cost\": { \"input\": 0.2, \"output\": 0.8 } } } }");
+            var lab = scan.Access.Single(a => a.Service == "experientiallabs");
+            lab.Provider = "experientiallabs";
+            lab.ModelsFile = Path.Combine(home, @"lists\experientiallabs.json");
+            lab.ModelsFormat = "pi";
+            Assert(AgentModels.Find(lab, "luna") != null && AgentModels.Find(lab, "luna").Priced, "The fixture's price was not read.");
+
+            var s = Candidates.Select(Fixture(10), scan, new Requirements(), DateTime.Now);
+            Assert(!s.Chosen.Any(c => c.Provider.Id == "experientiallabs"), "A model the agent prices was offered through it.");
+            Assert(Excluded(s, "experientiallabs").Reason == "agent_lists_price", "The exclusion does not say the agent prices the model.");
+            Assert(Order(s).SequenceEqual(new[] { "openrouter/a/small:free", "openrouter/z/large:free" }), "Other candidates changed: " + string.Join(", ", Order(s)));
+
+            // With a second agent that does not price it, the model is still offered, through that agent only.
+            scan.Access.Add(Candidates.Access("experientiallabs", "opencode", "windows", "key-experientiallabs-0123456789"));
+            var both = Candidates.Select(Fixture(10), scan, new Requirements(), DateTime.Now);
+            Assert(both.Chosen.Where(c => c.Provider.Id == "experientiallabs").Select(c => c.Access.Runtime).SequenceEqual(new[] { "opencode" }),
+                "The model was not offered through the agent that does not price it.");
         }
 
         private static void BestEffortSelection()

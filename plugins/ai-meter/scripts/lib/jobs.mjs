@@ -4,11 +4,25 @@
 //   -> read its events -> release_capacity with the outcome.
 // It describes before claiming, so a lease is only taken for a candidate the plugin can actually start.
 //
-// Each job is a folder under the jobs folder (~/.aimeter/jobs, or AI_METER_JOBS): job.json (the state, written only
-// by the worker, apart from a worker that died), task.txt, events.jsonl (the agent's output) and stderr.txt. A
-// "cancel" file asks the worker to stop the agent. Folders of ended jobs are removed after a week. A read-only task
-// works in a snapshot next to the jobs folder, removed when the task ends; the worktrees of tasks that changed files
-// live there too and are never removed by the plugin (workspace.mjs).
+// Each job is a folder under the jobs folder (~/.aimeter/jobs, or AI_METER_JOBS): job.json (the state), task.txt,
+// events.jsonl (the agent's output) and stderr.txt. A "cancel" file asks the worker to stop. A read-only task works
+// in a snapshot next to the jobs folder, removed when the task ends; the worktrees of tasks that changed files live
+// there too and are never removed by the plugin (workspace.mjs).
+//
+// Who owns what:
+//   - The worker writes job.json while it lives. A job whose worker died is settled by the next coordinator call
+//     that looks at it (wait, cancel): its agent is stopped, its snapshot removed, its lease released, and the
+//     ended state saved, so it does not stay "running" on disk.
+//   - The timeout covers the whole job, from the worker's start: choosing a candidate, starting and running the
+//     agent. Cancelling and the timeout abort whatever is in progress, AI Meter's requests included; every request
+//     to AI Meter has its own deadline too (meter.mjs), so releasing the lease cannot hold the end of a job.
+//   - The worker owns the agent's process tree: on Linux the agent leads its own process group, which is signalled
+//     as a whole when it is stopped and when it exits; on Windows taskkill /T ends the tree when the agent is stopped
+//     (an agent started in WSL through wsl.exe included, as describe_dispatch says). Processes a Windows agent leaves
+//     behind after exiting on its own are not tracked: that would need a Job Object.
+//   - Output is bounded: lines, the event log and the error output have limits, past which the plugin drops lines,
+//     stops the agent or cuts the log. At most MAXIMUM_ACTIVE_JOBS jobs run at once.
+// Folders of ended jobs are removed a week later, when another job starts.
 
 import { spawn, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -25,6 +39,11 @@ const KEEP_DAYS = 7;
 const ANSWER_LIMIT = 20000;
 export const DEFAULT_TIMEOUT_SECONDS = 1200;
 export const MAXIMUM_TIMEOUT_SECONDS = 7000;   // A lease lasts at most 7200 s, so one claim covers the whole task.
+export const MAXIMUM_ACTIVE_JOBS = 4;   // Leases pace the services; this bounds the workers and agents on this PC.
+const LINE_LIMIT_CHARACTERS = 4 * 1024 * 1024;
+const EVENTS_LIMIT_BYTES = 64 * 1024 * 1024;
+const STDERR_LIMIT_BYTES = 1024 * 1024;
+const OWN_PROCESS_GROUP = process.platform !== "win32";
 
 export const root = () => process.env.AI_METER_JOBS || join(homedir(), ".aimeter", "jobs");
 const worktrees = () => join(dirname(root()), "worktrees");
@@ -54,17 +73,44 @@ function alive(pid) {
   }
 }
 
-/**
- * A job as the coordinator sees it. A job whose worker died is reported as failed; its lease expires on its own.
- * A job still queued after a minute never got its worker.
- */
+/** Why a job that has not ended has no worker any more, or null while it has one. */
+function orphaned(job) {
+  if (ENDED.has(job.status)) return null;
+  if (job.worker_pid && !alive(job.worker_pid)) return "The worker stopped before the task ended.";
+  if (job.status === "queued" && Date.now() - Date.parse(job.created_at) > 60000) return "The worker did not start.";
+  return null;
+}
+
+/** A job as the coordinator sees it, without changing anything: a job without its worker is reported as failed. */
 export function view(job) {
-  if (!ENDED.has(job.status) && job.worker_pid && !alive(job.worker_pid)) {
-    job = { ...job, status: "failed", error: job.error || "The worker stopped before the task ended; the lease expires on its own." };
-  } else if (job.status === "queued" && Date.now() - Date.parse(job.created_at) > 60000) {
-    job = { ...job, status: "failed", error: "The worker did not start." };
+  const reason = orphaned(job);
+  return reason ? { ...job, status: "failed", error: job.error || reason } : job;
+}
+
+/**
+ * Close a job whose worker died: stop its agent, remove its snapshot, release its lease and save the end, as
+ * endedAs ("failed", or "cancelled" when the coordinator cancelled it). Returns the job as the coordinator sees it.
+ */
+async function settle(id, endedAs = "failed") {
+  const job = load(id);
+  const reason = orphaned(job);
+  if (!reason) return view(job);
+  // An agent outlives its timeout only by accident; long after it, its pid may well be another process's.
+  const agentCanStillRun = job.started_at && Date.now() - Date.parse(job.started_at) < (job.timeout_seconds + 600) * 1000;
+  if (agentCanStillRun) stopProcess(job.agent_pid, null, true);
+  if (job.snapshot) removeSnapshot(job.snapshot);
+  if (job.lease_id && !job.released) {
+    try {
+      await release(job.lease_id, { outcome: endedAs, requests: 0 });
+      job.released = true;
+    } catch (error) {
+      job.release_error = error.message;
+    }
   }
-  return job;
+  const ended = { ...job, status: endedAs, error: endedAs === "cancelled" ? null : job.error || reason, ended_at: new Date().toISOString() };
+  // The worker may have saved its own end meanwhile; that one wins.
+  if (!ENDED.has(load(id).status)) save(ended);
+  return view(load(id));
 }
 
 /** Record a job and start its worker. options: task, workspace, mode, client, timeout_seconds and optional pins. */
@@ -77,15 +123,21 @@ export function start(options) {
   const timeout = Math.min(Math.max(Number(options.timeout_seconds) || DEFAULT_TIMEOUT_SECONDS, 5), MAXIMUM_TIMEOUT_SECONDS);
 
   prune();
+  const active = list(Infinity).filter((job) => !ENDED.has(job.status)).length;
+  if (active >= MAXIMUM_ACTIVE_JOBS) throw new Error(`${active} delegated tasks are still running, the most this plugin runs at once. Wait for one to end, or cancel one.`);
+
   const id = "j" + Date.now().toString(36) + randomBytes(2).toString("hex");
   mkdirSync(folderOf(id), { recursive: true });
   writeFileSync(join(folderOf(id), "task.txt"), options.task);
+  const from = place();
   const job = {
     id,
     status: "queued",
     created_at: new Date().toISOString(),
     client: options.client || "unknown",
-    from: place(),
+    from,
+    // An agent in another WSL distribution cannot be started from this one (choose skips it).
+    ...(from === "wsl" && process.env.WSL_DISTRO_NAME ? { from_distro: process.env.WSL_DISTRO_NAME } : {}),
     workspace: options.workspace,
     mode,
     timeout_seconds: timeout,
@@ -96,7 +148,7 @@ export function start(options) {
   save(job);
 
   const script = join(dirname(fileURLToPath(import.meta.url)), "..", "delegate.mjs");
-  // From here on only the worker writes job.json; it records its own pid.
+  // From here on the worker writes job.json; it records its own pid.
   const worker = spawn(process.execPath, [script, "run-job", id], { detached: true, stdio: "ignore", windowsHide: true });
   worker.unref();
   return { ...job, worker_pid: worker.pid };
@@ -112,31 +164,34 @@ export function list(limit = 20) {
     .slice(0, limit);
 }
 
-/** Wait up to waitSeconds for a job to end, then return it. */
-export async function wait(id, waitSeconds = 0) {
+/** Wait up to waitSeconds for a job to end, then return it. A job whose worker died is settled here. */
+export async function wait(id, waitSeconds = 0, endedAs = "failed") {
   const deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
-  let job = view(load(id));
+  let job = await settle(id, endedAs);
   while (!ENDED.has(job.status) && Date.now() < deadline) {
     await sleep(500);
-    job = view(load(id));
+    job = await settle(id, endedAs);
   }
   return job;
 }
 
-/** Ask a job's worker to stop its agent and wait for it, up to 15 s. A job with no worker left is closed here. */
+/**
+ * Ask a job's worker to stop and wait for it, up to 15 s. A job with no worker left is closed here, as cancelled.
+ * A worker still alive after 15 s is left to end on its own; the job is returned as it is.
+ */
 export async function cancel(id) {
-  let job = view(load(id));
+  const job = await settle(id, "cancelled");
   if (ENDED.has(job.status)) return job;
   writeFileSync(join(folderOf(id), "cancel"), "");
-  job = await wait(id, 15);
-  if (ENDED.has(job.status) || alive(job.worker_pid)) return job;
+  return wait(id, 15, "cancelled");
+}
 
-  stopProcess(job.agent_pid);
-  if (job.snapshot) removeSnapshot(job.snapshot);
-  if (job.lease_id) await release(job.lease_id, { outcome: "cancelled" }).catch(() => {});
-  job = { ...load(id), status: "cancelled", ended_at: new Date().toISOString() };
-  save(job);
-  return job;
+/** Why the worker stopped a job: the reason travels as an AbortSignal's reason. */
+class Stopped extends Error {
+  constructor(why) {
+    super(why === "cancelled" ? "Cancelled." : "Timed out.");
+    this.why = why;
+  }
 }
 
 /** The worker: run one job to its end. Every failure ends up in job.json, never as an unhandled error. */
@@ -147,28 +202,47 @@ export async function runJob(id) {
   job.status = "starting";
   save(job);
 
+  const deadline = Date.now() + job.timeout_seconds * 1000;
+  const control = new AbortController();
+  const watch = setInterval(() => {
+    if (existsSync(join(folderOf(id), "cancel"))) control.abort(new Stopped("cancelled"));
+    else if (Date.now() > deadline) control.abort(new Stopped("timed_out"));
+  }, 500);
+
   try {
     if (!job.from) throw new Error("Delegation needs Windows or WSL, where AI Meter runs.");
-    const chosen = await choose(job);
+    const chosen = await choose(job, control.signal);
     if (!chosen) return;
-    await runAgent(job, chosen, task);
+    await runAgent(job, chosen, task, control.signal);
   } catch (error) {
+    const why = control.signal.aborted ? control.signal.reason.why : null;
     if (job.snapshot) removeSnapshot(job.snapshot);
-    job.status = "failed";
-    job.error = error.message;
+    if (job.lease_id && !job.released) {
+      try {
+        await release(job.lease_id, { outcome: why || "failed", requests: 0 });
+        job.released = true;
+      } catch (releaseError) {
+        job.release_error = releaseError.message;
+      }
+    }
+    job.status = why || "failed";
+    job.error = why === "cancelled" ? null : why === "timed_out" ? "Timed out before the agent started." : error.message;
     job.ended_at = new Date().toISOString();
     save(job);
+  } finally {
+    clearInterval(watch);
   }
 }
 
 /**
  * Pick the first candidate in AI Meter's order that matches what the job asked for, whose events the plugin can read,
- * that AI Meter can describe for this place and whose pool grants a lease. A candidate AI Meter refuses to describe
- * (an error such as "no key of its own", or supported: false) is skipped with the reason, not fatal to the job.
- * Best-effort candidates (built on an agent's own model list, docs/MCP.md) come only after every ordinary one, and
- * only when the job allows them. Returns { candidate, plan, lease } or null after failing the job.
+ * that this place can start, that AI Meter can describe for this place and whose pool grants a lease. A candidate
+ * AI Meter refuses to describe (an error such as "no key of its own", or supported: false) is skipped with the
+ * reason, not fatal to the job. Best-effort candidates (built on an agent's own model list, docs/MCP.md) come only
+ * after every ordinary one, and only when the job allows them. Returns { candidate, plan, lease } or null after
+ * failing the job; throws the signal's reason when the job is cancelled or times out meanwhile.
  */
-async function choose(job) {
+async function choose(job, signal) {
   const wanted = job.wanted;
   // The folder is made only once a candidate is chosen, but describe_dispatch needs its path now.
   if (job.mode === "modify") {
@@ -195,10 +269,16 @@ async function choose(job) {
     const refusedPools = new Set();
 
     for (const c of candidates) {
+      if (signal.aborted) throw signal.reason;
       const which = { service: c.service, model: c.model, runtime: c.runtime.name, where: c.runtime.where, ...pick(c.runtime, ["distro"]) };
       if (refusedPools.has(c.pool)) continue;
       if (!canRead(which.runtime)) {
         job.skipped.push({ ...which, reason: "this plugin cannot read " + which.runtime + "'s output yet" });
+        continue;
+      }
+      // describe_dispatch from WSL gives the agent's Linux path, which means something only in its own distribution.
+      if (job.from_distro && which.where === "wsl" && which.distro && which.distro !== job.from_distro) {
+        job.skipped.push({ ...which, reason: "it is in WSL distribution " + which.distro + ", and this plugin runs in " + job.from_distro + "; delegation does not cross distributions" });
         continue;
       }
       let plan;
@@ -236,23 +316,18 @@ async function choose(job) {
     job.ended_at = new Date().toISOString();
     save(job);
     return null;
-  });
+  }, signal);
 }
 
-async function runAgent(job, chosen, task) {
+async function runAgent(job, chosen, task, signal) {
   const { plan } = chosen;
   const folder = folderOf(job.id);
 
-  try {
-    if (job.worktree) job.worktree = createWorktree(job.workspace, job.id, job.worktree.path);
-    else job.snapshot = createSnapshot(job.workspace, job.snapshot.path);
-  } catch (error) {
-    if (job.snapshot) removeSnapshot(job.snapshot);
-    await release(job.lease_id, { outcome: "cancelled", requests: 0 }).catch(() => {});
-    throw error;
-  }
+  if (job.worktree) job.worktree = createWorktree(job.workspace, job.id, job.worktree.path);
+  else job.snapshot = createSnapshot(job.workspace, job.snapshot.path);
   if (job.snapshot?.secrets_left_out.length) job.warnings = [...(job.warnings || []), "secret_files_left_out"];
   if (job.worktree?.committed_secrets_visible) job.warnings = [...(job.warnings || []), "committed_secret_files_visible"];
+  if (signal.aborted) throw signal.reason;
 
   const reader = readerFor(plan.runtime);
   const child = spawn(plan.program, plan.arguments, {
@@ -260,6 +335,7 @@ async function runAgent(job, chosen, task) {
     env: { ...process.env, ...plan.environment },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    detached: OWN_PROCESS_GROUP,   // Its own process group, so that its children can be stopped with it.
   });
   job.agent_pid = child.pid;
   job.version = plan.version;
@@ -271,52 +347,81 @@ async function runAgent(job, chosen, task) {
 
   const events = createWriteStream(join(folder, "events.jsonl"));
   const errors = createWriteStream(join(folder, "stderr.txt"));
-  let pending = "";
   let stopped = null;
   const stop = (why) => {
     if (stopped) return;
     stopped = why;
     stopProcess(child.pid, child);
   };
+  const onAbort = () => stop(signal.reason.why);
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
+
+  // One event per line. A line longer than the limit is dropped up to its newline, and counted.
+  let pending = "";
+  let dropping = false;
+  let eventBytes = 0;
+  const readLine = (text) => {
+    const line = text.trim();
+    if (!line) return;
+    try {
+      reader.feed(JSON.parse(line));
+    } catch {
+      // Not an event: kept in events.jsonl only.
+    }
+    if (reader.paid) stop("paid");   // The first request priced above zero ends the task.
+  };
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
-    events.write(chunk);
+    eventBytes += Buffer.byteLength(chunk);
+    if (eventBytes > EVENTS_LIMIT_BYTES) return stop("output_limit");
+    if (!events.write(chunk)) {
+      child.stdout.pause();
+      events.once("drain", () => child.stdout.resume());
+    }
     pending += chunk;
     let index;
     while ((index = pending.indexOf("\n")) >= 0) {
-      const line = pending.slice(0, index).trim();
+      const line = pending.slice(0, index);
       pending = pending.slice(index + 1);
-      if (!line) continue;
-      try {
-        reader.feed(JSON.parse(line));
-      } catch {
-        // Not an event: kept in events.jsonl only.
-      }
-      if (reader.paid) stop("paid");   // The first request priced above zero ends the task.
+      if (dropping) dropping = false;
+      else readLine(line);
+    }
+    if (pending.length > LINE_LIMIT_CHARACTERS) {
+      if (!dropping) job.dropped_lines = (job.dropped_lines || 0) + 1;
+      dropping = true;
+      pending = "";
     }
   });
-  child.stderr.pipe(errors);
+  let stderrBytes = 0;
+  child.stderr.on("data", (chunk) => {
+    if (stderrBytes < STDERR_LIMIT_BYTES) errors.write(chunk.subarray(0, STDERR_LIMIT_BYTES - stderrBytes));
+    stderrBytes += chunk.length;
+  });
   child.stdin.on("error", () => {});   // An agent that exits early closes its stdin; the exit says why.
   child.stdin.end(task);
 
+  // "close" comes after the output streams have ended, so no event is lost. A process the agent left behind can keep
+  // them open: on Linux its group is ended at exit, and on Windows the streams are closed two seconds after the exit.
   const exitCode = await new Promise((resolve) => {
-    const deadline = Date.now() + job.timeout_seconds * 1000;
-    const timer = setInterval(() => {
-      if (existsSync(join(folder, "cancel"))) stop("cancelled");
-      else if (Date.now() > deadline) stop("timed_out");
-    }, 500);
     child.on("error", (error) => {
-      clearInterval(timer);
       reader.error = "The agent could not start: " + error.message;
       resolve(null);
     });
     child.on("exit", (code) => {
-      clearInterval(timer);
-      resolve(code);
+      endGroup(child.pid);
+      setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        resolve(code);
+      }, 2000);
     });
+    child.on("close", (code) => resolve(code));
   });
-  events.end();
-  errors.end();
+  signal.removeEventListener("abort", onAbort);
+  if (!dropping) readLine(pending);   // A last line without its newline.
+  if (stderrBytes > STDERR_LIMIT_BYTES) errors.write(`\n[AI Meter: ${stderrBytes - STDERR_LIMIT_BYTES} more bytes not kept]\n`);
+  await Promise.all([new Promise((resolve) => events.end(resolve)), new Promise((resolve) => errors.end(resolve))]);
   if (job.snapshot) removeSnapshot(job.snapshot);
 
   const summary = summarise(reader, exitCode, stopped);
@@ -334,6 +439,7 @@ async function runAgent(job, chosen, task) {
       rate_limited: summary.rate_limited,
       ...(summary.input_tokens === null ? {} : { input_tokens: summary.input_tokens, output_tokens: summary.output_tokens }),
     });
+    job.released = true;
   } catch (error) {
     job.release_error = error.message;
   }
@@ -348,10 +454,11 @@ function release(leaseId, outcome) {
 }
 
 /**
- * Stop an agent as describe_dispatch says: taskkill /T /F on Windows, which also ends an agent started in WSL through
- * wsl.exe; SIGINT elsewhere, then SIGKILL if it is still there after five seconds.
+ * Stop an agent and the processes it started. On Windows, taskkill /T /F, which also ends an agent started in WSL
+ * through wsl.exe. Elsewhere SIGINT to its process group, then SIGKILL to what is left five seconds later; force
+ * (an agent whose worker died) sends SIGKILL at once. An agent from before process groups is signalled alone.
  */
-function stopProcess(pid, child) {
+function stopProcess(pid, child, force = false) {
   if (!pid || !alive(pid)) return;
   if (process.platform === "win32") {
     try {
@@ -361,23 +468,46 @@ function stopProcess(pid, child) {
     }
     return;
   }
-  try {
-    if (child) child.kill("SIGINT");
-    else process.kill(pid, "SIGINT");
-  } catch {
-    return;
-  }
-  setTimeout(() => alive(pid) && process.kill(pid, "SIGKILL"), 5000).unref();
+  signalGroup(pid, force ? "SIGKILL" : "SIGINT");
+  if (!force) setTimeout(() => signalGroup(pid, "SIGKILL"), 5000).unref();
 }
 
-/** Remove the folders of jobs that ended more than a week ago, with any snapshot a dead worker left behind. */
+/**
+ * After the agent exited, end anything it left in its process group (Linux; see stopProcess for Windows). Only the
+ * group: the agent's own pid is free once it exited, and may already be another process's.
+ */
+function endGroup(pid) {
+  if (!OWN_PROCESS_GROUP || !pid) return;
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // Nothing left.
+  }
+}
+
+function signalGroup(pid, signalName) {
+  try {
+    process.kill(-pid, signalName);
+  } catch {
+    try {
+      process.kill(pid, signalName);
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
+/**
+ * Remove the folders of jobs that ended more than a week ago, or whose worker died that long ago, with any snapshot
+ * left behind.
+ */
 function prune() {
   if (!existsSync(root())) return;
   const limit = Date.now() - KEEP_DAYS * 86400000;
   for (const name of readdirSync(root())) {
     const file = join(folderOf(name), "job.json");
     try {
-      if (statSync(file).mtimeMs < limit && ENDED.has(JSON.parse(readFileSync(file, "utf8")).status)) {
+      if (statSync(file).mtimeMs < limit && ENDED.has(view(JSON.parse(readFileSync(file, "utf8"))).status)) {
         rmSync(folderOf(name), { recursive: true, force: true });
         rmSync(join(snapshots(), name), { recursive: true, force: true });
       }
