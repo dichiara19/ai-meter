@@ -46,6 +46,11 @@ namespace AIMeter
         public bool OverlayHideFullscreen { get; set; }
         public bool OverlayCollapsed { get; set; }
 
+        // How every surface states a limit: "left" (default) or "used"; money limits as "amount" (default) or "percent".
+        // Notifications always say what is left.
+        public string LimitValues { get; set; }
+        public string MoneyValues { get; set; }
+
         // Taskbar pill.
         public bool TaskbarDock { get; set; }
         public string TaskbarSide { get; set; }     // "auto", "left", "right"
@@ -106,6 +111,7 @@ namespace AIMeter
             DesktopWidget = false; DesktopX = double.MinValue; DesktopY = double.MinValue;   // The taskbar pill is the default surface; the desktop widget is optional.
             TaskbarDock = true; TaskbarSide = "auto";
             Overlay = false; OverlayCorner = "tr"; OverlayMetric = "5h"; OverlayHideFullscreen = true;
+            LimitValues = "left"; MoneyValues = "amount";
             Theme = "system"; Language = "system"; Refresh = "auto"; NotifyLow = true; NotifyReset = true;
             NotifyResets = new System.Collections.Generic.Dictionary<string, bool>(); PillLimits = new System.Collections.Generic.Dictionary<string, string>();
             Budgets = new System.Collections.Generic.Dictionary<string, string>();
