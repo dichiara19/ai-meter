@@ -24,6 +24,7 @@ namespace AIMeter
         private string plan;
         private DateTime fetchedAt = DateTime.MinValue;
         private string problem;   // Authentication notice shown when access is missing or expired.
+        private string problemFix;   // What the notice's link opens: see ProviderState.Fix.
         private string credentialScope, spendScope;
         private Catalogue catalogue;
         private DateTime freeNextFetch = DateTime.MinValue;
@@ -60,6 +61,7 @@ namespace AIMeter
             {
                 st.NeedsLogin = true;
                 st.Notice = L.T(problem);
+                st.Fix = problemFix;
             }
             return st;
         }
@@ -207,21 +209,21 @@ namespace AIMeter
         /// <summary>
         /// A value a request names as {key:slot}, such as an account id, besides the main secret: the one saved for the
         /// slot in Settings, then the first of the slot's "env" variables that is set, then the slot's "beside" field
-        /// next to the key a coding agent keeps (or one of those variables exported in the same home). Null when absent.
+        /// next to the key a coding agent keeps (or one of those variables exported in the same home). Each is reduced to
+        /// the slot's "pattern", so a value saved with the rest of the address it was copied from still works. Null when absent.
         /// </summary>
         private string SlotValue(string slot)
         {
-            string saved = ApiKeys.Get(D.Id + "." + slot);
-            if (saved != null) return saved;
             var spec = Json.Obj(Json.Obj(D.Raw, "keys"), slot);
-            if (spec == null) return null;
+            string saved = ServiceDefinition.SlotText(spec, ApiKeys.Get(D.Id + "." + slot));
+            if (saved != null || spec == null) return saved;
             var env = ServiceDefinition.Strings(spec, "env");
             foreach (var name in env)
             {
-                string v = ServiceDefinition.Env(name);
-                if (!string.IsNullOrEmpty(v)) return v.Trim();
+                string v = ServiceDefinition.SlotText(spec, ServiceDefinition.Env(name));
+                if (v != null) return v;
             }
-            return D.UsesKey ? KeyFinder.Beside(KeyFinder.Find(D), Json.Str(spec, "beside"), env) : null;
+            return D.UsesKey ? ServiceDefinition.SlotText(spec, KeyFinder.Beside(KeyFinder.Find(D), Json.Str(spec, "beside"), env)) : null;
         }
 
         /// <summary>The {key:slot} names in a request's URL, headers and body, in order and without repeats.</summary>
@@ -310,6 +312,7 @@ namespace AIMeter
             if (token == null)
             {
                 problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "Add your API key in Settings to see your usage" : "Sign in to see your usage");
+                problemFix = null;
                 live = null;
                 spend = null;
                 return;
@@ -329,6 +332,7 @@ namespace AIMeter
             if (missing != null)
             {
                 problem = Json.Str(Json.Obj(Json.Obj(D.Raw, "keys"), missing), "notice") ?? "Add your API key in Settings to see your usage";
+                problemFix = "slot:" + missing;
                 live = null;
                 spend = null;
                 return;
@@ -353,6 +357,7 @@ namespace AIMeter
                 if (Json.Str(req, "error") != null && JPath.Get(doc, Json.Str(req, "error")) != null)
                 {
                     problem = Json.Str(req, "errorNotice") ?? "The service answered without usage data";
+                    problemFix = "settings";
                     live = null;
                     usageDoc = null;
                     spend = null;
@@ -364,6 +369,7 @@ namespace AIMeter
                 usageDoc = live != null ? doc : null;
                 if (live != null) live.Identity = credentialScope;
                 problem = live == null ? "The service answered without usage data" : null;
+                problemFix = "settings";
                 spend = ReadSpend(doc);
                 if (spend != null)
                 {
@@ -378,6 +384,7 @@ namespace AIMeter
                 if (Refused(e))
                 {
                     problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "The API key was not accepted: check it in Settings" : "Sign-in expired: sign in again");
+                    problemFix = null;
                     live = null;
                 }
             }
@@ -475,7 +482,7 @@ namespace AIMeter
             if (token == null)
             {
                 catalogue = null;
-                if (!hasUsage) problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "Add your API key in Settings to see your usage" : "Sign in to see your usage");
+                if (!hasUsage) { problem = Json.Str(D.Auth, "notice") ?? (D.UsesKey ? "Add your API key in Settings to see your usage" : "Sign in to see your usage"); problemFix = null; }
                 return;
             }
             double interval = Json.Num(req, "interval") ?? 360;
@@ -488,6 +495,7 @@ namespace AIMeter
                 if (!hasUsage && Refused(e))
                 {
                     problem = Json.Str(D.Auth, "notice") ?? "The API key was not accepted: check it in Settings";
+                    problemFix = null;
                     catalogue = null;
                 }
             }

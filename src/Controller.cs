@@ -201,8 +201,10 @@ namespace AIMeter
         {
             Last = s;
             Notify(s);
-            // Rebuild settings when the available service limits change.
-            string keys = string.Join(",", s.Providers.Where(p => p.Usage != null).SelectMany(p => p.Usage.Windows.Where(w => w.HasPercent).Select(w => p.Id + "|" + w.Key)));
+            // Rebuild settings when the available service limits or a service's notice change, so that a key or value
+            // just saved there shows whether the service accepted it.
+            string keys = string.Join(",", s.Providers.Where(p => p.Usage != null).SelectMany(p => p.Usage.Windows.Where(w => w.HasPercent).Select(w => p.Id + "|" + w.Key)))
+                        + "#" + string.Join(",", s.Providers.Where(p => p.Notice != null).Select(p => p.Id + "|" + p.Notice));
             if (keys != limitKeys)
             {
                 limitKeys = keys;

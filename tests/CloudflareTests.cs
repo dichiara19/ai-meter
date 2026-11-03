@@ -23,6 +23,7 @@ namespace AIMeter
             test("No Neuron rows today is zero, while a missing account sends no request and asks for it", EmptyAndMissing);
             test("A GraphQL error in a 200 answer is a notice, not usage", GraphQlError);
             test("The account ID is read beside the key OpenCode keeps, or from the profile beside Pi's", AccountBesideKey);
+            test("An account ID saved with the dashboard address it was copied from is reduced to the ID", AccountInAddress);
         }
 
         private const BindingFlags Private = BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic;
@@ -70,6 +71,7 @@ namespace AIMeter
                     Assert(Fetch(p) == null && server.Requests.Count == 0, "A request without the account was sent.");
                     Assert((string)typeof(DefinedProvider).GetField("problem", Private).GetValue(p) == "Add your Cloudflare account ID in Settings to see your Neurons", "The missing account was not explained.");
                     lock (DefinedProvider.NeedsExtraKey) Assert(DefinedProvider.NeedsExtraKey.Contains("cloudflare-workers-ai.account"), "Settings does not offer the account ID.");
+                    Assert((string)typeof(DefinedProvider).GetField("problemFix", Private).GetValue(p) == "slot:account", "The card's link does not ask for the account ID.");
                 }
                 using (var server = new Recorder(Answer("[]")))
                 using (new Variables(Token, Account))
@@ -89,7 +91,9 @@ namespace AIMeter
                 var p = Provider(server.Url);
                 Assert(Fetch(p) == null, "An error answer produced usage.");
                 string problem = (string)typeof(DefinedProvider).GetField("problem", Private).GetValue(p);
-                Assert(problem != null && problem.StartsWith("Cloudflare did not return your Neurons"), "The GraphQL error was not shown as the definition's notice.");
+                Assert(problem != null && problem.StartsWith("Cloudflare refused to show this account's Neurons"), "The GraphQL error was not shown as the definition's notice.");
+                // The key and the account are both there: the card's link opens Settings rather than asking for a key again.
+                Assert((string)typeof(DefinedProvider).GetField("problemFix", Private).GetValue(p) == "settings", "The card's link asks for the key the service already has.");
             }
         }
 
@@ -107,6 +111,33 @@ namespace AIMeter
             found = KeyFinder.SearchAll(d, home, false).First();
             Assert(found.App == "Pi" && KeyFinder.Beside(found, "metadata.accountId", new[] { "CLOUDFLARE_ACCOUNT_ID" }) == Account, "The account exported beside Pi's key was not found.");
             Assert(KeyFinder.Beside(found, null, new string[0]) == null, "A value was invented where there is none.");
+        }
+
+        private static void AccountInAddress()
+        {
+            var spec = Json.Obj(Json.Obj(Definition("https://example.test/graphql").Raw, "keys"), "account");
+            Assert(ServiceDefinition.SlotText(spec, "https://dash.cloudflare.com/" + Account + "/home") == Account, "The ID was not taken from the dashboard address.");
+            Assert(ServiceDefinition.SlotText(spec, " " + Account.ToUpperInvariant() + " ") == Account.ToUpperInvariant(), "An upper-case ID was not recognised.");
+            Assert(ServiceDefinition.SlotText(spec, "dash.cloudflare.com/home") == null && ServiceDefinition.SlotText(spec, "  ") == null, "A value without an ID was accepted.");
+
+            // The value saved before the pattern existed, as one user pasted it, still names the account.
+            bool findKeys = Settings.Current.FindKeys;
+            Settings.Current.FindKeys = false;
+            ApiKeys.Save("cloudflare-workers-ai.account", Account + "/home");
+            try
+            {
+                using (var server = new Recorder(Answer("[]")))
+                using (new Variables(Token, null))
+                {
+                    Assert(Fetch(Provider(server.Url)) != null, "The saved address did not reach the service as an ID.");
+                    Assert(server.Requests.Single().Contains("\"account\":\"" + Account + "\""), "The request does not name the bare ID.");
+                }
+            }
+            finally
+            {
+                ApiKeys.Remove("cloudflare-workers-ai.account");
+                Settings.Current.FindKeys = findKeys;
+            }
         }
 
         // ------------------------------------------------------------ helpers

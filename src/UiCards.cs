@@ -356,7 +356,7 @@ namespace AIMeter
                 note.Children.Add(ic);
                 if (p.NeedsLogin && p.CanSignIn && login != null)
                 {
-                    var link = new Button { Content = L.T("Sign in"), Padding = new Thickness(4, 0, 4, 1), FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
+                    var link = new Button { Content = FixLabel(p), Padding = new Thickness(4, 0, 4, 1), FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
                     link.SetResourceReference(FrameworkElement.StyleProperty, "LinkButton");
                     link.Click += (o, e) => login(p.Id);
                     DockPanel.SetDock(link, Dock.Right);
@@ -368,6 +368,15 @@ namespace AIMeter
                 note.Children.Add(nt);
                 stack.Children.Add(note);
             }
+        }
+
+        /// <summary>The notice link's text: what it opens (see ProviderState.Fix), "Sign in" for a missing key or sign-in.</summary>
+        private static string FixLabel(ProviderState p)
+        {
+            if (p.Fix == "settings") return L.T("Settings");
+            var d = p.Fix != null && p.Fix.StartsWith("slot:") ? Definitions.Get(p.Id) : null;
+            string label = d != null ? Json.Str(Json.Obj(Json.Obj(d.Raw, "keys"), p.Fix.Substring(5)), "label") : null;
+            return label != null ? L.F("Add {0}", L.T(label)) : L.T("Sign in");
         }
 
         /// <summary>Open desktop apps, then agent sessions, folded behind a summary row when the caller supports it.</summary>

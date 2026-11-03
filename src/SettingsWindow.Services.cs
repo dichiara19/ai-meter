@@ -54,7 +54,7 @@ namespace AIMeter
             if (catalogues.Count > 0)
             {
                 Section(L.T("Model catalogues for AI apps"));
-                Hint(L.T("These services list their models but do not let a key read your limits, so they are not on the taskbar or in the panel. The apps you connect under AI apps use them to find free models and to delegate tasks."));
+                Hint(L.T("These services list their models but do not let a key read your limits, so they are not on the taskbar or in the panel. The apps you connect under AI apps use them to find free models and to delegate tasks."), L.T("AI apps"), "apps");
                 foreach (var s in catalogues) ServiceLink(s);
             }
             Hint(L.T("API keys can come from the programs that already use them, so you don't have to paste them again:"));
@@ -237,6 +237,13 @@ namespace AIMeter
             rows.Add(Row(null, L.T("API key"), text,
                 ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false)
                                   : Button(found != null ? L.T("Use another key…") : L.T("Add key…"), () => C.EnterApiKey(d), found == null)));
+            // Whether the service accepted what is saved, so that a key or value just entered is not taken on trust.
+            // The page is rebuilt when the notice changes.
+            var state = LastState(d.Id);
+            if (ApiKeys.Has(d.Id) || found != null)
+                rows.Add(Row(null, L.T("Connection"),
+                    state != null && state.NeedsLogin && !string.IsNullOrEmpty(state.Notice) ? state.Notice
+                    : state != null && (state.Usage != null || state.Catalogue != null) ? L.T("Connected") : L.T("Waiting for the first update"), null));
             // Offer extra credentials only when needed or already saved.
             var keys = Json.Obj(d.Raw, "keys");
             if (keys != null)
