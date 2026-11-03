@@ -8,8 +8,8 @@ using System.Text.RegularExpressions;
 namespace AIMeter
 {
     /// <summary>
-    /// Discover existing API keys in the coding agents of agents/*.json (OpenCode, Pi, Crush and any agent a definition
-    /// gives key sources) and shell profiles on Windows and running WSL.
+    /// Discover existing API keys in the coding agents of agents/*.json (OpenCode, Pi, Crush, Hermes's dotenv file and any
+    /// agent a definition gives key sources) and shell profiles on Windows and running WSL.
     /// Provider definitions declare the service aliases used by those apps in auth.ids.
     /// Resolve environment references using auth.env and exports from the same home directory.
     /// Never execute command values; discovered credentials are used only for their configured service.
@@ -29,10 +29,13 @@ namespace AIMeter
             internal bool Wsl;
         }
 
-        /// <summary>App name, home-relative path and JSON value path, with {id} standing for a service alias, in agent order.</summary>
+        /// <summary>
+        /// App name, home-relative path and JSON value path, with {id} standing for a service alias, in agent order;
+        /// the path is null for a dotenv file.
+        /// </summary>
         private static IEnumerable<string[]> Sources
         {
-            get { return Agents.All.SelectMany(a => a.Keys.Select(k => new[] { a.Name, k.File, k.Path })); }
+            get { return Agents.All.SelectMany(a => a.Keys.Select(k => new[] { a.Name, k.File, k.EnvFile ? null : k.Path })); }
         }
 
         private static readonly string[] Profiles = { ".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile", ".zshenv", @".config\fish\config.fish" };
@@ -67,6 +70,17 @@ namespace AIMeter
             string where = wsl ? " (WSL)" : "";
             foreach (var s in Sources)
             {
+                if (s[2] == null)
+                {
+                    // A dotenv file, as Hermes keeps: the service's own variable names, as in a shell profile.
+                    string file = Path.Combine(home, s[1]);
+                    foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
+                    {
+                        string v = Resolve(FromFile(name, file), home, wsl);
+                        if (v != null) { yield return new Found { Key = v, Source = s[0] + where, App = s[0], Home = home, Wsl = wsl, File = file }; break; }
+                    }
+                    continue;
+                }
                 var doc = ReadJson(Path.Combine(home, s[1]));
                 if (doc == null) continue;
                 foreach (var id in ids)
@@ -91,8 +105,9 @@ namespace AIMeter
 
         /// <summary>
         /// A value a service needs besides its key, such as an account id, from where that key was found: the field
-        /// <paramref name="beside"/> of the same entry in the agent's file, or else one of <paramref name="env"/> exported
-        /// in the shell profiles of that home. References are resolved as for keys; null when the value is not there.
+        /// <paramref name="beside"/> of the same entry in the agent's file, one of <paramref name="env"/> in the same
+        /// dotenv file, or else one of them exported in the shell profiles of that home. References are resolved as for
+        /// keys; null when the value is not there.
         /// </summary>
         internal static string Beside(Found key, string beside, IEnumerable<string> env)
         {
@@ -104,8 +119,9 @@ namespace AIMeter
             }
             foreach (var name in env ?? Enumerable.Empty<string>())
             {
-                string v = FromProfiles(name, key.Home);
-                if (Plausible(v)) return v;
+                string v = key.File != null && key.Entry == null ? Resolve(FromFile(name, key.File), key.Home, key.Wsl) : null;
+                if (v == null && Plausible(FromProfiles(name, key.Home))) v = FromProfiles(name, key.Home);
+                if (v != null) return v;
             }
             return null;
         }
@@ -132,18 +148,23 @@ namespace AIMeter
         private static string FromProfiles(string name, string home)
         {
             string found = null;
+            foreach (var p in Profiles) found = FromFile(name, Path.Combine(home, p)) ?? found;
+            return found;
+        }
+
+        /// <summary>The last assignment of a variable in one shell profile or dotenv file: NAME=value, export or fish set.</summary>
+        private static string FromFile(string name, string path)
+        {
+            string text = ReadSmall(path);
+            if (text == null) return null;
+            string found = null;
             var sh = new Regex(@"^\s*(?:export\s+)?" + Regex.Escape(name) + @"=(['""]?)([^'""\s#]+)\1\s*(?:#.*)?$");
             var fish = new Regex(@"^\s*set\s+(?:-[a-zA-Z]+\s+)*" + Regex.Escape(name) + @"\s+(['""]?)([^'""\s]+)\1\s*$");
-            foreach (var p in Profiles)
+            foreach (var line in text.Split('\n'))
             {
-                string text = ReadSmall(Path.Combine(home, p));
-                if (text == null) continue;
-                foreach (var line in text.Split('\n'))
-                {
-                    var m = sh.Match(line.TrimEnd('\r'));
-                    if (!m.Success) m = fish.Match(line.TrimEnd('\r'));
-                    if (m.Success) found = m.Groups[2].Value;
-                }
+                var m = sh.Match(line.TrimEnd('\r'));
+                if (!m.Success) m = fish.Match(line.TrimEnd('\r'));
+                if (m.Success) found = m.Groups[2].Value;
             }
             return found;
         }

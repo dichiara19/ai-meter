@@ -23,7 +23,7 @@ namespace AIMeter
         public string[] Folders = new string[0];
         /// <summary>Program names per place ("windows" or "wsl"), without an extension.</summary>
         public readonly Dictionary<string, string[]> Programs = new Dictionary<string, string[]>();
-        /// <summary>Where the agent keeps API keys: a home-relative file and a value path with {id} for a service alias.</summary>
+        /// <summary>Where the agent keeps API keys: a home-relative file and a value path with {id} for a service alias, or a dotenv file.</summary>
         public readonly List<KeySource> Keys = new List<KeySource>();
         /// <summary>npm package, to read the version without running the agent; null when not installed through npm.</summary>
         public string Package;
@@ -64,8 +64,11 @@ namespace AIMeter
                 if (names.Length > 0) kind.Programs[where] = names;
             }
             foreach (var k in Objects(d, "keys"))
-                if (Json.Str(k, "file") != null && Json.Str(k, "path") != null)
-                    kind.Keys.Add(new KeySource { File = Local(Json.Str(k, "file")), Path = Json.Str(k, "path") });
+            {
+                bool env = Json.Str(k, "format") == "env";
+                if (Json.Str(k, "file") != null && (env || Json.Str(k, "path") != null))
+                    kind.Keys.Add(new KeySource { File = Local(Json.Str(k, "file")), Path = env ? null : Json.Str(k, "path"), EnvFile = env });
+            }
             var dispatch = Json.Obj(d, "dispatch");
             if (dispatch != null) kind.Dispatch = AgentDispatch.FromJson(dispatch);
             var models = Json.Obj(d, "models");
@@ -84,7 +87,15 @@ namespace AIMeter
         }
     }
 
-    internal sealed class KeySource { public string File, Path; }
+    /// <summary>
+    /// A file where an agent keeps API keys: JSON with a value Path, or, with EnvFile, a dotenv file of NAME=value lines
+    /// read by the variable names each service definition lists in auth.env.
+    /// </summary>
+    internal sealed class KeySource
+    {
+        public string File, Path;
+        public bool EnvFile;
+    }
 
     /// <summary>
     /// How a plugin starts an agent: per verified place, the version range and (optionally) its own arguments and

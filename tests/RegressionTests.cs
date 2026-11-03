@@ -68,6 +68,7 @@ namespace AIMeter
             ValueTests.Register(Test);
             LogoTests.Register(Test);
             CloudflareTests.Register(Test);
+            HermesTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 

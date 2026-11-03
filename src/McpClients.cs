@@ -145,6 +145,7 @@ namespace AIMeter
             new[] { "claude-code", "Claude Code" },
             new[] { "codex", "Codex" },
             new[] { "antigravity-cli", "Antigravity CLI" },
+            new[] { "hermes", "Hermes" },
         };
 
         /// <summary>
@@ -152,6 +153,7 @@ namespace AIMeter
         /// Claude Code and Codex take the server command after "--"; Antigravity CLI takes it before, with its
         /// dash-prefixed arguments after "--". In PowerShell the separator is quoted: PowerShell drops a bare "--"
         /// when the agent is an npm-installed .ps1 shim, and the agent would then read -NoProfile as its own option.
+        /// Hermes takes --command and then --args, which must come last and keeps every following word, dashes included.
         /// </summary>
         public static string Command(string clientId, string relay, bool wsl)
         {
@@ -168,6 +170,7 @@ namespace AIMeter
                 case "claude-code": return "claude mcp add --scope user " + EntryName + " " + separator + " " + powerShell + " " + flags;
                 case "codex": return "codex mcp add " + EntryName + " " + separator + " " + powerShell + " " + flags;
                 case "antigravity-cli": return "agy mcp add " + EntryName + " " + powerShell + " " + separator + " " + flags;
+                case "hermes": return "hermes mcp add " + EntryName + " --command " + powerShell + " --args " + flags;
                 default: throw new ArgumentException("No command-line installation for " + clientId, "clientId");
             }
         }
