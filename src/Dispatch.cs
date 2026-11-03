@@ -85,6 +85,10 @@ namespace AIMeter
                 // ("wsl.exe --" hands the command line to that shell). env sets the variables, including a PATH where the
                 // agent's interpreter is found, then runs the agent by its full path.
                 if (access.Program == null) return plan.Refuse("the agent's program was not found inside WSL");
+                // The key is never passed on: it would be on wsl.exe's command line and in this description.
+                if (access.KeyFromProfile)
+                    return plan.Refuse("the key for " + access.Service + " is only exported in a WSL shell profile, which wsl.exe -e does not read; " +
+                        "start the coordinator from a shell in WSL, or give " + kind.Name + " its own key");
                 var wsl = new List<string> { "-d", distro, "--cd", folder, "-e", "env", "PATH=" + SearchPath(access.Program, access.NodeFolder) };
                 wsl.AddRange(plan.Environment.Select(kv => kv.Key + "=" + kv.Value));
                 wsl.Add(access.Program);

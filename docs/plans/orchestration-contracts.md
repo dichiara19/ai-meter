@@ -1,5 +1,7 @@
 # Orchestration contracts (draft)
 
+> **Superseded where implemented.** The authoritative contract for every tool that exists is [docs/MCP.md](../MCP.md); this draft remains for the reasoning behind it and for what is not built yet.
+
 Proposed contracts for milestones M1–M4 of the [agent orchestration plan](agent-orchestration.md). Every name below is a proposal. Each milestone finalises its part in code and in [docs/MCP.md](../MCP.md), and this file then points there.
 
 The existing conventions of the MCP server stay:

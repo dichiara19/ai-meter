@@ -33,6 +33,7 @@ export function full(job, jobsFolder) {
   if (job.notes?.length) report.notes = job.notes;
   if (job.version) report.agent_version = job.version;
   if (job.release_error) report.release_error = job.release_error;
+  if (job.dropped_lines) report.dropped_lines = job.dropped_lines;
   if (job.status !== "queued" && job.status !== "starting") report.logs = { events: join(jobsFolder, job.id, "events.jsonl"), stderr: join(jobsFolder, job.id, "stderr.txt") };
   return report;
 }

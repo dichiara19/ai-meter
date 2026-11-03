@@ -219,7 +219,6 @@ namespace AIMeter
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern IntPtr GetShellWindow();
         [DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder sb, int max);
 
         public const int GWL_EXSTYLE = -20;
         public const int GWL_STYLE = -16;
@@ -539,23 +538,14 @@ namespace AIMeter
             return tray != IntPtr.Zero && GetWindowRect(tray, out r) && r.Right > r.Left ? r.Left : 0;
         }
 
-        /// <summary>True if the window is a taskbar (primary or secondary).</summary>
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
 
+        /// <summary>True if the window belongs to this process.</summary>
         public static bool IsOwnWindow(IntPtr hwnd)
         {
             uint pid;
             GetWindowThreadProcessId(hwnd, out pid);
             return pid == (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
-        }
-
-        public static bool IsTaskbar(IntPtr hwnd)
-        {
-            if (hwnd == IntPtr.Zero) return false;
-            var sb = new StringBuilder(64);
-            GetClassNameW(hwnd, sb, sb.Capacity);
-            string c = sb.ToString();
-            return c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd";
         }
 
         /// <summary>Taskbar edge: 0 left, 1 top, 2 right, 3 bottom.</summary>

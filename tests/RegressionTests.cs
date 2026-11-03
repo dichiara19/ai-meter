@@ -55,6 +55,7 @@ namespace AIMeter
             Test("Free models skip routers, paid, unpriced, expired and media models", FreeModelList);
             Test("Running Pi processes name their session folders, also inside a sandbox", RunningPiFolders);
             Test("Pi sessions record their provider and move to that service's card", PiSessionsByService);
+            Test("The file cache ages out entries no scan reads, WSL ones included, without touching their files", CacheAging);
             StartupRegressionTests.Register(Test);
             HistoryRegressionTests.Register(Test);
             ConsumptionTests.Register(Test);
@@ -107,6 +108,22 @@ namespace AIMeter
         private static void Record(string scope, double? total, double? balance, DateTime at)
         {
             SpendTracker.Record(scope, total, balance, at);
+        }
+
+        private static void CacheAging()
+        {
+            var probe = new Probe(Settings.Current);
+            string wsl = @"\\wsl.localhost\Missing\home\me\.pi\agent\sessions\s.jsonl";
+            probe.Once("wsl:" + wsl, () => "kept while read");
+            probe.Once("wsl:" + wsl + ".old", () => "no longer read");
+            probe.AgeCacheEntry("wsl:" + wsl + ".old", TimeSpan.FromHours(2));
+            probe.Trim();
+            Assert(probe.CacheCount == 1 && probe.Once<string>("wsl:" + wsl, () => "reloaded") == "kept while read", "Trim dropped a used WSL entry, or kept an unused one.");
+
+            probe.AgeCacheEntry("wsl:" + wsl, TimeSpan.FromMinutes(1));   // Older than the entries below, but not unused.
+            for (int i = 0; i < 4100; i++) probe.Once("k:" + i, () => "x");
+            probe.Trim();
+            Assert(probe.CacheCount == 4000 && probe.Once<string>("wsl:" + wsl, () => "reloaded") == "reloaded", "The cache grew past its limit, or kept its oldest entries.");
         }
 
         private static void FirstSample()

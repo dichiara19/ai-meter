@@ -6,13 +6,13 @@
 // The server may run in the plugin's folder (Codex) or the project's (Claude Code), so every tool that works on files
 // takes the folder explicitly.
 
-import { createInterface } from "node:readline";
 import * as jobs from "./lib/jobs.mjs";
 import { withMeter } from "./lib/meter.mjs";
 import * as report from "./lib/report.mjs";
+import { VERSION } from "./lib/version.mjs";
 
-const VERSION = "0.1.0";
 const MAXIMUM_WAIT_SECONDS = 50;   // Codex gives an MCP call 60 s by default.
+const REQUEST_LIMIT_CHARACTERS = 1024 * 1024;   // A task is text; a longer line is refused, and the server goes on.
 let client = "unknown";
 
 const text = (description) => ({ type: "string", description });
@@ -128,18 +128,52 @@ async function handle(message) {
 
 const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
 
-createInterface({ input: process.stdin }).on("line", async (line) => {
-  if (!line.trim()) return;
+/** Why a parsed line is not a request or notification this server can handle, or null when it is one. */
+function invalid(message) {
+  if (message === null || typeof message !== "object" || Array.isArray(message)) return "A request must be a JSON object.";
+  if (typeof message.method !== "string") return "A request needs a method.";
+  if (message.id !== undefined && typeof message.id !== "string" && typeof message.id !== "number") return "A request id must be a string or a number.";
+  if (message.params !== undefined && (message.params === null || typeof message.params !== "object")) return "params must be an object.";
+  if (message.method === "tools/call" && typeof message.params?.name !== "string") return "tools/call needs params.name.";
+  return null;
+}
+
+async function answer(line) {
+  if (line.length > REQUEST_LIMIT_CHARACTERS) return send({ id: null, error: { code: -32600, message: "Request longer than " + REQUEST_LIMIT_CHARACTERS + " characters." } });
   let message;
   try {
     message = JSON.parse(line);
   } catch {
     return send({ id: null, error: { code: -32700, message: "Parse error" } });
   }
+  const reason = invalid(message);
+  if (reason) return send({ id: typeof message?.id === "string" || typeof message?.id === "number" ? message.id : null, error: { code: -32600, message: reason } });
   try {
     const result = await handle(message);
     if (message.id !== undefined && result !== undefined) send({ id: message.id, result });
   } catch (error) {
     if (message.id !== undefined) send({ id: message.id, error: { code: error.code || -32603, message: error.message } });
   }
+}
+
+// Lines are split by hand rather than with readline, so that an endless line is dropped as it arrives instead of
+// being held in memory: its start is answered with an error, and the rest is skipped up to the next newline.
+let buffer = "";
+let skipping = false;
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf("\n")) >= 0) {
+    const line = buffer.slice(0, index);
+    buffer = buffer.slice(index + 1);
+    if (skipping) skipping = false;
+    else if (line.trim()) answer(line.trim());
+  }
+  if (buffer.length > REQUEST_LIMIT_CHARACTERS) {
+    if (!skipping) send({ id: null, error: { code: -32600, message: "Request longer than " + REQUEST_LIMIT_CHARACTERS + " characters." } });
+    skipping = true;
+    buffer = "";
+  }
 });
+process.stdin.on("end", () => buffer.trim() && !skipping && answer(buffer.trim()));

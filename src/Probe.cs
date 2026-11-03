@@ -29,7 +29,12 @@ namespace AIMeter
         public static readonly string AppData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         public static readonly string LocalAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
-        private sealed class CacheEntry { public DateTime Mtime; public long Length; public object Value; }
+        /// <summary>Used is the last time a read asked for the entry, so that Trim can age out entries no scan reads any more.</summary>
+        private sealed class CacheEntry { public DateTime Mtime; public long Length; public object Value; public DateTime Used = DateTime.UtcNow; }
+
+        /// <summary>Entries unused for this long go, wherever their file is; past the most entries, the least recently used go first.</summary>
+        private static readonly TimeSpan UnusedFor = TimeSpan.FromHours(1);
+        private const int MostEntries = 4000;
 
         public Probe(Settings s) { S = s; }
 
@@ -117,7 +122,7 @@ namespace AIMeter
         public object Cached(string key, FileInfo fi, Func<object> load)
         {
             CacheEntry e;
-            if (cache.TryGetValue(key, out e) && e.Mtime == fi.LastWriteTimeUtc && e.Length == fi.Length) return e.Value;
+            if (cache.TryGetValue(key, out e) && e.Mtime == fi.LastWriteTimeUtc && e.Length == fi.Length) { e.Used = DateTime.UtcNow; return e.Value; }
             object v = load();
             cache[key] = new CacheEntry { Mtime = fi.LastWriteTimeUtc, Length = fi.Length, Value = v };
             return v;
@@ -127,7 +132,7 @@ namespace AIMeter
         public T Once<T>(string key, Func<T> load) where T : class
         {
             CacheEntry e;
-            if (cache.TryGetValue(key, out e)) return e.Value as T;
+            if (cache.TryGetValue(key, out e)) { e.Used = DateTime.UtcNow; return e.Value as T; }
             T v = load();
             cache[key] = new CacheEntry { Value = v };
             return v;
@@ -148,16 +153,29 @@ namespace AIMeter
             return small;
         }
 
-        /// <summary>Occasionally clears cache entries for files that no longer exist.</summary>
+        /// <summary>
+        /// Occasionally clears cache entries: those unused for an hour, those for local files that no longer exist, and
+        /// the least recently used past MostEntries. WSL files (\\ paths) are aged out rather than checked, so that
+        /// trimming never wakes a stopped distribution.
+        /// </summary>
         public void Trim()
         {
-            foreach (var k in cache.Keys.ToList())
+            var now = DateTime.UtcNow;
+            foreach (var kv in cache.ToList())
             {
-                int colon = k.IndexOf(':');
-                string path = colon >= 0 ? k.Substring(colon + 1) : k;
-                if (!path.StartsWith(@"\\") && path.Contains(@"\") && !File.Exists(path)) cache.Remove(k);
+                int colon = kv.Key.IndexOf(':');
+                string path = colon >= 0 ? kv.Key.Substring(colon + 1) : kv.Key;
+                bool gone = !path.StartsWith(@"\\") && path.Contains(@"\") && !File.Exists(path);
+                if (gone || now - kv.Value.Used > UnusedFor) cache.Remove(kv.Key);
             }
+            if (cache.Count > MostEntries)
+                foreach (var kv in cache.OrderBy(kv => kv.Value.Used).Take(cache.Count - MostEntries).ToList()) cache.Remove(kv.Key);
         }
+
+#if AIMETER_TEST
+        internal int CacheCount { get { return cache.Count; } }
+        internal void AgeCacheEntry(string key, TimeSpan by) { cache[key].Used -= by; }
+#endif
 
         // ================================================================ files and processes
         public static IEnumerable<FileInfo> SafeFiles(string dir, string pattern)
