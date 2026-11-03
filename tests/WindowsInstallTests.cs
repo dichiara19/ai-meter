@@ -44,13 +44,17 @@ namespace AIMeter
                 // This process's PATH comes before the user's: a program there is found even with no installer folder.
                 Environment.SetEnvironmentVariable("PATH", onPath);
                 string claudeOnPath = Touch(onPath, "claude.exe");
-                Assert(ClaudeProvider.CliPath(home, appData) == claudeOnPath, "Claude Code on PATH was not found.");
+                Assert(ClaudeProvider.CliPath(home, appData, local) == claudeOnPath, "Claude Code on PATH was not found.");
                 string npmClaude = Touch(appData, @"npm\claude.cmd");
-                Assert(ClaudeProvider.CliPath(home, appData) == npmClaude, "npm's Claude Code shim was not found.");
+                Assert(ClaudeProvider.CliPath(home, appData, local) == npmClaude, "npm's Claude Code shim was not found.");
                 string nativeClaude = Touch(home, @".local\bin\claude.exe");
-                Assert(ClaudeProvider.CliPath(home, appData) == nativeClaude, "The native installer's Claude Code did not come before npm's.");
-                string bundledClaude = Touch(appData, @"Claude\claude-code\2.1.316\claude.exe");
-                Assert(ClaudeProvider.CliPath(home, appData) == bundledClaude, "The desktop app's Claude Code did not come first.");
+                Assert(ClaudeProvider.CliPath(home, appData, local) == nativeClaude, "The native installer's Claude Code did not come before npm's.");
+                // A desktop app installed where %APPDATA%\Claude did not exist keeps its files in the package's LocalCache.
+                string redirectedClaude = Touch(local, @"Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude-code\2.1.316\abc\claude.exe");
+                Assert(ClaudeProvider.CliPath(home, appData, local) == redirectedClaude, "The desktop app's Claude Code in its package folder was not found.");
+                string bundledClaude = Touch(appData, @"Claude\claude-code\2.1.317\claude.exe");
+                File.SetLastWriteTime(redirectedClaude, DateTime.Now.AddDays(-1));
+                Assert(ClaudeProvider.CliPath(home, appData, local) == bundledClaude, "The desktop app's newest Claude Code was not chosen.");
 
                 // npm's Codex: the executable it unpacks, not the shim, so that app-server talks to Codex directly.
                 if (ServiceDefinition.OnPath("codex.exe") == null)

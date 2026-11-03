@@ -31,7 +31,34 @@ namespace AIMeter
         /// <summary>Whether Claude Code or the Claude app is installed on this PC.</summary>
         public static bool Detected()
         {
-            return Directory.Exists(Path.Combine(Probe.Home, ".claude")) || Directory.Exists(Path.Combine(Probe.AppData, "Claude"));
+            return Directory.Exists(Path.Combine(Probe.Home, ".claude")) || AppFolders(Probe.AppData, Probe.LocalAppData).Any();
+        }
+
+        /// <summary>
+        /// The Claude app's data folders that exist. The app is an MSIX package: Windows keeps its AppData in the real
+        /// %APPDATA%\Claude only when that folder existed before installation, and otherwise redirects it to the
+        /// package's private LocalCache. Both may exist, each holding part of the files.
+        /// </summary>
+        internal static IEnumerable<string> AppFolders(string appData, string localAppData)
+        {
+            string real = Path.Combine(appData, "Claude");
+            if (Directory.Exists(real)) yield return real;
+            string[] packages;
+            try { packages = Directory.GetDirectories(Path.Combine(localAppData, "Packages"), "Claude_*"); }
+            catch (IOException) { yield break; }
+            catch (UnauthorizedAccessException) { yield break; }
+            foreach (var package in packages)
+            {
+                string redirected = Path.Combine(package, @"LocalCache\Roaming\Claude");
+                if (Directory.Exists(redirected)) yield return redirected;
+            }
+        }
+
+        /// <summary>A path inside the Claude app's data, in the first folder that has it; the real AppData when none does.</summary>
+        private static string AppPath(string relativePath)
+        {
+            return AppFolders(Probe.AppData, Probe.LocalAppData).Select(f => Path.Combine(f, relativePath)).FirstOrDefault(p => Directory.Exists(p) || File.Exists(p))
+                ?? Path.Combine(Probe.AppData, "Claude", relativePath);
         }
         public override bool Enabled(Settings s) { return s.ClaudeEnabled; }
         public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; }
@@ -117,7 +144,7 @@ namespace AIMeter
         private static Dictionary<string, Dictionary<string, object>> DesktopSessionMeta(Probe p)
         {
             var map = new Dictionary<string, Dictionary<string, object>>();
-            string root = Path.Combine(Probe.AppData, @"Claude\claude-code-sessions");
+            string root = AppPath("claude-code-sessions");
             DateTime cutoff = DateTime.Now.AddDays(-3);
             foreach (var dir in Probe.SafeDirs(root).SelectMany(Probe.SafeDirs))
                 foreach (var file in Probe.SafeFiles(dir, "local_*.json"))
@@ -132,7 +159,7 @@ namespace AIMeter
 
         private static IEnumerable<Session> CoworkSessions(Probe p)
         {
-            string root = Path.Combine(Probe.AppData, @"Claude\local-agent-mode-sessions");
+            string root = AppPath("local-agent-mode-sessions");
             DateTime cutoff = DateTime.Now.AddMinutes(-30);
             var list = new List<Session>();
             foreach (var dir in Probe.SafeDirs(root).SelectMany(Probe.SafeDirs))
@@ -355,24 +382,26 @@ namespace AIMeter
         }
 
         /// <summary>The Claude Code CLI on Windows, or null when it is not installed.</summary>
-        public static string CliPath() { return CliPath(Probe.Home, Probe.AppData); }
+        public static string CliPath() { return CliPath(Probe.Home, Probe.AppData, Probe.LocalAppData); }
 
         /// <summary>
-        /// The latest CLI bundled with the desktop app, then the native installer's (~\.local\bin), npm's shim and PATH.
-        /// Every one of them shares the sign-in in ~\.claude.
+        /// The latest CLI bundled with the desktop app, in any of its data folders, then the native installer's
+        /// (~\.local\bin), npm's shim and PATH. Every one of them shares the sign-in in ~\.claude.
         /// </summary>
-        internal static string CliPath(string home, string appData)
+        internal static string CliPath(string home, string appData, string localAppData)
         {
-            string root = Path.Combine(appData, @"Claude\claude-code");
-            try
+            var bundled = new List<string>();
+            foreach (var folder in AppFolders(appData, localAppData))
             {
-                string bundled = Directory.Exists(root)
-                    ? Directory.GetFiles(root, "claude.exe", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTime).FirstOrDefault()
-                    : null;
-                if (bundled != null) return bundled;
+                string root = Path.Combine(folder, "claude-code");
+                try
+                {
+                    if (Directory.Exists(root)) bundled.AddRange(Directory.GetFiles(root, "claude.exe", SearchOption.AllDirectories));
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            if (bundled.Count > 0) return bundled.OrderByDescending(File.GetLastWriteTime).First();
             return new[] { Path.Combine(home, @".local\bin\claude.exe"), Path.Combine(appData, @"npm\claude.cmd") }.FirstOrDefault(File.Exists)
                 ?? ServiceDefinition.OnPath("claude.exe") ?? ServiceDefinition.OnPath("claude.cmd");
         }
@@ -380,7 +409,7 @@ namespace AIMeter
         /// <summary>Latest sample saved and updated by the Claude app.</summary>
         private static Usage AppCachedUsage(Probe p)
         {
-            var fi = new FileInfo(Path.Combine(Probe.AppData, @"Claude\plan-usage-history.json"));
+            var fi = new FileInfo(AppPath("plan-usage-history.json"));
             if (!fi.Exists) return null;
             return p.Cached(fi.FullName, fi, () =>
             {
