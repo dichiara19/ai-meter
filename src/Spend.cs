@@ -225,11 +225,90 @@ namespace AIMeter
                     }
                 }
                 PiRootCosts(p, Path.Combine(home, @".pi\agent\sessions"), startMs, piResponses, add);
+                foreach (var db in CodingAgents.HermesDatabases(home, home == Probe.Home))
+                    foreach (var c in HermesCosts(p, db, startMs))
+                    {
+                        Dictionary<string, ModelCost> d;
+                        if (!acc.TryGetValue(c.Provider, out d)) acc[c.Provider] = d = new Dictionary<string, ModelCost>(StringComparer.OrdinalIgnoreCase);
+                        Add(d, c.Model, c.Cost, c.Tokens, c.Replies);
+                    }
             }
             // Pi runs that keep their sessions elsewhere (--session-dir, PI_CODING_AGENT_DIR) while they are running.
             try { foreach (var folder in RunningAgents.PiSessionFolders(p)) PiRootCosts(p, folder.Path, startMs, piResponses, add); }
             catch (Exception) { }
             return acc;
+        }
+
+        private sealed class HermesCost
+        {
+            public string Provider, Model;
+            public double Cost;
+            public long Tokens;
+            public int Replies;
+        }
+
+        /// <summary>
+        /// Today's share of the costs Hermes recorded in a state.db, by provider and model. Hermes adds up cost and tokens
+        /// per session and model (session_model_usage; older versions only per session, in sessions), not per reply, so
+        /// a session that began before today counts with the share of its messages' tokens written today (or, when
+        /// messages carry no token count, of its messages). The cost is the one the provider reported, else Hermes's
+        /// estimate. A provider set as "custom" or "auto" is the service whose API is on the same site as the endpoint.
+        /// </summary>
+        private static List<HermesCost> HermesCosts(Probe p, string db, long startMs)
+        {
+            var fi = new FileInfo(db);
+            var wal = new FileInfo(db + "-wal");
+            if (!fi.Exists || (fi.LastWriteTime < DateTime.Today && (!wal.Exists || wal.LastWriteTime < DateTime.Today))) return new List<HermesCost>();
+            var stamp = wal.Exists && wal.Length > 0 ? wal : fi;
+            return (List<HermesCost>)p.Cached("costs:hermes:" + db + ":" + startMs, stamp, () =>
+            {
+                string start = (startMs / 1000.0).ToString("R", CultureInfo.InvariantCulture);
+                Func<string, string> share = id =>
+                    ", (SELECT COALESCE(SUM(token_count), 0) FROM messages m WHERE m.session_id = " + id + ")"
+                    + ", (SELECT COALESCE(SUM(token_count), 0) FROM messages m WHERE m.session_id = " + id + " AND m.timestamp >= " + start + ")"
+                    + ", (SELECT COUNT(*) FROM messages m WHERE m.session_id = " + id + ")"
+                    + ", (SELECT COUNT(*) FROM messages m WHERE m.session_id = " + id + " AND m.timestamp >= " + start + ")";
+                const string Tokens = "input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + reasoning_tokens";
+                string path = CodingAgents.Openable(db);
+                var rows = Sqlite.Rows(path, "SELECT billing_provider, billing_base_url, model, actual_cost_usd, estimated_cost_usd, " + Tokens
+                                             + ", api_call_count, first_seen" + share("u.session_id") + " FROM session_model_usage u WHERE last_seen >= " + start, 5000)
+                        ?? Sqlite.Rows(path, "SELECT billing_provider, billing_base_url, model, actual_cost_usd, estimated_cost_usd, " + Tokens
+                                             + ", api_call_count, started_at" + share("s.id") + " FROM sessions s WHERE COALESCE(last_activity_at, started_at) >= " + start, 5000);
+                var list = new List<HermesCost>();
+                foreach (var r in rows ?? new List<object[]>())
+                {
+                    Func<int, double> num = i => r.Length > i && r[i] != null ? Convert.ToDouble(r[i], CultureInfo.InvariantCulture) : 0;
+                    Func<int, string> str = i => r.Length > i && r[i] != null ? Convert.ToString(r[i], CultureInfo.InvariantCulture) : null;
+                    string provider = str(0);
+                    if (string.IsNullOrEmpty(provider) || provider == "custom" || provider == "auto") provider = ServiceAt(str(1));
+                    if (provider == null || string.IsNullOrEmpty(str(2))) continue;
+                    double part = num(7) * 1000 >= startMs ? 1 : num(8) > 0 ? num(9) / num(8) : num(10) > 0 ? num(11) / num(10) : 0;
+                    if (part <= 0) continue;
+                    list.Add(new HermesCost
+                    {
+                        Provider = provider.ToLowerInvariant(), Model = str(2),
+                        Cost = (num(3) > 0 ? num(3) : num(4)) * part, Tokens = (long)(num(5) * part),
+                        Replies = Math.Max(1, (int)Math.Round(num(6) * part)),
+                    });
+                }
+                return list;
+            });
+        }
+
+        /// <summary>The first service id of the definition whose usage or model list is on the same site as an endpoint, or null.</summary>
+        private static string ServiceAt(string baseUrl)
+        {
+            Uri uri;
+            if (string.IsNullOrEmpty(baseUrl) || !Uri.TryCreate(baseUrl, UriKind.Absolute, out uri)) return null;
+            Func<string, string> site = host => string.Join(".", host.Split('.').Reverse().Take(2).Reverse());
+            foreach (var d in Definitions.All)
+                foreach (var section in new[] { "request", "freeModels" })
+                {
+                    Uri own;
+                    if (Uri.TryCreate(Json.Str(Json.Obj(d.Raw, section), "url") ?? "", UriKind.Absolute, out own) && site(own.Host) == site(uri.Host))
+                        return ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id).First();
+                }
+            return null;
         }
 
         private static void PiRootCosts(Probe p, string root, long startMs, HashSet<string> piResponses, Action<string, string, double, long> add)

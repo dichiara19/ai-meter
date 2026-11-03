@@ -24,6 +24,7 @@ namespace AIMeter
             test("A GraphQL error in a 200 answer is a notice, not usage", GraphQlError);
             test("The account ID is read beside the key OpenCode keeps, or from the profile beside Pi's", AccountBesideKey);
             test("An account ID saved with the dashboard address it was copied from is reduced to the ID", AccountInAddress);
+            test("Neurons beyond each day's free 10,000 are spent at $0.011 per 1,000, today, this week and this month", PaidNeurons);
         }
 
         private const BindingFlags Private = BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic;
@@ -32,7 +33,13 @@ namespace AIMeter
 
         private static void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }
 
-        private static string Answer(string groups) { return "{\"data\":{\"viewer\":{\"accounts\":[{\"aiInferenceAdaptiveGroups\":" + groups + "}]}},\"errors\":null}"; }
+        /// <summary>An answer with today's total and, by day, this week's and this month's (both empty unless given).</summary>
+        private static string Answer(string today, string week = "[]", string month = "[]")
+        {
+            return "{\"data\":{\"viewer\":{\"accounts\":[{\"today\":" + today + ",\"week\":" + week + ",\"month\":" + month + "}]}},\"errors\":null}";
+        }
+
+        private static string Day(string date, int neurons) { return "{\"sum\":{\"totalNeurons\":" + neurons + "},\"dimensions\":{\"date\":\"" + date + "\"}}"; }
 
         private static void TodayNeurons()
         {
@@ -48,6 +55,10 @@ namespace AIMeter
                 Assert(request.Contains("Authorization: Bearer " + Token), "The token was not sent as a bearer token.");
                 Assert(request.Contains("\"account\":\"" + Account + "\"") && request.Contains("\"date\":\"" + DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "\""),
                     "The query does not name the account and today's UTC date.");
+                var utc = DateTime.UtcNow.Date;
+                Assert(request.Contains("\"week\":\"" + utc.AddDays(-(((int)utc.DayOfWeek + 6) % 7)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "\"")
+                       && request.Contains("\"month\":\"" + new DateTime(utc.Year, utc.Month, 1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "\""),
+                    "The query does not start the week on Monday and the month on the first, in UTC.");
             }
         }
 
@@ -137,6 +148,32 @@ namespace AIMeter
             {
                 ApiKeys.Remove("cloudflare-workers-ai.account");
                 Settings.Current.FindKeys = findKeys;
+            }
+        }
+
+        private static void PaidNeurons()
+        {
+            // Today 12,000: 2,000 paid. This month also a day of 25,000 (15,000 paid) and one under the free allocation.
+            string month = "[" + Day("2026-11-01", 25000) + "," + Day("2026-11-02", 4000) + "," + Day("2026-11-03", 12000) + "]";
+            using (var server = new Recorder(Answer("[{\"count\":40,\"sum\":{\"totalNeurons\":12000}}]", "[" + Day("2026-11-02", 4000) + "," + Day("2026-11-03", 12000) + "]", month)))
+            using (new Variables(Token, Account))
+            {
+                var p = Provider(server.Url);
+                var u = Fetch(p);
+                Assert(u != null && u.Windows.Single().Used >= 100, "Neurons beyond the free allocation do not fill the limit.");
+                var spend = typeof(DefinedProvider).GetField("spend", Private).GetValue(p);
+                Func<string, double?> value = f => (double?)spend.GetType().GetField(f).GetValue(spend);
+                Assert(Math.Abs(value("Day").Value - 0.022) < 1e-9, "Today's 2,000 paid Neurons are not $0.022.");
+                Assert(Math.Abs(value("Week").Value - 0.022) < 1e-9, "This week's spending does not count only the Neurons beyond each day's allocation.");
+                Assert(Math.Abs(value("Month").Value - 0.187) < 1e-9, "This month's 17,000 paid Neurons are not $0.187.");
+            }
+            using (var server = new Recorder(Answer("[]")))
+            using (new Variables(Token, Account))
+            {
+                var p = Provider(server.Url);
+                Fetch(p);
+                var spend = typeof(DefinedProvider).GetField("spend", Private).GetValue(p);
+                Assert(spend != null && (double?)spend.GetType().GetField("Month").GetValue(spend) == 0, "A month without paid Neurons is not $0.");
             }
         }
 

@@ -434,15 +434,8 @@ namespace AIMeter
         /// </summary>
         private static IEnumerable<Found> Hermes(Probe p, Place pl)
         {
-            var homes = new List<string>();
-            if (pl.Where == "Windows")
-            {
-                if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HERMES_HOME"))) homes.Add(Environment.GetEnvironmentVariable("HERMES_HOME"));
-                homes.Add(Path.Combine(pl.Home, @"AppData\Local\hermes"));
-            }
-            homes.Add(Path.Combine(pl.Home, ".hermes"));
             var list = new List<Found>();
-            foreach (var db in homes.Select(h => Path.Combine(h, "state.db")).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var db in HermesDatabases(pl.Home, pl.Where == "Windows"))
             {
                 if (!File.Exists(db) || !Recent(Stamp(db))) continue;
                 list.AddRange((List<Found>)p.Cached("agent:hermes:" + db, Stamp(db), () =>
@@ -473,6 +466,19 @@ namespace AIMeter
                 }));
             }
             return list;
+        }
+
+        /// <summary>Where Hermes keeps state.db in a home, on Windows or in WSL, without repeats; the files may not exist.</summary>
+        internal static IEnumerable<string> HermesDatabases(string home, bool windows)
+        {
+            var homes = new List<string>();
+            if (windows)
+            {
+                if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HERMES_HOME"))) homes.Add(Environment.GetEnvironmentVariable("HERMES_HOME"));
+                homes.Add(Path.Combine(home, @"AppData\Local\hermes"));
+            }
+            homes.Add(Path.Combine(home, ".hermes"));
+            return homes.Select(h => Path.Combine(h, "state.db")).Distinct(StringComparer.OrdinalIgnoreCase);
         }
 
         // ================================================================ utilities

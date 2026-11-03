@@ -260,7 +260,7 @@ namespace AIMeter
                     box.Children.Add(row);
                 }
                 if (ms.Count > 3) box.Children.Add(Text(L.F("+{0} more", ms.Count - 3), 11.5, "Text3"));
-                box.ToolTip = L.T("Models used today through this service by OpenCode and Pi, with the cost they computed:") + "\n"
+                box.ToolTip = L.T("Models used today through this service by OpenCode, Pi, Kilo and Hermes, with the cost they computed:") + "\n"
                               + string.Join("\n", ms.Select(m => L.F("{0}: {1}, {2} tokens, {3} replies", m.Model, money.Format(m.Cost), Tokens((int)Math.Min(int.MaxValue, m.Tokens)), m.Replies)));
                 stack.Children.Add(box);
             }
