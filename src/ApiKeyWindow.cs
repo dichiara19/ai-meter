@@ -47,27 +47,56 @@ namespace AIMeter
             var h = Ui.Text(Title, 20, "Text", FontWeights.SemiBold);
             h.FontFamily = Theme.DisplayFont;
             root.Children.Add(h);
-            var info = Ui.Text((extra != null && Json.Str(extra, "description") != null ? L.T(Json.Str(extra, "description")) + " " : "")
-                + L.F("Paste an API key of your {0} account. AI Meter uses it only to read your usage; it is encrypted with Windows data protection and stays on this PC.", serviceName), 13, "Text2");
+            // An extra value that is not a secret, such as an account ID, is typed in plain sight and described on its own.
+            bool secret = !(extra != null && extra.ContainsKey("secret") && !Json.Bool(extra, "secret"));
+            string description = extra != null && Json.Str(extra, "description") != null ? L.T(Json.Str(extra, "description")) : null;
+            var info = Ui.Text(!secret ? description
+                : (description != null ? description + " " : "")
+                  + L.F("Paste an API key of your {0} account. AI Meter uses it only to read your usage; it is encrypted with Windows data protection and stays on this PC.", serviceName), 13, "Text2");
             info.TextWrapping = TextWrapping.Wrap;
             info.TextTrimming = TextTrimming.None;
             info.Margin = new Thickness(0, 8, 0, 16);
             root.Children.Add(info);
 
-            var box = new PasswordBox { BorderThickness = new Thickness(0), Background = System.Windows.Media.Brushes.Transparent, FontSize = 14, Padding = new Thickness(0) };
+            Control box;
+            Func<string> entered;
+            if (secret)
+            {
+                var hidden = new PasswordBox();
+                hidden.SetResourceReference(PasswordBox.CaretBrushProperty, "Text");
+                box = hidden;
+                entered = () => hidden.Password;
+            }
+            else
+            {
+                var plain = new TextBox();
+                plain.SetResourceReference(TextBox.CaretBrushProperty, "Text");
+                box = plain;
+                entered = () => plain.Text;
+            }
+            box.BorderThickness = new Thickness(0);
+            box.Background = System.Windows.Media.Brushes.Transparent;
+            box.FontSize = 14;
+            box.Padding = new Thickness(0);
             box.SetResourceReference(Control.ForegroundProperty, "Text");
-            box.SetResourceReference(PasswordBox.CaretBrushProperty, "Text");
             var frame = new Border { CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1, 1, 1, 2), Padding = new Thickness(10, 6, 10, 6), Child = box };
             frame.SetResourceReference(Border.BackgroundProperty, "Control");
             frame.SetResourceReference(Border.BorderBrushProperty, "ControlStroke");
             box.GotKeyboardFocus += (o, e) => frame.SetResourceReference(Border.BorderBrushProperty, "Accent");
             box.LostKeyboardFocus += (o, e) => frame.SetResourceReference(Border.BorderBrushProperty, "ControlStroke");
             root.Children.Add(frame);
+            // A value with a "pattern" is saved as the part that matches it, such as the ID in a pasted address.
+            var wrong = Ui.Text(L.T("Not recognised: check what you pasted."), 12, "Text3");
+            wrong.Margin = new Thickness(2, 6, 0, 0);
+            wrong.Visibility = Visibility.Collapsed;
+            root.Children.Add(wrong);
 
             var buttons = new DockPanel { Margin = new Thickness(0, 18, 0, 0), LastChildFill = false };
             if (keyPage != null)
             {
-                var link = new Button { Content = L.T("Create a key"), Padding = new Thickness(0, 0, 4, 1), FontSize = 13 };
+                // An extra value names its own page, such as the dashboard that shows an account ID, with "pageLabel".
+                string linkText = extra != null && Json.Str(extra, "pageLabel") != null ? L.T(Json.Str(extra, "pageLabel")) : L.T("Create a key");
+                var link = new Button { Content = linkText, Padding = new Thickness(0, 0, 4, 1), FontSize = 13 };
                 link.SetResourceReference(StyleProperty, "LinkButton");
                 link.Click += (o, e) => { try { System.Diagnostics.Process.Start(keyPage); } catch (Exception) { } };
                 DockPanel.SetDock(link, Dock.Left);
@@ -79,14 +108,34 @@ namespace AIMeter
             DockPanel.SetDock(cancel, Dock.Right);
             var save = new Button { Content = L.T("Save"), Margin = new Thickness(0, 0, 8, 0), IsEnabled = false, IsDefault = true };
             save.SetResourceReference(StyleProperty, "AccentButton");
-            save.Click += (o, e) => { ApiKeys.Save(keyId, box.Password); if (Saved != null) Saved(); Close(); };
+            Func<string> value = () => extra != null && Json.Str(extra, "pattern") != null ? ServiceDefinition.SlotText(extra, entered()) : entered().Trim();
+            save.Click += (o, e) => { ApiKeys.Save(keyId, value()); if (Saved != null) Saved(); Close(); };
             DockPanel.SetDock(save, Dock.Right);
             buttons.Children.Add(cancel);
             buttons.Children.Add(save);
-            box.PasswordChanged += (o, e) => save.IsEnabled = box.Password.Trim().Length >= 8;
+            Action check = () =>
+            {
+                string v = value();
+                save.IsEnabled = v != null && v.Length >= 8;
+                wrong.Visibility = v == null && entered().Trim().Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            };
+            if (box is PasswordBox) ((PasswordBox)box).PasswordChanged += (o, e) => check();
+            else ((TextBox)box).TextChanged += (o, e) => check();
             root.Children.Add(buttons);
             Content = root;
             Loaded += (o, e) => box.Focus();
+            // Back from the page with the value copied, such as the dashboard's address with the account ID in it, the
+            // empty box takes it from the clipboard; only for a value that is not a secret and matches its pattern.
+            if (!secret && extra != null && Json.Str(extra, "pattern") != null)
+                Activated += (o, e) =>
+                {
+                    var plain = (TextBox)box;
+                    if (plain.Text.Length > 0) return;
+                    string copied = null;
+                    try { if (Clipboard.ContainsText()) copied = Clipboard.GetText(); }
+                    catch (COMException) { }
+                    if (copied != null && copied.Length < 2048 && ServiceDefinition.SlotText(extra, copied) != null) plain.Text = copied.Trim();
+                };
         }
     }
 }

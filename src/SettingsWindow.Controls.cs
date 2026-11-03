@@ -37,6 +37,25 @@ namespace AIMeter
             page.Children.Add(t);
         }
 
+        /// <summary>
+        /// A hint whose first mention of another settings page, such as "AI apps", opens it. A translation that does
+        /// not name the page as its navigation label does stays plain text.
+        /// </summary>
+        private void Hint(string text, string pageName, string pageId)
+        {
+            Hint(text);
+            int at = text.IndexOf(pageName, StringComparison.Ordinal);
+            if (at < 0) return;
+            var t = (TextBlock)page.Children[page.Children.Count - 1];
+            var link = new System.Windows.Documents.Hyperlink(new System.Windows.Documents.Run(pageName));
+            link.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "AccentText");
+            link.Click += (o, e) => Open(pageId);
+            t.Inlines.Clear();
+            t.Inlines.Add(new System.Windows.Documents.Run(text.Substring(0, at)));
+            t.Inlines.Add(link);
+            t.Inlines.Add(new System.Windows.Documents.Run(text.Substring(at + pageName.Length)));
+        }
+
         private void Group(params FrameworkElement[] rows) { page.Children.Add(Card(rows)); }
 
         /// <summary>A settings card: rows separated by dividers on the card background.</summary>

@@ -180,6 +180,12 @@ namespace AIMeter
         public string Notice;     // Connection status message, when needed.
         public bool NeedsLogin;
         public bool CanSignIn;    // Whether the notice offers a sign-in action managed by AI Meter.
+        /// <summary>
+        /// What that action opens for a definition-based service: null for its API key, "slot:" and the name of an
+        /// extra value the request lacks (a "keys" entry, such as Cloudflare's account ID), or "settings" when the
+        /// service turned down a request made with everything it needs, so the key and values are checked there.
+        /// </summary>
+        public string Fix;
         public List<LocalModel> Models;   // Loaded models, for local providers only.
         public long GpuUsed, GpuTotal;    // GPU memory in bytes, for local providers only.
         public Tip Tip;           // Active tip, evaluated for each snapshot.

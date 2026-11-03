@@ -18,13 +18,21 @@ namespace AIMeter
 {
     internal partial class Controller
     {
-        /// <summary>Sign in through Claude Code, GitHub for Copilot, or the selected service's own mechanism.</summary>
+        /// <summary>
+        /// Sign in through Claude Code, GitHub for Copilot, or the selected service's own mechanism. For a key-based
+        /// service the card's notice says what is missing (ProviderState.Fix): its key, an extra value such as an
+        /// account ID, or nothing, when the service refused the request and Settings shows the key and values to check.
+        /// </summary>
         public void Login(string id)
         {
             var def = Definitions.Get(id);
+            var state = Last != null ? Last.Providers.FirstOrDefault(p => p.Id == id) : null;
+            string fix = state != null ? state.Fix : null;
             if (id == "copilot") LoginGitHub();
             else if (id == "antigravity") LoginAntigravity();
             else if (id == "claude") LoginClaude();
+            else if (def != null && fix == "settings") OpenSettings("service:" + id);
+            else if (def != null && fix != null && fix.StartsWith("slot:")) EnterApiKey(def, fix.Substring(5));
             else if (def != null && def.UsesKey) EnterApiKey(def);
         }
 
