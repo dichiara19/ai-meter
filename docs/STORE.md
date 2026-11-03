@@ -26,6 +26,8 @@ Only **stable** tags (`vX.Y.Z`) go to the Store; betas and release candidates st
 
 The first submission is always made by hand: Microsoft's tools can only update an app that is already published.
 
+Every build runs the [Windows App Certification Kit](https://learn.microsoft.com/windows/uwp/debug-test-perf/windows-app-certification-kit), the technical tests the Store runs during [certification](https://learn.microsoft.com/windows/apps/publish/publish-your-app/msix/app-certification-process), on its `AIMeter.msix` (the `certify` job; report in the **AIMeter-wack** artifact). The job fails when the overall result, which counts only the required tests, is not PASS. The optional *Blocked executables* test always fails, because AI Meter starts `cmd`, PowerShell and `wsl.exe` by design (sign-ins, the MCP relay); [optional tests](https://learn.microsoft.com/windows/uwp/debug-test-perf/windows-desktop-bridge-app-tests#required-versus-optional-tests) are informational and do not count for the Store. Do not submit a package whose `certify` job failed.
+
 ## Automatic submission
 
 The workflow uses Microsoft's [Store Developer CLI](https://learn.microsoft.com/windows/apps/publish/msstore-dev-cli/overview) through the official [`microsoft/microsoft-store-apppublisher`](https://learn.microsoft.com/windows/apps/publish/msstore-dev-cli/github-actions) action: `msstore reconfigure` with Partner Center API credentials, then `msstore publish AIMeter.msix -id <product id>`. The job stays off until all of this is set:
