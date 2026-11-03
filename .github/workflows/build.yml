@@ -91,12 +91,20 @@ jobs:
           Copy-Item $exe, bin\AIMeter.exe.config, LICENSE, NOTICE dist
           Compress-Archive dist\* AIMeter.zip
           # same app, started from source by PowerShell: for PCs with Smart App Control on
-          New-Item -ItemType Directory script, script\src, script\assets, script\providers | Out-Null
+          New-Item -ItemType Directory script, script\src, script\assets, script\providers, script\agents | Out-Null
           Copy-Item src\*.cs script\src
           Copy-Item assets\app.ico, assets\antigravity.png script\assets
           Copy-Item providers\*.json, providers\*.png script\providers
+          Copy-Item agents\*.json script\agents
           Copy-Item AIMeter.ps1, 'Start AI Meter.cmd', LICENSE, NOTICE script
           Compress-Archive script\* AIMeter-script.zip
+          # The script build embeds no resources, so it reads these folders: without agents, delegation finds no agents.
+          Expand-Archive AIMeter-script.zip script-check
+          foreach ($folder in 'src', 'providers', 'agents') {
+            $missing = @(Get-ChildItem "$folder\*" -File -Include *.cs, *.json | Where-Object { -not (Test-Path "script-check\$folder\$($_.Name)") })
+            if ($missing.Count) { throw "AIMeter-script.zip lacks $folder\$($missing[0].Name)." }
+          }
+          Remove-Item -Recurse script-check
 
       # Microsoft Store package: the Store signs it (identity from Partner Center in the repository variables)
       - name: Build MSIX for the Microsoft Store

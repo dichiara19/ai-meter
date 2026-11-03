@@ -64,7 +64,10 @@ The coordinator calls these tools of the `ai-meter-delegate` server:
 
 A job runs in its own worker process, so it outlives the call that started it. Cancelling stops the agent with `taskkill /T /F` on Windows, which also ends an agent started in WSL, and with `SIGINT` elsewhere.
 
-**Read-only by default.** Pi gets only its reading tools, and OpenCode its `plan` agent. **`modify`** runs the agent in a new Git worktree on branch `ai-meter/<job id>`, made from the last commit. Uncommitted changes in your checkout are not in it, and the report says so. The plugin never commits, merges or removes the worktree: the report gives the commands to review and to discard it.
+**The agent never works in your folder.** The workspace must be in a Git repository.
+- **Read-only by default.** Pi gets only its reading tools. OpenCode gets its `plan` agent with permissions set by the agent definition, not left to its defaults or your config: every tool but reading, searching, LSP and the todo list is denied, and so is reading `.env` files. The agent works on a copy of the files Git tracks or would track, as they are on disk. Ignored files, symbolic links, submodules and files whose names suggest secrets (`.env` and its variants except `.env.example`, `.npmrc`, `.pypirc`, `.netrc`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, private SSH keys) are left out, and the report lists the secrets it left out. The copy is in `~/.aimeter/snapshots` and is removed when the task ends.
+- **`modify`** runs the agent in a new Git worktree on branch `ai-meter/<job id>`, made from the last commit, so ignored files such as `.env` are not in it. Uncommitted changes in your checkout are not in it either, and the report says so; it also lists committed files that look like secrets. OpenCode's `build` agent may not read `.env` files or folders outside the worktree. The plugin never commits, merges or removes the worktree: the report gives the commands to review and to discard it.
+- **Neither is a sandbox.** An agent can still read a path outside its folder if it is given one, Pi in particular, which has no permission rules.
 
 **Choosing a model and an agent.** AI Meter orders candidates by the room left in their pool, not by quality. Within one pool the order is by service, model, agent id and place, alphabetically. So when Pi and OpenCode both have a key, OpenCode comes first, and on Windows before WSL. When it matters, look at `delegate_candidates` and pin `model`, `runtime` or `where`. Pi sends about 4,600 tokens of system prompt per request, and OpenCode, isolated, about 9,600.
 
@@ -103,7 +106,8 @@ Measured on 2026-11-02 with Claude Code 2.1.316 on Sonnet 5.5 as coordinator, in
 
 ## Privacy
 
-- The task text, the agent's events and its error output stay on this PC, in `~/.aimeter/jobs/<job id>`, on the side where the coordinator runs (Windows or WSL). Folders of ended jobs are removed after seven days. Never put secrets in a task.
+- **The task and every file the agent reads go to the provider of the chosen model.** Providers of free models may log prompts or train on them. See above for what the agent can see. Never put secrets in a task.
+- Copies of the task text, the agent's events and its error output are kept on this PC, in `~/.aimeter/jobs/<job id>`, on the side where the coordinator runs (Windows or WSL). Folders of ended jobs are removed after seven days, when another task starts.
 - Worktrees of `modify` tasks are in `~/.aimeter/worktrees` and are never removed by the plugin.
 - AI Meter's lease book holds only pool, model, agent, times and counters ([README](../../README.md#privacy-policy)).
 - OpenRouter can route a `:free` model to a provider key you linked to your OpenRouter account (BYOK), billed to that account.

@@ -15,14 +15,22 @@ Good fits:
 - drafting tests or documentation for code you name;
 - a small mechanical change in files you name.
 
-Keep it yourself when the task needs this conversation's context, a design decision, security-sensitive judgement, or secrets. Free models are weaker than you and see only the task and the folder.
+Keep it yourself when the task needs this conversation's context, a design decision, security-sensitive judgement, or secrets. Check the free model's answer as carefully as a stranger's: it may be shallower or wrong.
+
+## What leaves this PC
+
+The task, and every file the agent reads, go to the provider of the chosen model. Providers of free models may log prompts or train on them. So the plugin never runs an agent in the user's folder itself:
+- `read_only` works on a copy of the files Git tracks or would track, as they are on disk. Ignored files, symbolic links, submodules and files whose names suggest secrets (`.env` and its variants except `.env.example`, `.npmrc`, `*.pem`, `*.key`, private SSH keys) are left out; `secret_files_left_out` lists those it found. The copy is removed when the task ends.
+- `modify` works in a new worktree made from the last commit, so ignored files such as `.env` are not in it. Committed files that look like secrets are, and `worktree.committed_secrets_visible` lists them: tell the user.
+- The workspace must be in a Git repository.
+- Neither is a sandbox: an agent can still read a path outside its folder. Never name such paths, or secrets, in a task.
 
 ## How
 
 1. **Optionally look first.** `delegate_candidates` lists where a task can run now: candidates in AI Meter's order, each pool's room, why other models are left out, and the agents found. AI Meter orders by room, not by quality, and breaks ties alphabetically: when several models share a pool, prefer a known coding model with a large context and pass it as `model`. Pass `runtime` (and `where`) when the user prefers an agent.
 2. **Start it.** Call `delegate` with:
    - `task`: complete instructions. Name the files, say what to look for and the shape of the answer. The agent sees nothing else;
-   - `workspace`: the absolute path of the repository root (the server may not run in it);
+   - `workspace`: the absolute path of the repository root (the server may not run in it); it must be in a Git repository;
    - `mode`: `read_only` (default), or `modify` for a task that changes files;
    - optionally `model`, `runtime`, `where`, `min_context`, `timeout_seconds`;
    - `wait_seconds` up to 50, so that short tasks answer in the same call.
@@ -51,4 +59,4 @@ Some services, such as NVIDIA and the Gemini API, do not state prices or tool su
 - `warnings` containing `openrouter_byok_fallback`: OpenRouter can retry a `:free` request on a provider key the user linked to OpenRouter (BYOK), billed to that account, while the agent still shows a price of zero. Mention it once. `counters.byok_fallback: true` means OpenRouter's error named such a key: tell the user that their linked key was used, and suggest unlinking it before delegating again.
 
 ## Good to know
-- The task text and the agent's output stay on this PC, in `~/.aimeter/jobs`, for a week. Never put secrets in a task.
+- Copies of the task text and the agent's output are kept on this PC, in `~/.aimeter/jobs`, for a week. The provider has its own copy (see "What leaves this PC").

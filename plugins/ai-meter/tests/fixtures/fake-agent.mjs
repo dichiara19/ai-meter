@@ -4,12 +4,13 @@
 //   error429  fails with a rate limit;
 //   byok      (Pi) fails as OpenRouter does when a :free request fell back to a linked provider key;
 //   unsettled (Pi) exits before agent_settled;
+//   list      (Pi) answers with the files in its folder and their contents, as JSON;
 //   write     (OpenCode) changes a.txt and writes made-by-agent.txt in its folder, then answers;
 //   paid      prices its first request above zero, then waits until it is stopped;
 //   hang      waits until it is stopped.
 // Requests are otherwise priced at zero, as the agents do for free models.
 
-import { writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const [runtime, behaviour] = process.argv.slice(2);
 const emit = (event) => process.stdout.write(JSON.stringify(event) + "\n");
@@ -34,7 +35,7 @@ function pi() {
     type: "message_end",
     message: {
       role: "assistant",
-      content: failed ? [] : [{ type: "text", text: "echo: " + task }],
+      content: failed ? [] : [{ type: "text", text: behaviour === "list" ? listFolder() : "echo: " + task }],
       stopReason: failed ? "error" : "stop",
       errorMessage: behaviour === "byok" ? byok : failed ? "429 Too Many Requests: free-models-per-min" : undefined,
       usage: { input: 100, output: 7, cacheRead: 20, cacheWrite: 0, totalTokens: 127, cost: { total: cost } },
@@ -63,4 +64,17 @@ function openCode() {
   emit({ type: "step_start" });
   emit({ type: "text", part: { text: "echo: " + task } });
   emit({ type: "step_finish", part: { reason: "stop", cost, tokens: { input: 60, output: 9, reasoning: 0, cache: { read: 0, write: 0 } } } });
+}
+
+function listFolder() {
+  const files = {};
+  for (const path of readdirSync(".", { recursive: true })) {
+    const name = path.replaceAll("\\", "/");
+    try {
+      files[name] = readFileSync(path, "utf8");
+    } catch {
+      // A folder.
+    }
+  }
+  return JSON.stringify(files);
 }
