@@ -66,6 +66,9 @@ namespace AIMeter
             WindowsInstallTests.Register(Test);
             AgentTests.Register(Test);
             UpdateTests.Register(Test);
+            ValueTests.Register(Test);
+            LogoTests.Register(Test);
+            CloudflareTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 

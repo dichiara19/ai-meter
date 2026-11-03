@@ -21,7 +21,13 @@ namespace AIMeter
         /// such as "OpenCode", or "profile") says where; Alias is the provider id the app keeps it under (null for a
         /// profile export).
         /// </summary>
-        internal sealed class Found { public string Key, Source, App, Alias; }
+        internal sealed class Found
+        {
+            public string Key, Source, App, Alias;
+            // Where the key was read: its home, the agent's file and the JSON path of the entry holding it (null for a profile).
+            internal string Home, File, Entry;
+            internal bool Wsl;
+        }
 
         /// <summary>App name, home-relative path and JSON value path, with {id} standing for a service alias, in agent order.</summary>
         private static IEnumerable<string[]> Sources
@@ -65,16 +71,43 @@ namespace AIMeter
                 if (doc == null) continue;
                 foreach (var id in ids)
                 {
-                    string v = Resolve(JPath.Str(JPath.Get(doc, s[2].Replace("{id}", id))), home, wsl);
-                    if (v != null) { yield return new Found { Key = v, Source = s[0] + where, App = s[0], Alias = id }; break; }
+                    string path = s[2].Replace("{id}", id);
+                    string v = Resolve(JPath.Str(JPath.Get(doc, path)), home, wsl);
+                    if (v != null)
+                    {
+                        yield return new Found { Key = v, Source = s[0] + where, App = s[0], Alias = id, Home = home, Wsl = wsl,
+                                                 File = Path.Combine(home, s[1]), Entry = path.Contains('.') ? path.Substring(0, path.LastIndexOf('.')) : null };
+                        break;
+                    }
                 }
             }
             // Read exports from WSL or Windows Git Bash shell profiles.
             foreach (var name in ServiceDefinition.Strings(d.Auth, "env"))
             {
                 string v = FromProfiles(name, home);
-                if (Plausible(v)) { yield return new Found { Key = v, Source = L.T("shell profile") + where, App = "profile" }; break; }
+                if (Plausible(v)) { yield return new Found { Key = v, Source = L.T("shell profile") + where, App = "profile", Home = home, Wsl = wsl }; break; }
             }
+        }
+
+        /// <summary>
+        /// A value a service needs besides its key, such as an account id, from where that key was found: the field
+        /// <paramref name="beside"/> of the same entry in the agent's file, or else one of <paramref name="env"/> exported
+        /// in the shell profiles of that home. References are resolved as for keys; null when the value is not there.
+        /// </summary>
+        internal static string Beside(Found key, string beside, IEnumerable<string> env)
+        {
+            if (key == null || key.Home == null) return null;
+            if (beside != null && key.File != null && key.Entry != null)
+            {
+                string v = Resolve(JPath.Str(JPath.Get(ReadJson(key.File), key.Entry + "." + beside)), key.Home, key.Wsl);
+                if (v != null) return v;
+            }
+            foreach (var name in env ?? Enumerable.Empty<string>())
+            {
+                string v = FromProfiles(name, key.Home);
+                if (Plausible(v)) return v;
+            }
+            return null;
         }
 
         /// <summary>Resolve a literal key or environment reference, without executing commands.</summary>

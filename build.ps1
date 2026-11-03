@@ -106,7 +106,8 @@ function Invoke-Csc([string]$out, [string[]]$extra = @()) {
         "$fw\System.Xaml.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll",
         "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
     ) | ForEach-Object { "/r:$_" }
-    $res = @('app.ico', 'antigravity.png' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
+    # The app icon and the official logos bundled for built-in services whose app may be missing.
+    $res = @('app.ico', 'antigravity.png', 'openai.png', 'openai-dark.png', 'copilot.png', 'copilot-dark.png' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })
     # Service definitions and their logos embedded in the executable (when running from source they are read from the providers folder).
     $res += @(Get-ChildItem (Join-Path $root 'providers\*') -Include *.json, *.png | ForEach-Object { "/resource:$($_.FullName),providers.$($_.Name)" })
     # Coding agent definitions, likewise (read from the agents folder when running from source).

@@ -85,15 +85,14 @@ namespace AIMeter
                 }
                 item.Children.Add(logoHost);
 
-                var windows = p.Usage == null ? new UsageWindow[0] : p.Usage.Windows.ToArray();
                 bool any = false;
                 foreach (var w in Shown(p, metric))
                 {
                     // Show standalone spending values and cached readings without a live percentage bar.
                     if ((w.NoBar && w.RightText != null) || w.CachedAt.HasValue)
                     {
-                        string value = w.RightText ?? (w.Spent != null ? w.Spent.Format(Math.Max(0, w.Spent.Limit - w.Spent.Used)) : Math.Round(w.Remaining).ToString(It) + "%");
-                        var v = Text(w.CachedAt.HasValue ? L.F("{0} (cached)", value) : L.T(value), 12, "Text", FontWeights.SemiBold);
+                        string value = Value(w, p.Usage, ValueStyle.Number);
+                        var v = Text(w.CachedAt.HasValue ? L.F("{0} (cached)", value) : value, 12, "Text", FontWeights.SemiBold);
                         v.Margin = new Thickness(7, 0, 0, 0);
                         v.VerticalAlignment = VerticalAlignment.Center;
                         item.Children.Add(v);
@@ -101,11 +100,12 @@ namespace AIMeter
                         continue;
                     }
                     var stack = new StackPanel { Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+                    // The same value as the card, as a number: the percentage, or the money left on a credit limit.
                     double room = p.Usage.Room(w);
-                    var t = Text(Math.Round(room).ToString(CultureInfo.InvariantCulture) + "%", 12, "Text", FontWeights.SemiBold);
+                    var t = Text(Value(w, p.Usage, ValueStyle.Number), 12, "Text", FontWeights.SemiBold);
                     t.HorizontalAlignment = HorizontalAlignment.Center;
                     stack.Children.Add(t);
-                    var bar = Bar(room, room < w.Remaining ? LevelBrush(room, BrandBrush(p.Id)) : LevelBrush(w, BrandBrush(p.Id)), 2, w.Remaining);
+                    var bar = LimitBar(room, room < w.Remaining ? LevelBrush(room, BrandBrush(p.Id)) : LevelBrush(w, BrandBrush(p.Id)), 2, w.Remaining);
                     bar.Width = 26;
                     bar.Margin = new Thickness(0, 1, 0, 0);
                     stack.Children.Add(bar);
@@ -113,8 +113,8 @@ namespace AIMeter
                     any = true;
                 }
                 // Show a standalone balance instead of a percentage.
-                var balance = windows.FirstOrDefault(w => w.NoBar && w.RightText != null);
-                if (!any && balance != null) { var t = Text(balance.RightText, 12, "Text", FontWeights.SemiBold); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); any = true; }
+                var balance = Balance(p);
+                if (!any && balance != null) { var t = Text(Value(balance, p.Usage, ValueStyle.Number), 12, "Text", FontWeights.SemiBold); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); any = true; }
                 if (!any) { var t = Text("–", 12, "Text3"); t.Margin = new Thickness(7, 0, 0, 0); item.Children.Add(t); }
                 row.Children.Add(item);
             }
@@ -145,14 +145,16 @@ namespace AIMeter
             item.Children.Add(iconHost);
             long vram = p.Models.Sum(m => m.Vram), total = p.GpuTotal;
             var stack = new StackPanel { Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-            string text = vram > 0 ? GpuMemory.Format(vram) : p.Models.Count.ToString(It);
+            // Like a limit: the video memory free (or in use) out of the total, with the bar that matches it.
+            string text = vram > 0 && total > 0 ? GpuMemory.Value(p.GpuUsed, total, ValueStyle.Number)
+                        : vram > 0 ? GpuMemory.Format(vram) : p.Models.Count.ToString(It);
             var t = Text(text, 12, "Text", FontWeights.SemiBold);
             t.HorizontalAlignment = HorizontalAlignment.Center;
             stack.Children.Add(t);
             if (vram > 0 && total > 0)
             {
                 double free = 100 - Math.Min(100, p.GpuUsed * 100.0 / total);
-                var bar = Bar(free, LevelBrush(free, "Info"), 2);
+                var bar = LimitBar(free, LevelBrush(free, "Info"), 2);
                 bar.Width = 26;
                 bar.Margin = new Thickness(0, 1, 0, 0);
                 stack.Children.Add(bar);

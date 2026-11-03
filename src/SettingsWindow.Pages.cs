@@ -18,6 +18,17 @@ namespace AIMeter
         private void BuildDisplay()
         {
             Header(L.T("Where to see it"));
+            // How every surface states a limit: the pill, the panel, the widget, the overlay and tooltips.
+            Group(
+                Row(Ui.Glyph("", 20, "Text"), L.T("Limits show"), L.T("In the taskbar, the panel, the widget and the overlay. Video memory follows the same choice."), Combo(new[]
+                {
+                    Tuple.Create("left", L.T("What is left")), Tuple.Create("used", L.T("What is used")),
+                }, S.LimitValues ?? "left", v => { S.LimitValues = v; Changed(); })),
+                Row(null, L.T("Credit limits show"), L.T("For limits in money, such as credits, key limits and budgets."), Combo(new[]
+                {
+                    Tuple.Create("amount", L.T("The amount")), Tuple.Create("percent", L.T("A percentage")),
+                }, S.MoneyValues ?? "amount", v => { S.MoneyValues = v; Changed(); })));
+            Hint(L.T("Notifications always say what is left, since they warn that a limit is running out."));
             Group(
                 Row(Ui.Glyph("", 20, "Text"), L.T("Desktop widget"), L.T("Stays below your windows, like part of the wallpaper. Drag it by its header."),
                     Pair(Button(L.T("Reset position"), () => C.ResetDesktopPosition(), false), Toggle(S.DesktopWidget, v => { S.DesktopWidget = v; Changed(); }))));
