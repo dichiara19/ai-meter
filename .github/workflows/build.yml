@@ -133,6 +133,65 @@ jobs:
           name: AIMeter-msix
           path: bin/AIMeter.msix
 
+  # The Windows App Certification Kit, the technical tests the Store runs during certification, on this build's MSIX.
+  # The kit installs the package, so it is signed here with a throwaway certificate for its own publisher, trusted
+  # only on the runner; the Store signs the real one. The report is uploaded as the AIMeter-wack artifact.
+  certify:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: AIMeter-msix
+
+      - name: Run the Windows App Certification Kit
+        shell: powershell
+        run: |
+          $kit = 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe'
+          if (-not (Test-Path $kit)) { throw "The Windows App Certification Kit is not installed on this runner ($kit)." }
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+          $msix = (Resolve-Path AIMeter.msix).Path
+
+          # Sign with a certificate whose subject is the package's publisher, trusted only on this runner.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead($msix)
+          try { $manifest = [xml](New-Object IO.StreamReader(($zip.Entries | Where-Object FullName -eq 'AppxManifest.xml').Open())).ReadToEnd() }
+          finally { $zip.Dispose() }
+          $publisher = $manifest.Package.Identity.Publisher
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $publisher -KeyUsage DigitalSignature -FriendlyName 'AI Meter WACK' `
+              -CertStoreLocation Cert:\CurrentUser\My -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
+          $cer = Join-Path $env:RUNNER_TEMP 'wack.cer'
+          Export-Certificate -Cert $cert -FilePath $cer | Out-Null
+          Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          & $signtool.FullName sign /fd SHA256 /sha1 $cert.Thumbprint $msix
+          if ($LASTEXITCODE) { throw "signtool failed ($LASTEXITCODE)." }
+
+          New-Item -ItemType Directory wack | Out-Null
+          $report = Join-Path (Resolve-Path wack).Path 'report.xml'
+          & $kit reset
+          & $kit test -appxpackagepath $msix -reportoutputpath $report
+          Write-Host "appcert exited with $LASTEXITCODE."
+          if (-not (Test-Path $report)) { throw 'The kit wrote no report.' }
+
+          # Summarise: the overall result, then every test that did not pass, with its messages.
+          $xml = [xml](Get-Content $report -Raw)
+          $overall = $xml.REPORT.OVERALL_RESULT
+          Write-Host "Overall result: $overall"
+          foreach ($test in $xml.SelectNodes('//TEST')) {
+              $result = $test.RESULT.InnerText
+              if ($result -and $result -ne 'PASS') {
+                  Write-Host "::warning title=WACK $result::$($test.NAME)"
+                  foreach ($message in $test.SelectNodes('.//MESSAGE')) { Write-Host "    $($message.InnerText.Trim())" }
+              }
+          }
+          "overall=$overall" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: AIMeter-wack
+          path: wack/
+
   # The plugin also runs inside WSL, where agents are stopped with SIGINT rather than taskkill.
   plugin-linux:
     runs-on: ubuntu-latest
