@@ -16,6 +16,35 @@ namespace AIMeter
         {
             test("Without installed apps every service shows a readable logo or monogram", NoInstalledApps);
             test("An unknown service gets its own initial, not another app's icon", UnknownService);
+            test("Without the apps, Copilot and ChatGPT show their bundled official logos and Claude its initial", BundledLogos);
+        }
+
+        private static void BundledLogos()
+        {
+            // The assets live in the repository; the tests otherwise run from PowerShell's folder.
+            string previous = Environment.GetEnvironmentVariable("AIMETER_HOME");
+            ClearCache();
+            Ui.NoInstalledApps = true;
+            try
+            {
+                Environment.SetEnvironmentVariable("AIMETER_HOME", Environment.GetEnvironmentVariable("AIMETER_REPOSITORY") ?? Environment.CurrentDirectory);
+                foreach (bool dark in new[] { true, false })
+                {
+                    foreach (string id in new[] { "openai", "copilot" })
+                    {
+                        var image = Ui.Logo(id, 16, dark) as Image;
+                        Assert(image != null && image.Source != null, "The bundled " + id + " logo was not used (" + (dark ? "dark" : "light") + ").");
+                    }
+                    var claude = Ui.Logo("claude", 16, dark) as Border;
+                    Assert(claude != null && ((TextBlock)claude.Child).Text == "C", "Claude did not fall back to its initial.");
+                }
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("AIMETER_HOME", previous);
+                Ui.NoInstalledApps = false;
+                ClearCache();
+            }
         }
 
         private static void Assert(bool condition, string message)

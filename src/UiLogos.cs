@@ -31,7 +31,7 @@ namespace AIMeter
             BitmapSource bmp;
             if (!Logos.TryGetValue(key, out bmp))
             {
-                // Prefer the installed app's icon, then the bundled official logo.
+                // Prefer the installed app's icon, then the bundled official logo, then the monogram.
                 // Antigravity CLI has no icon; API services bundle theirs beside the definition.
                 string file = id == "antigravity" ? null : FindInstalledLogo(id, dark);
                 if (file != null && file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
@@ -44,7 +44,11 @@ namespace AIMeter
                 if (bmp == null)
                 {
                     var def = Definitions.Get(id);
-                    bmp = FromStream(id == "antigravity" ? Program.OpenAsset("antigravity.png") : def != null ? def.LogoImage(dark) : null);
+                    var bundled = BundledLogo(id, dark);
+                    bmp = FromStream(bundled ?? (def != null ? def.LogoImage(dark) : null));
+                    // OpenAI's Blossom file carries its clear space, a quarter of each side: at 16 pixels the symbol
+                    // would be half the size of the other logos. The space around pill and card icons keeps it clear.
+                    if (bundled != null && id == "openai" && bmp != null) bmp = Inset(bmp, 0.22);
                 }
                 Logos[key] = bmp;
             }
@@ -54,6 +58,28 @@ namespace AIMeter
             // Round square web logos to match Windows app icons.
             img.Clip = new RectangleGeometry(new Rect(0, 0, size, size), size * 0.22, size * 0.22);
             return img;
+        }
+
+        /// <summary>
+        /// The official logo bundled for a built-in service whose app may be missing, black for the light theme and white
+        /// for the dark one: Antigravity's, GitHub's Copilot icon and OpenAI's Blossom (for ChatGPT and Codex), used as
+        /// published, only to identify the service. Claude has none: Anthropic allows its logo only with permission, so
+        /// without the Claude app the monogram stands in.
+        /// </summary>
+        private static Stream BundledLogo(string id, bool dark)
+        {
+            if (id == "antigravity") return Program.OpenAsset("antigravity.png");
+            if (id == "openai" || id == "copilot") return Program.OpenAsset(id + (dark ? "-dark" : "") + ".png");
+            return null;
+        }
+
+        /// <summary>The image without the given share of empty margin on each side.</summary>
+        private static BitmapSource Inset(BitmapSource bmp, double share)
+        {
+            int x = (int)(bmp.PixelWidth * share), y = (int)(bmp.PixelHeight * share);
+            var cropped = new CroppedBitmap(bmp, new Int32Rect(x, y, bmp.PixelWidth - 2 * x, bmp.PixelHeight - 2 * y));
+            cropped.Freeze();
+            return cropped;
         }
 
         /// <summary>Decode a resource or file stream at 64 pixels; return null for missing or invalid images.</summary>
@@ -95,7 +121,7 @@ namespace AIMeter
 
         /// <summary>
         /// Draw the service's letters on its brand colour, used whenever no image is available (for example when
-        /// Claude, Codex or Copilot is not installed). An id without a brand colour in the palette gets a neutral
+        /// the Claude app is not installed, or a bundled logo cannot be read). An id without a brand colour in the palette gets a neutral
         /// background, since a missing resource would leave only white letters.
         /// </summary>
         private static FrameworkElement Monogram(string id, double size)
