@@ -256,16 +256,6 @@ namespace AIMeter
             return null;
         }
 
-        /// <summary>Which server answers on the port and which models it has loaded (null if it is not a model server).</summary>
-        internal List<LocalModel> InspectPort(int port, out string kind)
-        {
-            kind = Identify(port);
-            if (kind == null) return null;
-            var found = Query(new Server { Kind = kind, Port = port, Where = "Windows", Proc = "" });
-            if (found != null) foreach (var m in found) if (m.Server == null) m.Server = ServerName(kind);
-            return found;
-        }
-
         // ================================================================ loaded models
         private List<LocalModel> Query(Server s)
         {

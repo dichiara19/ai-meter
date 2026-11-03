@@ -14,8 +14,12 @@ namespace AIMeter
 {
     /// <summary>
     /// Model Context Protocol server: lets AI apps and coding agents read AI Meter's latest snapshot (limits, running
-    /// sessions, free models and today's spending). Every tool is read-only and nothing secret is returned: no keys,
-    /// tokens or account identities; session titles only when the user allows them.
+    /// sessions, free models and today's spending). Nothing secret is returned: no keys, tokens or account identities;
+    /// session titles only when the user allows them.
+    ///
+    /// The lease tools (claim_capacity, renew_capacity, release_capacity) are the only ones that change state, and they
+    /// write only AI Meter's lease book (leases.json): they start no process and change no settings, keys or service
+    /// data. Every other tool is read-only; describe_dispatch describes a command but runs nothing.
     ///
     /// Tools answer from the latest snapshot and add no network requests unless the caller asks with refresh or
     /// max_age_seconds. Such a request goes through RefreshGate to the usual collection worker, and every result says
@@ -845,7 +849,7 @@ namespace AIMeter
             return Json.Serialize(new Dictionary<string, object> { { "jsonrpc", "2.0" }, { "id", id }, { "result", result } });
         }
 
-        private static string Error(object id, int code, string text)
+        internal static string Error(object id, int code, string text)
         {
             return Json.Serialize(new Dictionary<string, object>
             {
@@ -858,16 +862,32 @@ namespace AIMeter
     /// Serves McpServer on a named pipe that only the current Windows user can open. Each connection is one client
     /// session, handled on its own background thread; the pipe name includes the user name, so several signed-in
     /// users each reach their own AI Meter.
+    ///
+    /// The pipes are opened for overlapped I/O so that Stop can end them: disposing such a pipe cancels a pending
+    /// WaitForConnection or read, whereas a synchronous call would keep waiting on the handle.
     /// </summary>
     internal sealed class McpPipeHost
     {
         public const string PipePrefix = "AIMeter.Mcp.";
         public static string PipeName { get { return PipePrefix + Environment.UserName; } }
 
+        /// <summary>
+        /// The longest request line accepted, in UTF-8 bytes without the newline. MCP requests to AI Meter are a few
+        /// hundred bytes, so 1 MiB leaves ample room while a client that never ends its line cannot make AI Meter hold
+        /// an unbounded string. A longer line receives a JSON-RPC error and the session continues (see LineReader).
+        /// </summary>
+        public const int MaxRequestBytes = 1 << 20;
+
         private const int MaxClients = 16;
+
+        /// <summary>Connections in a row whose client left before they were established, retried at once before backing off.</summary>
+        private const int QuickRetries = 8;
+
         private readonly McpServer server;
         private readonly string name;
-        private volatile bool stopping;
+        private readonly ManualResetEvent stopped = new ManualResetEvent(false);
+        private readonly object sync = new object();
+        private readonly HashSet<NamedPipeServerStream> open = new HashSet<NamedPipeServerStream>();   // Listening and connected pipes, for Stop.
 
         public McpPipeHost(McpServer server, string name = null)
         {
@@ -880,63 +900,183 @@ namespace AIMeter
             new Thread(AcceptLoop) { IsBackground = true, Name = "AIMeter.Mcp", Priority = ThreadPriority.BelowNormal }.Start();
         }
 
-        public void Stop() { stopping = true; }
+        /// <summary>
+        /// Stop accepting and end every session: the listening pipe and each client's pipe are disposed, so blocked waits
+        /// and reads return and their threads finish; clients see the pipe close. A host cannot be started again.
+        /// </summary>
+        public void Stop()
+        {
+            List<NamedPipeServerStream> closing;
+            lock (sync)
+            {
+                stopped.Set();
+                closing = open.ToList();
+                open.Clear();
+            }
+            foreach (var pipe in closing)
+                try { pipe.Dispose(); }
+                catch (Exception) { }
+        }
 
         private void AcceptLoop()
         {
             var security = new PipeSecurity();
             security.AddAccessRule(new PipeAccessRule(WindowsIdentity.GetCurrent().User, PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance, AccessControlType.Allow));
-            while (!stopping)
+            int vanished = 0;
+            while (!stopped.WaitOne(0))
             {
-                NamedPipeServerStream pipe = null;
+                NamedPipeServerStream pipe;
                 try
                 {
-                    pipe = new NamedPipeServerStream(name, PipeDirection.InOut, MaxClients, PipeTransmissionMode.Byte, PipeOptions.None, 4096, 4096, security);
-                    pipe.WaitForConnection();
-                    var connected = pipe;
-                    pipe = null;
-                    new Thread(() => Serve(connected)) { IsBackground = true, Name = "AIMeter.Mcp.Client" }.Start();
+                    pipe = new NamedPipeServerStream(name, PipeDirection.InOut, MaxClients, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 4096, 4096, security);
                 }
                 catch (IOException ex)
                 {
                     // All instances busy, or the name is taken by another copy: wait instead of spinning.
-                    if (pipe != null) pipe.Dispose();
                     Program.LogError("mcp-pipe", ex);
-                    Thread.Sleep(5000);
+                    stopped.WaitOne(5000);
+                    continue;
                 }
                 catch (Exception ex)
                 {
                     // Access refused or anything unexpected: this thread must never end AI Meter.
-                    if (pipe != null) try { pipe.Dispose(); } catch (Exception) { }
                     Program.LogError("mcp-pipe", ex);
-                    Thread.Sleep(30000);
+                    stopped.WaitOne(30000);
+                    continue;
+                }
+                if (!Track(pipe)) return;
+
+                try
+                {
+                    pipe.WaitForConnection();
+                    vanished = 0;
+                    var connected = pipe;
+                    new Thread(() => Serve(connected)) { IsBackground = true, Name = "AIMeter.Mcp.Client" }.Start();
+                }
+                catch (Exception ex)
+                {
+                    Close(pipe);
+                    if (stopped.WaitOne(0)) return;   // Stop disposed the listening pipe.
+
+                    // "The pipe is being closed": a client connected and left before the connection was established. Others
+                    // may be waiting for an instance, so offer a new one at once; only a long run of these is logged.
+                    bool clientLeft = ex is IOException;
+                    if (clientLeft && ++vanished < QuickRetries) continue;
+                    vanished = 0;
+                    Program.LogError("mcp-pipe", ex);
+                    stopped.WaitOne(clientLeft ? 1000 : 30000);
                 }
             }
         }
 
+        /// <summary>Record an open pipe for Stop; false, with the pipe disposed, when the host is already stopping.</summary>
+        private bool Track(NamedPipeServerStream pipe)
+        {
+            lock (sync)
+            {
+                if (!stopped.WaitOne(0)) { open.Add(pipe); return true; }
+            }
+            pipe.Dispose();
+            return false;
+        }
+
+        private void Close(NamedPipeServerStream pipe)
+        {
+            lock (sync) open.Remove(pipe);
+            try { pipe.Dispose(); }
+            catch (Exception) { }
+        }
+
         /// <summary>
-        /// Answer one client until it disconnects. This runs on its own thread, where an unhandled exception would end
-        /// AI Meter, so every failure, including the flush when the pipe is closed after the client went away, stays here.
+        /// Answer one client until it disconnects or Stop closes its pipe. This runs on its own thread, where an unhandled
+        /// exception would end AI Meter, so every failure, including the flush when the pipe is closed after the client went
+        /// away, stays here.
         /// </summary>
         private void Serve(NamedPipeServerStream pipe)
         {
-            var utf8 = new UTF8Encoding(false);
             try
             {
-                var reader = new StreamReader(pipe, utf8);
-                var writer = new StreamWriter(pipe, utf8) { AutoFlush = true, NewLine = "\n" };
+                var reader = new LineReader(pipe, MaxRequestBytes);
+                var writer = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
                 string line;
-                while (!stopping && (line = reader.ReadLine()) != null)
-                    writer.WriteLine(line.Trim().Length == 0 ? "" : server.Handle(line));
+                bool tooLong;
+                while (reader.Next(out line, out tooLong))
+                {
+                    if (tooLong)
+                        writer.WriteLine(McpServer.Error(null, -32600, "Request too large: at most " + MaxRequestBytes + " bytes per line."));
+                    else
+                        writer.WriteLine(line.Trim().Length == 0 ? "" : server.Handle(line));
+                }
             }
-            catch (IOException) { }   // The client went away.
+            catch (IOException) { }   // The client went away, or Stop closed the pipe.
             catch (ObjectDisposedException) { }
+            catch (OperationCanceledException) { }
             catch (Exception ex) { Program.LogError("mcp-client", ex); }
             finally
             {
-                // Disposing the pipe alone, not the reader and writer, avoids flushing into a broken pipe.
-                try { pipe.Dispose(); }
-                catch (Exception) { }
+                // Disposing the pipe alone, not the writer, avoids flushing into a broken pipe.
+                Close(pipe);
+            }
+        }
+
+        /// <summary>
+        /// Reads newline-terminated UTF-8 lines while holding at most a fixed number of bytes of each. A longer line is
+        /// still consumed up to its newline, its content discarded, and reported as too long: the caller answers it with
+        /// one error line, so every line still receives exactly one reply and the relay stays in step. A final line
+        /// without a newline counts as a line, and a trailing carriage return is removed, as StreamReader.ReadLine does.
+        /// </summary>
+        internal sealed class LineReader
+        {
+            private static readonly Encoding Utf8 = new UTF8Encoding(false);
+            private readonly Stream stream;
+            private readonly int limit;
+            private readonly byte[] buffer = new byte[4096];
+            private readonly MemoryStream current = new MemoryStream();
+            private int position, length;
+
+            public LineReader(Stream stream, int limit)
+            {
+                this.stream = stream;
+                this.limit = limit;
+            }
+
+            /// <summary>Read the next line; false at the end of the stream. A line over the limit comes back as tooLong with a null line.</summary>
+            public bool Next(out string line, out bool tooLong)
+            {
+                line = null;
+                tooLong = false;
+                current.SetLength(0);
+                bool started = false;   // Whether any byte of this line, or its newline, has arrived.
+                while (true)
+                {
+                    if (position == length)
+                    {
+                        position = 0;
+                        length = stream.Read(buffer, 0, buffer.Length);
+                        if (length == 0)
+                        {
+                            if (!started) return false;
+                            break;
+                        }
+                    }
+                    started = true;
+                    int newline = Array.IndexOf(buffer, (byte)'\n', position, length - position);
+                    int end = newline < 0 ? length : newline;
+                    if (!tooLong && current.Length + (end - position) > limit)
+                    {
+                        tooLong = true;
+                        current.SetLength(0);
+                    }
+                    if (!tooLong) current.Write(buffer, position, end - position);
+                    position = newline < 0 ? length : newline + 1;
+                    if (newline >= 0) break;
+                }
+                if (tooLong) return true;
+
+                int count = (int)current.Length;
+                if (count > 0 && current.GetBuffer()[count - 1] == '\r') count--;
+                line = Utf8.GetString(current.GetBuffer(), 0, count);
+                return true;
             }
         }
     }

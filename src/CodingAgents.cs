@@ -49,9 +49,6 @@ namespace AIMeter
             return last;
         }
 
-        /// <summary>Sessions found in any user folder (also used to test the formats).</summary>
-        internal List<Session> ScanHome(Probe p, string home) { return Scan(p, new List<Place> { new Place { Home = home, Where = "Windows" } }); }
-
         private List<Session> Scan(Probe p, List<Place> places)
         {
             var all = new List<Tuple<Found, string>>();

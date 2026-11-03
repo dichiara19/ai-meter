@@ -14,7 +14,7 @@ namespace AIMeter
     {
         internal static void Register(Action<string, Action> test)
         {
-            test("MCP answers the handshake, lists read-only tools and ignores notifications", Protocol);
+            test("MCP answers the handshake, marks only the lease tools as writing and ignores notifications", Protocol);
             test("MCP tools report limits, sessions without titles, free models and room", Tools);
             test("An MCP refresh asks only for old readings and reports each service's freshness", RefreshTargets);
             test("Concurrent MCP refreshes share one collection", RefreshShared);
@@ -24,6 +24,8 @@ namespace AIMeter
             test("Retry-After is read as seconds or an HTTP date and capped", RetryAfter);
             test("MCP relay and pipe carry requests from a separate process", Relay);
             test("A client that disconnects abruptly leaves the MCP pipe serving", AbruptDisconnect);
+            test("MCP request lines are read up to a limit, and a longer one is refused without ending the session", LongLines);
+            test("Stopping the MCP pipe ends waiting sessions and accepts no one", PipeStop);
             test("Connecting an app adds only AI Meter's JSON entry and keeps the rest", JsonEdits);
             test("Codex TOML gains and loses only AI Meter's tables", TomlEdits);
             test("Codex TOML headers inside strings, comments and multi-line arrays are left alone", TomlLexical);
@@ -366,6 +368,90 @@ namespace AIMeter
                 writer.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}");
                 Assert(Json.Num(Json.Parse(reader.ReadLine()), "id") == 7, "The pipe stopped answering after a client left.");
             }
+        }
+
+        private static List<string> ReadAll(McpPipeHost.LineReader reader)
+        {
+            var lines = new List<string>();
+            string line;
+            bool tooLong;
+            while (reader.Next(out line, out tooLong)) lines.Add(tooLong ? "<too long>" : line);
+            return lines;
+        }
+
+        private static void LongLines()
+        {
+            // The reader alone, with a small limit and lines that cross its 4096-byte buffer.
+            var utf8 = new UTF8Encoding(false);
+            string exact = new string('a', 5000), over = new string('b', 5001);
+            var input = new MemoryStream(utf8.GetBytes(exact + "\n" + over + "\r\n\nnext\r\n" + over + "\n\u00e8 last"));
+            var lines = ReadAll(new McpPipeHost.LineReader(input, 5000));
+            Assert(lines.SequenceEqual(new[] { exact, "<too long>", "", "next", "<too long>", "\u00e8 last" }),
+                "Wrong lines: " + string.Join(" | ", lines.Select(l => l.Length > 20 ? l.Substring(0, 5) + "..." + l.Length : l)));
+            Assert(ReadAll(new McpPipeHost.LineReader(new MemoryStream(utf8.GetBytes("one\n")), 10)).SequenceEqual(new[] { "one" }),
+                "A stream that ends after a newline gained an empty line.");
+            Assert(ReadAll(new McpPipeHost.LineReader(new MemoryStream(), 10)).Count == 0, "An empty stream produced a line.");
+
+            // Through the pipe: an over-long request receives one error with a null id, and the session goes on.
+            string name = "AIMeter.Mcp.Test." + Guid.NewGuid().ToString("N");
+            var snap = Fixture();
+            var host = new McpPipeHost(new McpServer(() => snap, () => false), name);
+            host.Start();
+            try
+            {
+                using (var client = new System.IO.Pipes.NamedPipeClientStream(".", name, System.IO.Pipes.PipeDirection.InOut))
+                {
+                    client.Connect(5000);
+                    var writer = new StreamWriter(client, utf8) { AutoFlush = true, NewLine = "\n" };
+                    var reader = new StreamReader(client, utf8);
+                    string padding = new string(' ', McpPipeHost.MaxRequestBytes);
+                    writer.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"ping\"" + padding + "}");
+                    var refused = Json.Parse(reader.ReadLine());
+                    Assert(Json.Num(Json.Obj(refused, "error"), "code") == -32600 && refused.ContainsKey("id") && refused["id"] == null,
+                        "An over-long request was not refused with a null id.");
+                    writer.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"ping\"}");
+                    Assert(Json.Num(Json.Parse(reader.ReadLine()), "id") == 6, "The session ended after an over-long request.");
+                }
+            }
+            finally { host.Stop(); }
+        }
+
+        private static void PipeStop()
+        {
+            string name = "AIMeter.Mcp.Test." + Guid.NewGuid().ToString("N");
+            var snap = Fixture();
+            var host = new McpPipeHost(new McpServer(() => snap, () => false), name);
+            host.Start();
+            var utf8 = new UTF8Encoding(false);
+            using (var client = new System.IO.Pipes.NamedPipeClientStream(".", name, System.IO.Pipes.PipeDirection.InOut))
+            {
+                client.Connect(5000);
+                var writer = new StreamWriter(client, utf8) { AutoFlush = true, NewLine = "\n" };
+                var reader = new StreamReader(client, utf8);
+                writer.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}");
+                Assert(Json.Num(Json.Parse(reader.ReadLine()), "id") == 1, "The pipe did not answer before stopping.");
+                Thread.Sleep(200);   // Let the host wait for the next request and for the next client.
+
+                // The session's server thread is blocked reading: stopping must close the pipe, so the client sees the end.
+                bool ended = false;
+                var waiting = new Thread(() =>
+                {
+                    try { ended = reader.ReadLine() == null; }
+                    catch (IOException) { ended = true; }
+                }) { IsBackground = true };
+                waiting.Start();
+                host.Stop();
+                Assert(waiting.Join(5000) && ended, "Stopping left a connected session open.");
+            }
+
+            bool accepted = true;
+            using (var late = new System.IO.Pipes.NamedPipeClientStream(".", name, System.IO.Pipes.PipeDirection.InOut))
+            {
+                try { late.Connect(500); }
+                catch (TimeoutException) { accepted = false; }
+                catch (IOException) { accepted = false; }
+            }
+            Assert(!accepted, "A stopped pipe still accepted a client.");
         }
 
         private static McpClients.Client Client(McpClients.Format format, bool stdioType = false)

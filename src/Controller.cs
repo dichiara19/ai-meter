@@ -327,6 +327,8 @@ namespace AIMeter
         {
             stopping = true;
             wake.Set();
+            // Close the MCP pipe now, so connected apps see AI Meter leave and a new copy can take the pipe name at once.
+            if (mcpHost != null) mcpHost.Stop();
             SystemEvents.SessionSwitch -= OnSessionSwitch;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
