@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -10,16 +11,23 @@ namespace AIMeter
     /// <summary>
     /// Claude Code and Cowork sessions on Windows and running WSL, app presence and usage API limits.
     /// Claude Code manages sign-in and token renewal; this provider never touches the refresh token.
-    /// API: GET /api/oauth/usage with anthropic-beta oauth-2025-04-20.
+    /// API: GET /api/oauth/usage with anthropic-beta oauth-2025-04-20; the plan's API credits use the Admin API's
+    /// GET /v1/organizations/cost_report.
     /// </summary>
     internal sealed class ClaudeProvider : Provider
     {
+        /// <summary>The saved Admin key of the Console organisation that receives the plan's API credits.</summary>
+        public const string AdminKeyId = "claude.admin";
+
         private readonly Settings S;
         private Usage live;
         private DateTime fetchedAt = DateTime.MinValue;
         private bool needsLogin;
         private string plan;
         private bool? wslHasClaude;
+        private UsageWindow apiCredits;
+        private DateTime apiFetchedAt = DateTime.MinValue;
+        private bool adminKeyRefused;
 
         private static string PlanFile { get { return Path.Combine(Settings.Folder, "claude-usage.json"); } }
         private static string RawFile { get { return Path.Combine(Settings.Folder, "claude-usage-raw.json"); } }
@@ -60,8 +68,9 @@ namespace AIMeter
             return AppFolders(Probe.AppData, Probe.LocalAppData).Select(f => Path.Combine(f, relativePath)).FirstOrDefault(p => Directory.Exists(p) || File.Exists(p))
                 ?? Path.Combine(Probe.AppData, "Claude", relativePath);
         }
+
         public override bool Enabled(Settings s) { return s.ClaudeEnabled; }
-        public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; }
+        public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; apiFetchedAt = DateTime.MinValue; }
 
         public override ProviderState Collect(Probe p)
         {
@@ -207,6 +216,7 @@ namespace AIMeter
             if (st.Usage == live && live != null && (DateTime.Now - live.At).TotalMinutes > interval + 2)
                 st.Usage = live.AsCache();
 
+            ApiCredits(p, st);
             if (!S.ClaudeLiveUsage) return;
             if (creds == null && !p.WslUp && wslHasClaude == true)
                 st.Notice = L.T("WSL is off: limits from the last update");
@@ -215,6 +225,148 @@ namespace AIMeter
                 st.NeedsLogin = true;
                 st.Notice = L.T("Connect your account for real-time limits");
             }
+        }
+
+        /// <summary>
+        /// Add the plan's monthly API credits, read with an Admin key of the linked Console organisation. Anthropic
+        /// reports costs, not the credit balance, so this cycle's costs are compared with the credit amount; the
+        /// credits are spent before purchased ones, so costs beyond the amount were paid with purchased credits.
+        /// </summary>
+        private void ApiCredits(Probe p, ProviderState st)
+        {
+            double amount;
+            int day;
+            string key = ApiKeys.Get(AdminKeyId);
+            if (key == null) { apiCredits = null; return; }
+            if (!ApiCreditSettings(S.ClaudeApiCredits, plan, out amount, out day))
+            {
+                apiCredits = null;
+                if (st.Notice == null) st.Notice = L.T("Set the amount and renewal day of your API credits in Settings");
+                return;
+            }
+
+            DateTime start = CycleStart(DateTime.Today, day);
+            if (apiCredits != null && apiCredits.StartedAt != start) apiCredits = null;   // A new cycle began.
+            if (p.AllowNetwork && (DateTime.Now - apiFetchedAt).TotalMinutes >= 15 && NetworkBackoff.Ready("claude-api"))
+            {
+                apiFetchedAt = DateTime.Now;
+                double? spent = FetchApiCost(key, start);
+                if (spent != null)
+                {
+                    double used = Math.Min(spent.Value, amount);
+                    var money = new Money { Used = used, Limit = amount, Currency = "USD" };
+                    var total = new Money { Used = spent.Value, Currency = "USD" };
+                    apiCredits = new UsageWindow
+                    {
+                        Label = "API credits", Short = "$", Used = amount > 0 ? used / amount * 100 : 100, Spent = money,
+                        StartedAt = start, ResetsAt = OnDay(start.Year, start.Month, day, 1),
+                        Detail = () => L.F("{0} spent on the Claude API in this cycle", total.Format(total.Used)),
+                    };
+                }
+            }
+
+            if (adminKeyRefused && st.Notice == null) st.Notice = L.T("The Admin key for API credits was refused: check it in Settings");
+            if (apiCredits == null) return;
+            st.Usage = st.Usage != null ? st.Usage.With(new[] { apiCredits }) : new Usage { Source = "live", At = apiFetchedAt, Windows = { apiCredits } };
+        }
+
+        /// <summary>
+        /// Read amount|day: the credit in US dollars, or empty for the plan's documented amount, and the day of the
+        /// month on which it renews. False when either is unknown.
+        /// </summary>
+        internal static bool ApiCreditSettings(string value, string plan, out double amount, out int day)
+        {
+            amount = 0;
+            day = 0;
+            var parts = (value ?? "").Split('|');
+            if (parts.Length != 2 || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out day) || day < 1 || day > 31) return false;
+            if (parts[0].Length > 0)
+                return double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out amount) && amount > 0 && !double.IsInfinity(amount);
+            amount = PlanApiCredit(plan);
+            return amount > 0;
+        }
+
+        /// <summary>Monthly API credits documented for a plan; Team credits depend on its seats and must be entered.</summary>
+        internal static double PlanApiCredit(string plan)
+        {
+            if (string.Equals(plan, "max", StringComparison.OrdinalIgnoreCase)) return 100;
+            if (string.Equals(plan, "ultra", StringComparison.OrdinalIgnoreCase)) return 200;
+            return 0;
+        }
+
+        /// <summary>The start of the credit cycle containing today: its renewal day, moved to the month's last day when shorter.</summary>
+        internal static DateTime CycleStart(DateTime today, int day)
+        {
+            var renewal = OnDay(today.Year, today.Month, day, 0);
+            return renewal <= today.Date ? renewal : OnDay(today.Year, today.Month, day, -1);
+        }
+
+        private static DateTime OnDay(int year, int month, int day, int monthsLater)
+        {
+            var first = new DateTime(year, month, 1).AddMonths(monthsLater);
+            return first.AddDays(Math.Min(day, DateTime.DaysInMonth(first.Year, first.Month)) - 1);
+        }
+
+        /// <summary>
+        /// US dollars spent by the organisation since the cycle began, from daily UTC buckets; null when unavailable.
+        /// Buckets that end after ending_at are left out, so it is the next UTC midnight, to include today.
+        /// </summary>
+        private double? FetchApiCost(string key, DateTime start)
+        {
+            string from = start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "T00:00:00Z";
+            string to = DateTime.UtcNow.Date.AddDays(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "T00:00:00Z";
+            double cents = 0;
+            string page = null;
+            for (int pages = 0; pages < 5; pages++)
+            {
+                string url = "https://api.anthropic.com/v1/organizations/cost_report?starting_at=" + from + "&ending_at=" + to + "&bucket_width=1d&limit=31"
+                           + (page != null ? "&page=" + Uri.EscapeDataString(page) : "");
+                Dictionary<string, object> d;
+                try
+                {
+                    var req = (HttpWebRequest)WebRequest.Create(url);
+                    req.Headers["x-api-key"] = key;
+                    req.Headers["anthropic-version"] = "2023-06-01";
+                    req.UserAgent = "ai-meter/" + Controller.Version;
+                    req.Timeout = 15000;
+                    req.ReadWriteTimeout = 15000;
+                    using (var resp = (HttpWebResponse)req.GetResponse())
+                    using (var r = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                        d = Json.Parse(r.ReadToEnd());
+                }
+                catch (WebException e)
+                {
+                    NetworkBackoff.Note("claude-api", e);
+                    var hr = e.Response as HttpWebResponse;
+                    adminKeyRefused = hr != null && (hr.StatusCode == HttpStatusCode.Unauthorized || hr.StatusCode == HttpStatusCode.Forbidden);
+                    return null;
+                }
+                catch (IOException) { return null; }
+                adminKeyRefused = false;
+
+                double? sum = CostCents(d);
+                if (sum == null) return null;
+                cents += sum.Value;
+                page = Json.Bool(d, "has_more") ? Json.Str(d, "next_page") : null;
+                if (page == null) return cents / 100;
+            }
+            return null;
+        }
+
+        /// <summary>The US-dollar costs of one cost_report page in cents, summed over its buckets; null when it is not one.</summary>
+        internal static double? CostCents(Dictionary<string, object> report)
+        {
+            var buckets = report != null && report.ContainsKey("data") ? report["data"] as object[] : null;
+            if (buckets == null) return null;
+            double cents = 0;
+            foreach (var bucket in buckets.OfType<Dictionary<string, object>>())
+            {
+                var results = bucket.ContainsKey("results") ? bucket["results"] as object[] : null;
+                if (results == null) continue;
+                foreach (var item in results.OfType<Dictionary<string, object>>())
+                    if ((Json.Str(item, "currency") ?? "USD") == "USD") cents += JPath.Num(item.ContainsKey("amount") ? item["amount"] : null) ?? 0;
+            }
+            return cents;
         }
 
         private string CredentialsPath(Probe p)

@@ -16,6 +16,8 @@ namespace AIMeter
         public bool ClaudeShowChat { get; set; }
         public bool ClaudeShowCode { get; set; }
         public bool ClaudeShowCowork { get; set; }
+        /// <summary>The plan's monthly Claude API credits as amount|renewal day; an empty amount follows the plan.</summary>
+        public string ClaudeApiCredits { get; set; }
         public bool OpenAIEnabled { get; set; }
         public bool OpenAIShowChat { get; set; }
         public bool CopilotEnabled { get; set; }

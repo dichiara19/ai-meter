@@ -18,6 +18,30 @@ namespace AIMeter
             test("Docker Desktop's distribution is never chosen as the WSL distribution", DockerDistribution);
             test("Codex without its program says so on its card", CodexWithoutProgram);
             test("A service that fails every cycle keeps its card with a notice and is logged once", FailingService);
+            test("The Claude plan's API credits follow the plan, renew on their day and sum the cost report", ClaudeApiCredits);
+        }
+
+        private static void ClaudeApiCredits()
+        {
+            double amount;
+            int day;
+            Assert(ClaudeProvider.ApiCreditSettings("|5", "max", out amount, out day) && amount == 100 && day == 5, "Max did not default to $100.");
+            Assert(ClaudeProvider.ApiCreditSettings("|5", "ultra", out amount, out day) && amount == 200, "Ultra did not default to $200.");
+            Assert(!ClaudeProvider.ApiCreditSettings("|5", "team", out amount, out day), "A Team plan's credit was guessed instead of entered.");
+            Assert(ClaudeProvider.ApiCreditSettings("260|12", "team", out amount, out day) && amount == 260 && day == 12, "An entered amount was not used.");
+            foreach (var invalid in new[] { null, "", "100|", "100|0", "100|32", "-5|3", "Infinity|3", "abc|3" })
+                Assert(!ClaudeProvider.ApiCreditSettings(invalid, "max", out amount, out day), "An invalid setting was accepted: " + (invalid ?? "null"));
+
+            Assert(ClaudeProvider.CycleStart(new DateTime(2026, 11, 3), 5) == new DateTime(2026, 10, 5), "Before the renewal day the cycle began last month.");
+            Assert(ClaudeProvider.CycleStart(new DateTime(2026, 11, 5, 9, 0, 0), 5) == new DateTime(2026, 11, 5), "On the renewal day a new cycle began.");
+            Assert(ClaudeProvider.CycleStart(new DateTime(2026, 2, 28), 31) == new DateTime(2026, 2, 28), "A renewal day beyond a short month did not move to its last day.");
+            Assert(ClaudeProvider.CycleStart(new DateTime(2026, 3, 30), 31) == new DateTime(2026, 2, 28), "The cycle after a short month did not start on its last day.");
+            Assert(ClaudeProvider.CycleStart(new DateTime(2026, 1, 2), 15) == new DateTime(2025, 12, 15), "The cycle did not cross the year.");
+
+            var report = Json.Parse("{\"data\":[{\"starting_at\":\"2026-11-01T00:00:00Z\",\"results\":[{\"amount\":\"123.45\",\"currency\":\"USD\"},{\"amount\":\"10\",\"currency\":\"USD\"}]},"
+                + "{\"starting_at\":\"2026-11-02T00:00:00Z\",\"results\":[]},{\"starting_at\":\"2026-11-03T00:00:00Z\",\"results\":[{\"amount\":\"900\",\"currency\":\"EUR\"}]}],\"has_more\":false,\"next_page\":null}");
+            Assert(ClaudeProvider.CostCents(report) == 133.45, "Cost report amounts in cents were not summed, or another currency was counted.");
+            Assert(ClaudeProvider.CostCents(Json.Parse("{\"error\":{\"type\":\"permission_error\"}}")) == null, "An error answer was read as no spending.");
         }
 
         private static void Assert(bool condition, string message)

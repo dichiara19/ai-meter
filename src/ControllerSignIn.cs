@@ -52,6 +52,17 @@ namespace AIMeter
             w.Activate();
         }
 
+        /// <summary>Ask for the Admin key that reads how much of the Claude plan's API credits has been used.</summary>
+        public void EnterClaudeAdminKey()
+        {
+            var w = new ApiKeyWindow(ClaudeProvider.AdminKeyId, "Claude Console", "Admin key",
+                "An Admin key (sk-ant-admin01-…) of the Console organisation linked to your plan. Only an organisation admin can create it.",
+                "https://platform.claude.com/settings/admin-keys");
+            w.Saved += () => { RefreshNow(); if (settingsWindow != null) settingsWindow.Build(); };
+            w.Show();
+            w.Activate();
+        }
+
         public void RemoveApiKey(ServiceDefinition d)
         {
             ApiKeys.Remove(d.Id);
