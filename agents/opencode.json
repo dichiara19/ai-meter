@@ -31,7 +31,28 @@
       "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
       "OPENCODE_DISABLE_PROJECT_CONFIG": "1",
       "OPENCODE_DISABLE_AUTOUPDATE": "1",
-      "OPENCODE_CONFIG_CONTENT": { "small_model": "{provider}/{model}" }
+      "OPENCODE_CONFIG_CONTENT": {
+        "small_model": "{provider}/{model}",
+        "agent": {
+          "plan": {
+            "permission": {
+              "*": "deny",
+              "read": { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
+              "glob": "allow",
+              "grep": "allow",
+              "lsp": "allow",
+              "todowrite": "allow"
+            }
+          },
+          "build": {
+            "permission": {
+              "read": { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
+              "external_directory": "deny",
+              "question": "deny"
+            }
+          }
+        }
+      }
     },
     "output": {
       "format": "jsonl",
@@ -42,6 +63,9 @@
       "rate_limited": "an error event whose message contains 429",
       "cost": "step_finish.part.cost of each step, priced by OpenCode from its own model list: above 0, the request was priced as paid; 0 does not prove a free request"
     },
-    "notes": ["Close stdin after writing the task: with stdin open OpenCode waits for more."]
+    "notes": [
+      "Close stdin after writing the task: with stdin open OpenCode waits for more.",
+      "Permissions are set here, not left to the plan agent's defaults or the user's config: read_only (plan) denies every tool but reading, searching, LSP and the todo list, and never reads .env files; modify (build) also never reads .env files or folders outside its worktree. The last matching rule wins, so each catch-all comes first."
+    ]
   }
 }

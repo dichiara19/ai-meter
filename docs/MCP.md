@@ -285,7 +285,7 @@ The coding agents AI Meter knows are data, like services: `agents/*.json`, built
 | `models` | The agent's own model list, for [best-effort candidates](#best-effort-candidates): `format` (`pi` or `models.dev`), `file` under `{home}/` or `{package}/` with `{provider}` for the service's alias, and optional `versions` whose layout was checked. Pi: `{package}/node_modules/@earendil-works/pi-ai/dist/providers/data/{provider}.json` for 1.x; OpenCode: `{home}/.cache/opencode/models.json` |
 | `dispatch` | How a plugin starts it. Without it, the agent is reported in `runtimes.unsupported` |
 | `dispatch.places` | The verified places, each with `versions` (`"1.x"` matches every 1.* version, `"1.4.0"` only that one), optional `executables` (native Windows programs inside the npm package) and optional own `arguments` and `environment` |
-| `dispatch.arguments` | The argument list per mode, `read_only` and `modify` |
+| `dispatch.arguments` | The argument list per mode, `read_only` and `modify`. `read_only` must be enforced by what the agent is given, such as Pi's `--tools` list or OpenCode's per-agent `permission` in `OPENCODE_CONFIG_CONTENT` (see `agents/opencode.json`), never by an agent's name and defaults alone |
 | `dispatch.environment` | Variables to set. A value written as a JSON object is serialised after its placeholders are filled, so a model id cannot change its structure |
 | `dispatch.output`, `dispatch.notes` | Returned as they are in `describe_dispatch` |
 

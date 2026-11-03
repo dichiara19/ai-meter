@@ -35,14 +35,15 @@ const TOOLS = [
     description:
       "Hand a self-contained task to a coding agent on a free model, chosen with AI Meter: the first candidate in AI Meter's order " +
       "whose agent can be started here and whose pool has room. Returns a job id at once; follow it with delegate_result. " +
-      "read_only (default) lets the agent read the workspace only. modify runs it in a new Git worktree on its own branch, " +
-      "made from the last commit; nothing is merged. Free models are weaker than you: give the whole context the task needs " +
-      "and check the answer.",
+      "The workspace must be in a Git repository. read_only (default) gives the agent reading tools only, on a copy of the " +
+      "files Git tracks or would track, without .env and other files whose names suggest secrets. modify runs it in a new " +
+      "Git worktree on its own branch, made from the last commit; nothing is merged. The task and every file the agent " +
+      "reads go to the model's provider. Give the whole context the task needs and check the answer.",
     inputSchema: {
       type: "object",
       properties: {
         task: text("The full instructions for the agent. It sees only this and the workspace."),
-        workspace: text("Absolute path of the folder the task works in, usually the repository root."),
+        workspace: text("Absolute path of the folder the task works in, inside a Git repository: usually its root."),
         mode: choice("read_only (default) or modify.", "read_only", "modify"),
         ...needs,
         model: text("Only this model id."),

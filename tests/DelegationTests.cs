@@ -63,6 +63,14 @@ namespace AIMeter
             Assert(oc.Environment["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1" && oc.Environment["OPENCODE_CONFIG_CONTENT"].Contains("openrouter/" + Model),
                 "OpenCode is not isolated, or its small model is not the free model.");
             Assert(oc.Notes.Any(n => n.Contains("stdin")), "The stdin warning is missing.");
+            // read_only must not rest on the plan agent's defaults or the user's config; the last matching rule wins.
+            var agents = Json.Obj(Json.Parse(oc.Environment["OPENCODE_CONFIG_CONTENT"]), "agent");
+            var plan = Json.Obj(Json.Obj(agents, "plan"), "permission");
+            var buildRead = Json.Obj(Json.Obj(Json.Obj(agents, "build"), "permission"), "read");
+            Assert(Json.Str(plan, "*") == "deny" && plan.Keys.First() == "*" && Json.Str(plan, "glob") == "allow" && Json.Str(plan, "bash") == null,
+                "OpenCode's read-only agent does not deny every tool but reading.");
+            Assert(Json.Obj(plan, "read").Keys.SequenceEqual(new[] { "*", "*.env", "*.env.*", "*.env.example" }) && Json.Str(buildRead, "*.env") == "deny",
+                "OpenCode may read .env files, or its read rules lost their order.");
             var build = Dispatch.Describe(Access("opencode", "windows"), Model, Dispatch.Modify, null, "windows", null, "1.19.5");
             Assert(build.Arguments[build.Arguments.IndexOf("--agent") + 1] == "build" && build.Arguments.Contains("{workspace}"), "Modify mode or the workspace placeholder is wrong.");
 
