@@ -49,8 +49,10 @@ namespace AIMeter
             };
             DockPanel.SetDock(header, Dock.Top);
             root.Children.Add(header);
-            root.Children.Add(body);
+            // Many services can make the widget taller than the screen: the cards then scroll, with a finger too.
+            root.Children.Add(Ui.TouchScroll(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = body, Focusable = false }));
             Content = root;
+            Ui.ToolTipsOnHold(this);
 
             SourceInitialized += (o, e) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle).AddHook(StayAtBottom);
             Loaded += (o, e) => Place();
@@ -76,6 +78,7 @@ namespace AIMeter
                          && y > SystemParameters.VirtualScreenTop - 10 && y < SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 60;
             Left = valid ? x : wa.Right - Width - 24;
             Top = valid ? y : wa.Top + 24;
+            MaxHeight = wa.Height - 24;
         }
 
         public void ResetPosition()
@@ -135,10 +138,12 @@ namespace AIMeter
             host.HorizontalAlignment = HorizontalAlignment.Center;
             host.VerticalAlignment = VerticalAlignment.Center;
 
+            // Hovering shows the panel without focus and leaving hides it. A finger has no hover: the mouse events WPF
+            // raises for a touch (with a StylusDevice) start no hover, and a tap pins the panel open instead.
             hover.Tick += (o, e) => { hover.Stop(); C.ShowDetails(this); };
-            MouseEnter += (o, e) => { C.CancelHideDetails(); hover.Start(); };
-            MouseLeave += (o, e) => { hover.Stop(); C.ScheduleHideDetails(); };
-            MouseLeftButtonUp += (o, e) => { hover.Stop(); C.ShowDetails(this); };
+            MouseEnter += (o, e) => { C.CancelHideDetails(); if (e.StylusDevice == null) hover.Start(); };
+            MouseLeave += (o, e) => { hover.Stop(); if (e.StylusDevice == null) C.ScheduleHideDetails(); };
+            MouseLeftButtonUp += (o, e) => { hover.Stop(); if (e.StylusDevice != null) C.PinDetails(this); else C.ShowDetails(this); };
             MouseRightButtonUp += (o, e) => { hover.Stop(); C.ShowMenu(this); e.Handled = true; };
         }
 
@@ -182,7 +187,8 @@ namespace AIMeter
         private Button MiniButton(string glyph, string tip, Action click)
         {
             var b = Ui.IconButton(glyph, tip, (o, e) => { hover.Stop(); click(); });
-            b.Width = 18; b.Height = 15; b.FontSize = 8;
+            // As large as the compact overlay allows, for a fingertip; the glyph stays small.
+            b.Width = 24; b.Height = 18; b.FontSize = 8;
             b.Cursor = Cursors.Arrow;
             System.Windows.Automation.AutomationProperties.SetName(b, tip);
             return b;
@@ -214,7 +220,7 @@ namespace AIMeter
         }
     }
 
-    /// <summary>Flyout panel: from the notification area (with focus) or when hovering over the pill (without).</summary>
+    /// <summary>Flyout panel: from the notification area (with focus), when hovering over the overlay (without) or tapping it (with).</summary>
     internal sealed class Flyout : Window
     {
         private readonly Controller C;
@@ -260,15 +266,19 @@ namespace AIMeter
             DockPanel.SetDock(footer, Dock.Bottom);
             root.Children.Add(footer);
 
-            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = body, Focusable = false };
+            var scroll = Ui.TouchScroll(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = body, Focusable = false });
             root.Children.Add(scroll);
             Content = root;
+            Ui.ToolTipsOnHold(this);
 
             Deactivated += (o, e) => { if (!HoverMode) Hide(); };
             IsVisibleChanged += (o, e) => { if (!IsVisible) TaskbarMode = false; };
             SizeChanged += (o, e) => { if (IsVisible && e.HeightChanged && bottomEdge.HasValue) Top = bottomEdge.Value - e.NewSize.Height; };
             MouseEnter += (o, e) => C.CancelHideDetails();
-            MouseLeave += (o, e) => { if (HoverMode) C.ScheduleHideDetails(); };
+            // A finger lifted from the panel is not the pointer leaving it; touching a panel opened by hovering keeps it
+            // open, and the touch gives it focus, so it closes like a pinned panel when focus moves elsewhere.
+            MouseLeave += (o, e) => { if (HoverMode && e.StylusDevice == null) C.ScheduleHideDetails(); };
+            PreviewStylusDown += (o, e) => { if (HoverMode) { HoverMode = false; C.CancelHideDetails(); } };
         }
 
         public void Render(Snapshot s)
@@ -307,12 +317,15 @@ namespace AIMeter
             Animate(edge == 1 ? -16 : 16);
         }
 
-        /// <summary>Opening next to the pill, without taking focus.</summary>
-        public void ShowNear(Window anchor)
+        /// <summary>
+        /// Opening next to the overlay: on hover, without taking focus, closing when the pointer leaves; after a tap,
+        /// with focus (the tap was this app's input, so Windows allows it), closing when focus moves elsewhere.
+        /// </summary>
+        public void ShowNear(Window anchor, bool focus)
         {
-            HoverMode = true;
+            HoverMode = !focus;
             MaxHeight = SystemParameters.WorkArea.Height - 24;
-            ShowActivated = false;
+            ShowActivated = focus;
             Show();
             UpdateLayout();
             var wa = SystemParameters.WorkArea;
@@ -320,6 +333,7 @@ namespace AIMeter
             Left = Math.Max(wa.Left + 12, Math.Min(anchor.Left + anchor.ActualWidth - ActualWidth, wa.Right - ActualWidth - 12));
             bottomEdge = below ? (double?)null : anchor.Top - 8;
             Top = below ? anchor.Top + anchor.ActualHeight + 8 : anchor.Top - ActualHeight - 8;
+            if (focus) { Activate(); Native.SetForegroundWindow(new WindowInteropHelper(this).Handle); }
             Animate(below ? -8 : 8);
         }
 
@@ -331,9 +345,10 @@ namespace AIMeter
         {
             HoverMode = false;
             MaxHeight = SystemParameters.WorkArea.Height - 24;
-            // No activation: the taskbar pill does not take focus, so Windows might deny it to the panel too.
-            // It closes when clicking elsewhere (another app comes to the foreground) or on the pill again.
-            ShowActivated = false;
+            // The pill never takes focus, but the click or tap on it was this app's input, so Windows lets the panel
+            // take it: the panel then closes on a click or tap anywhere else, like the system flyouts. Should Windows
+            // refuse, it still closes when another app comes to the foreground, or on the pill again.
+            ShowActivated = true;
             Show();
             TaskbarMode = true;
             UpdateLayout();
@@ -341,6 +356,8 @@ namespace AIMeter
             Left = fromLeft ? wa.Left + 12 : wa.Right - ActualWidth - 12;
             bottomEdge = wa.Bottom - 12;
             Top = wa.Bottom - ActualHeight - 12;
+            Activate();
+            Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
             slide.BeginAnimation(TranslateTransform.YProperty, null);
             slide.Y = 0;
             Animate(fromLeft ? -28 : 28, TranslateTransform.XProperty);

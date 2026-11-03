@@ -47,6 +47,7 @@ namespace AIMeter
         private string lastSignature;
         private string limitKeys;
         private DateTime flyoutHiddenAt;
+        private DateTime pillPressedAt;
         private readonly DispatcherTimer hideDetails = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         private Native.WinEventProc foregroundProc;   // Keep the delegate alive whilst the hook can call it.
         private bool fullscreenBusy;

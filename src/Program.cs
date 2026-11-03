@@ -28,6 +28,10 @@ namespace AIMeter
             Native.EnablePerMonitorDpi();
             Native.SetAppId("AIMeter.App");
             AppContext.SetSwitch("Switch.System.Windows.DoNotScaleForDpiChanges", false);
+            // Touch and pen through the Windows pointer messages (WM_POINTER) instead of the older WISP stack, which
+            // did not reliably bring taps and finger drags to WPF. The executable sets the same switch in
+            // AIMeter.exe.config (build.ps1).
+            AppContext.SetSwitch("Switch.System.Windows.Input.Stylus.EnablePointerSupport", true);
             Program.Run(args);
         }
     }

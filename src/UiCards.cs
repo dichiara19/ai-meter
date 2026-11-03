@@ -431,13 +431,16 @@ namespace AIMeter
         /// <summary>A clickable summary line with a chevron that shows or hides the rows below it.</summary>
         private static FrameworkElement FoldRow(string text, bool open, Action toggle, Thickness margin)
         {
-            var row = new DockPanel { Background = Brushes.Transparent, Cursor = Cursors.Hand, Margin = margin };
+            // At least 24 high, so a fingertip can hit the full-width row.
+            var row = new DockPanel { Background = Brushes.Transparent, Cursor = Cursors.Hand, Margin = margin, MinHeight = 24 };
             var chev = Glyph(open ? "" : "", 9, "Text3");
             chev.Width = 18;
             chev.HorizontalAlignment = HorizontalAlignment.Left;
             DockPanel.SetDock(chev, Dock.Left);
             row.Children.Add(chev);
-            row.Children.Add(Text(text, 11.5, "Text2"));
+            var label = Text(text, 11.5, "Text2");
+            label.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(label);
             row.MouseLeftButtonUp += (o, e) => { toggle(); e.Handled = true; };
             return row;
         }

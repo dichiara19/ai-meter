@@ -133,7 +133,7 @@ namespace AIMeter
   <Style x:Key='IconButton' TargetType='Button'>
     <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
     <Setter Property='Foreground' Value='{DynamicResource Text2}'/>
-    <Setter Property='Width' Value='28'/><Setter Property='Height' Value='28'/>
+    <Setter Property='Width' Value='32'/><Setter Property='Height' Value='32'/>
     <Setter Property='FontFamily' Value='Segoe Fluent Icons, Segoe MDL2 Assets'/>
     <Setter Property='FontSize' Value='12'/>
     <Setter Property='Cursor' Value='Arrow'/>
