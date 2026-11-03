@@ -117,7 +117,7 @@ namespace AIMeter
         public bool ExtraActive;
         /// <summary>Today's, this week's and this month's spending in the active language.</summary>
         public Func<string> SpendNote;
-        /// <summary>Today's models used through this service, as reported by OpenCode and Pi.</summary>
+        /// <summary>Today's models used through this service, as reported by OpenCode, Pi, Kilo and Hermes.</summary>
         public List<ModelCost> TodayModels;
         /// <summary>Copy usage with additional windows, preserving the original provider response.</summary>
         public Usage With(IEnumerable<UsageWindow> extra)

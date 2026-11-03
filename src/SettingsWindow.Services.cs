@@ -136,7 +136,7 @@ namespace AIMeter
             if (usage.SpendNote != null || credits)
                 vis.Add(Row(null, L.T("Spend today, this week and this month"), null, RowToggle(s.Id, "*spend")));
             if (usage.TodayModels != null || credits)
-                vis.Add(Row(null, L.T("Models used today"), L.T("From OpenCode and Pi, with the cost they computed."), RowToggle(s.Id, "*models")));
+                vis.Add(Row(null, L.T("Models used today"), L.T("From OpenCode, Pi, Kilo and Hermes, with the cost they computed."), RowToggle(s.Id, "*models")));
             if (prov.Catalogue != null || (def != null && Json.Obj(def.Raw, "freeModels") != null))
                 vis.Add(Row(null, L.T("Free models"), L.T("From the service's public model list, with the date each one stops being free when announced."), RowToggle(s.Id, "*free")));
             if (vis.Count == 0) return;

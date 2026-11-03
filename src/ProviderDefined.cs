@@ -268,8 +268,9 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Expand token, JWT, environment, extra key ({key:slot}) and date ({date:utc}, today's UTC date as yyyy-MM-dd)
-        /// placeholders with optional URL and suffix filters.
+        /// Expand token, JWT, environment, extra key ({key:slot}) and date placeholders with optional URL and suffix
+        /// filters. Dates are UTC, as yyyy-MM-dd: {date:utc} is today, {date:utc-week} this week's Monday and
+        /// {date:utc-month} the first of this month, the periods SpendTracker uses for service-reported spending.
         /// </summary>
         private string Fill(string template, string token)
         {
@@ -286,6 +287,8 @@ namespace AIMeter
                 else if (src.StartsWith("env:")) v = ServiceDefinition.Env(src.Substring(4));
                 else if (src.StartsWith("key:")) v = SlotValue(src.Substring(4));
                 else if (src == "date:utc") v = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                else if (src == "date:utc-week" || src == "date:utc-month")
+                    v = SpendTracker.Start(src == "date:utc-week" ? "week" : "month", DateTime.Now, true).ToUniversalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                 else return m.Value;
                 v = v ?? "";
                 while (filters.Length > 0)
@@ -632,10 +635,24 @@ namespace AIMeter
         }
 
         /// <summary>The number at a path of the answer, or a number written in the definition, such as a documented limit.</summary>
+        /// <summary>
+        /// A number a definition names by path or as a literal. An object { "items", "value", "above" } adds up, over the
+        /// array at "items", what each item's "value" exceeds "above" by (0 when not given): Cloudflare's paid Neurons
+        /// are those beyond the free 10,000 of each day. An empty array is 0; a missing one is null.
+        /// </summary>
         private static double? Number(object doc, Dictionary<string, object> spec, string key)
         {
             object v;
             if (spec == null || !spec.TryGetValue(key, out v) || v == null) return null;
+            var over = v as Dictionary<string, object>;
+            if (over != null)
+            {
+                var items = JPath.Get(doc, Json.Str(over, "items")) as IList;
+                if (items == null) return null;
+                double above = Json.Num(over, "above") ?? 0, sum = 0;
+                foreach (var item in items) sum += Math.Max(0, (JPath.Num(JPath.Get(item, Json.Str(over, "value"))) ?? 0) - above);
+                return sum;
+            }
             var path = v as string;
             return path == null ? JPath.Num(v) : JPath.Num(JPath.Get(doc, path));
         }
