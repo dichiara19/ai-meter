@@ -10,13 +10,20 @@ namespace AIMeter
     internal partial class SettingsWindow
     {
         // ------------------------------------------------------------ AI apps connected through MCP
+
+        /// <summary>
+        /// The clients the page lists, installed or not. tools\MediaRenderer.cs points it at fixture folders, so the
+        /// README images show sample apps instead of the ones on the machine that renders them.
+        /// </summary>
+        internal static Func<List<McpClients.Client>> KnownApps =
+            () => McpClients.Known(Probe.Home, Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Probe.WslHomeUp);
+
         private void BuildApps()
         {
             Header(L.T("AI apps"));
             Hint(L.T("Connected apps and coding agents can ask AI Meter, through MCP, how much room your limits have, which sessions are running, which models are free and what you spent today. They only read: AI Meter never shares keys or tokens."));
 
-            var clients = McpClients.Known(Probe.Home, Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Probe.WslHomeUp)
-                .Where(c => c.Installed).ToList();
+            var clients = KnownApps().Where(c => c.Installed).ToList();
             var rows = new List<FrameworkElement>();
             foreach (var client in clients)
             {

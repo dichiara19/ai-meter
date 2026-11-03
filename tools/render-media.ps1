@@ -1,6 +1,6 @@
 ﻿# Regenerates the README images (docs\media) with the real interface components and the demo data.
 #   powershell -ExecutionPolicy Bypass -File tools\render-media.ps1 [-Lang en]
-# The GIF requires ffmpeg (on Windows or in WSL).
+# The GIFs require ffmpeg (on Windows or in WSL).
 param([string]$Lang = 'en')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -18,13 +18,16 @@ $src = @(Get-ChildItem (Join-Path $root 'src\*.cs') | ForEach-Object FullName) +
 Add-Type -Path $src -ReferencedAssemblies $refs
 Write-Host ([AIMeter.MediaRenderer]::Run($out, $frames, $Lang))
 
-# GIF: no alpha channel (so each frame stores only what changes), palette from the frames, infinite loop.
-$gif = Join-Path $out 'demo.gif'
+# GIFs: no alpha channel (so each frame stores only what changes), palette from the frames, infinite loop.
 $vf = 'fps=15,format=rgb24,split[a][b];[a]palettegen=max_colors=128:stats_mode=full:reserve_transparent=0[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle'
-if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
-    & ffmpeg -y -loglevel error -framerate 15 -i (Join-Path $frames 'f%03d.png') -vf $vf -loop 0 $gif
-} else {
-    $w = { param($p) '/mnt/' + $p.Substring(0, 1).ToLower() + $p.Substring(2).Replace('\', '/') }
-    & wsl.exe -e ffmpeg -y -loglevel error -framerate 15 -i ((& $w $frames) + '/f%03d.png') -vf $vf -loop 0 (& $w $gif)
+$w = { param($p) '/mnt/' + $p.Substring(0, 1).ToLower() + $p.Substring(2).Replace('\', '/') }
+function Encode([string]$dir, [string]$gif) {
+    if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+        & ffmpeg -y -loglevel error -framerate 15 -i (Join-Path $dir 'f%03d.png') -vf $vf -loop 0 $gif
+    } else {
+        & wsl.exe -e ffmpeg -y -loglevel error -framerate 15 -i ((& $w $dir) + '/f%03d.png') -vf $vf -loop 0 (& $w $gif)
+    }
 }
+Encode $frames (Join-Path $out 'demo.gif')
+Encode (Join-Path $frames 'apps') (Join-Path $out 'ai-apps.gif')
 Get-ChildItem $out | Select-Object Name, @{ n = 'KB'; e = { [math]::Round($_.Length / 1KB) } } | Format-Table -AutoSize

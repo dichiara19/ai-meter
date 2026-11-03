@@ -33,10 +33,31 @@ namespace AIMeter
             openai.Sessions.Add(new Session { Kind = "Codex · CLI", Title = "Migrate billing API to v2", Status = "busy", Model = "gpt-5.5-codex", Updated = now.AddSeconds(-45) });
             s.Providers.Add(openai);
 
-            var copilot = new ProviderState { Id = "copilot", Name = "Copilot", Plan = "pro", Usage = new Usage { Source = "live", At = now } };
-            var month = new DateTime(now.Year, now.Month, 1).AddMonths(1);
-            copilot.Usage.Windows.Add(new UsageWindow { Label = "Premium requests", Short = UsageWindow.ShortMonth, Used = 64, ResetsAt = month, StartedAt = month.AddMonths(-1) });
-            s.Providers.Add(copilot);
+            // Antigravity reports one limit per model group; the first group of each length is the main limit.
+            var antigravity = new ProviderState { Id = "antigravity", Name = "Antigravity", Plan = "pro", Usage = new Usage { Source = "live", At = now } };
+            var agSession = now.AddHours(1).AddMinutes(25);
+            var agWeek = now.Date.AddDays(4).AddHours(7);
+            antigravity.Usage.Windows.Add(new UsageWindow { Label = "Session 5 h", Suffix = "Gemini", Short = UsageWindow.ShortFiveHours, Used = 47, ResetsAt = agSession, StartedAt = agSession.AddHours(-5) });
+            antigravity.Usage.Windows.Add(new UsageWindow { Label = "Session 5 h", Suffix = "Claude + GPT", Short = "m", Used = 12, ResetsAt = agSession, StartedAt = agSession.AddHours(-5) });
+            antigravity.Usage.Windows.Add(new UsageWindow { Label = "Week", Suffix = "Gemini", Short = UsageWindow.ShortWeek, Used = 29, ResetsAt = agWeek, StartedAt = agWeek.AddDays(-7) });
+            antigravity.Usage.Windows.Add(new UsageWindow { Label = "Week", Suffix = "Claude + GPT", Short = "m", Used = 8, ResetsAt = agWeek, StartedAt = agWeek.AddDays(-7) });
+            s.Providers.Add(antigravity);
+
+            // A credit service: key limit, a monthly budget from provider-reported totals, period spending and today's models.
+            var openrouter = new ProviderState { Id = "openrouter", Name = "OpenRouter", Running = true, Usage = new Usage { Source = "live", At = now } };
+            var usd = new Money { Currency = "USD" };
+            var monthStart = new DateTime(now.Year, now.Month, 1);
+            openrouter.Usage.Windows.Add(new UsageWindow { Label = "Key limit", Short = "$", Used = 36.8, Spent = new Money { Used = 18.4, Limit = 50, Currency = "USD" } });
+            openrouter.Usage.Windows.Add(new UsageWindow { Label = "Monthly budget", Short = "$", Budget = true, Used = 61, Spent = new Money { Used = 18.3, Limit = 30, Currency = "USD" },
+                Amount = 18.3, AmountUnit = "USD", StartedAt = monthStart, ResetsAt = monthStart.AddMonths(1) });
+            openrouter.Usage.SpendNote = () => L.F("Spent: today {0} · this week {1} · this month {2}", usd.Format(1.42), usd.Format(6.85), usd.Format(18.3));
+            openrouter.Usage.TodayModels = new List<ModelCost>
+            {
+                new ModelCost { Model = "deepseek/deepseek-v4", Cost = 0.94, Tokens = 1840000, Replies = 37 },
+                new ModelCost { Model = "moonshotai/kimi-k3", Cost = 0.48, Tokens = 612000, Replies = 14 },
+            };
+            openrouter.Sessions.Add(new Session { Kind = "Pi", Title = "Translate the settings strings", Status = "busy", Model = "deepseek/deepseek-v4", Updated = now.AddSeconds(-30) });
+            s.Providers.Add(openrouter);
 
             var local = new ProviderState { Id = "local", Name = L.T("Local models"), Running = true, GpuTotal = 16L << 30, GpuUsed = (long)(11.4 * (1 << 30)), Models = new List<LocalModel>() };
             var qwen = new LocalModel

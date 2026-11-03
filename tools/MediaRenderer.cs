@@ -47,7 +47,8 @@ namespace AIMeter
             Save(ToastShot(snap), IOPath.Combine(outDir, "notification.png"), 2);
             Save(SocialPreview(snap), IOPath.Combine(outDir, "social-preview.png"), 1);
             int frames = GifFrames(snap, framesDir);
-            return "ok, " + frames + " frames";
+            int appFrames = AppsMedia(outDir, IOPath.Combine(framesDir, "apps"));
+            return "ok, " + frames + " + " + appFrames + " frames";
         }
 
         private static void SetTheme(bool dark)
@@ -96,6 +97,17 @@ namespace AIMeter
         /// <summary>Compose the actual flyout controls with a simulated compositor backdrop.</summary>
         private static FrameworkElement Panel(Snapshot s, bool dark, Rect onDesk)
         {
+            TranslateTransform scroll;
+            double maxScroll;
+            return Panel(s, dark, onDesk, double.PositiveInfinity, out scroll, out maxScroll);
+        }
+
+        /// <summary>
+        /// Like the real flyout, a panel taller than maxHeight keeps its header and footer and scrolls its cards:
+        /// moving <paramref name="scroll"/> up by at most <paramref name="maxScroll"/> pixels reveals the rest.
+        /// </summary>
+        private static FrameworkElement Panel(Snapshot s, bool dark, Rect onDesk, double maxHeight, out TranslateTransform scroll, out double maxScroll)
+        {
             var root = new DockPanel { Margin = new Thickness(12, 10, 12, 12) };
             var header = new DockPanel { Height = 36 };
             var settings = Ui.IconButton("", L.T("Settings"), (o, e) => { });
@@ -122,7 +134,25 @@ namespace AIMeter
                 card.Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 8, 0, 0);
                 body.Children.Add(card);
             }
-            root.Children.Add(body);
+            scroll = new TranslateTransform();
+            body.RenderTransform = scroll;
+            var viewport = new Border { Child = body, ClipToBounds = true };
+            root.Children.Add(viewport);
+            root.Measure(new Size(344, double.PositiveInfinity));
+            maxScroll = Math.Max(0, root.DesiredSize.Height - maxHeight);
+            if (maxScroll > 0)
+            {
+                viewport.Height = body.DesiredSize.Height - maxScroll;
+                // A canvas arranges the cards at their full height, so WPF's layout clip does not cut them at the viewport.
+                double bodyWidth = body.DesiredSize.Width;
+                viewport.Child = null;
+                body.Width = bodyWidth;
+                var canvas = new Canvas();
+                canvas.Children.Add(body);
+                viewport.Child = canvas;
+                // Measure would otherwise reuse the cached size: the root's constraint is unchanged.
+                root.InvalidateMeasure();
+            }
             return Glass(root, dark, onDesk, 344);
         }
 
@@ -226,9 +256,18 @@ namespace AIMeter
         /// <summary>Place the actual dashboard on the same synthetic desktop used by the existing release images.</summary>
         internal static FrameworkElement HistoryShot(FrameworkElement content, bool dark)
         {
+            return WindowShot(content, dark, 1160, 860, "Usage history · Sample data");
+        }
+
+        /// <summary>
+        /// Frame a window's content with a Mica-like backdrop and caption buttons on the synthetic desktop,
+        /// with a caption below it naming the screen and stating that the data is invented.
+        /// </summary>
+        private static Canvas WindowShot(FrameworkElement content, bool dark, int windowWidth, int windowHeight, string what)
+        {
             if (wallpaper == null) wallpaper = Wallpaper(false);
             if (wallpaperBlur == null) wallpaperBlur = Wallpaper(true);
-            const int sceneWidth = 1280, sceneHeight = 1000, windowWidth = 1160, windowHeight = 860;
+            int sceneWidth = windowWidth + 120, sceneHeight = windowHeight + 140;
             var scene = new Canvas { Width = sceneWidth, Height = sceneHeight, ClipToBounds = true };
             scene.Children.Add(Crop(wallpaper, new Rect(320, 40, sceneWidth, sceneHeight)));
             content.Width = windowWidth; content.Height = windowHeight;
@@ -247,8 +286,8 @@ namespace AIMeter
             outline.SetResourceReference(Border.BorderBrushProperty, "CardStroke");
             outline.Effect = new DropShadowEffect { BlurRadius = 32, ShadowDepth = 8, Direction = 270, Opacity = dark ? 0.55 : 0.28, Color = Colors.Black };
             Canvas.SetLeft(outline, 60); Canvas.SetTop(outline, 60); scene.Children.Add(outline);
-            var caption = Plain("AI Meter " + Controller.Version + " · Usage history · Sample data", 13); caption.Opacity = 0.8;
-            Canvas.SetLeft(caption, 64); Canvas.SetTop(caption, 958); scene.Children.Add(caption);
+            var caption = Plain("AI Meter " + Controller.Version + " · " + what, 13); caption.Opacity = 0.8;
+            Canvas.SetLeft(caption, 64); Canvas.SetTop(caption, sceneHeight - 42); scene.Children.Add(caption);
             return scene;
         }
 
@@ -256,12 +295,13 @@ namespace AIMeter
         private sealed class Scene
         {
             public const int W = 640, H = 1080;
-            public double PanelOffset = double.NaN, PanelOpacity, ToastOffset = double.NaN, ToastOpacity;
+            public double PanelOffset = double.NaN, PanelOpacity, PanelScroll, ToastOffset = double.NaN, ToastOpacity;
             public Point? Mouse;
             public bool Hover;
         }
 
         private static Rect pillRect;
+        private static TranslateTransform panelScroll;
 
         private static FrameworkElement Compose(Snapshot s, Scene sc, FrameworkElement panel, FrameworkElement toast)
         {
@@ -273,6 +313,7 @@ namespace AIMeter
             if (panel != null && !double.IsNaN(sc.PanelOffset))
             {
                 panel.Opacity = sc.PanelOpacity;
+                if (panelScroll != null) panelScroll.Y = -sc.PanelScroll;
                 Canvas.SetLeft(panel, Scene.W - 344 - 12);
                 Canvas.SetTop(panel, Scene.H - BarH - 12 - panel.Height + sc.PanelOffset);
                 c.Children.Add(panel);
@@ -300,7 +341,10 @@ namespace AIMeter
             var panel = Panel(s, dark, onDesk);
             double h = ((Grid)panel).Height;
             var c = new Canvas { Width = 344 + 96, Height = h + 96, ClipToBounds = true };
-            c.Children.Add(Crop(wallpaper, new Rect(DeskW - 344 - 108, 12, 344 + 96, Math.Min(DeskH - 12, h + 96))));
+            // A panel listing every card can be taller than the desktop: stretch the abstract backdrop to fit.
+            var backdrop = Crop(wallpaper, new Rect(DeskW - 344 - 108, 12, 344 + 96, Math.Min(DeskH - 12, h + 96)));
+            backdrop.Height = h + 96;
+            c.Children.Add(backdrop);
             Canvas.SetLeft(panel, 48); Canvas.SetTop(panel, 40);
             c.Children.Add(panel);
             return c;
@@ -395,13 +439,15 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Animate the taskbar pill, a low-quota notification, the pointer click and the open panel.
-        /// Render at 15 frames per second for approximately nine seconds.
+        /// Animate the taskbar pill, a low-quota notification, the pointer click and the open panel, which scrolls
+        /// to its last card when it is taller than the work area. Render at 15 frames per second for about 13 seconds.
         /// </summary>
         private static int GifFrames(Snapshot s, string dir)
         {
             foreach (var f in Directory.GetFiles(dir, "f*.png")) File.Delete(f);
-            var panel = Panel(s, true, new Rect(DeskW - 356, DeskH - BarH - 960, 344, 0));
+            // The real flyout is at most the work area's height minus 24 pixels and sits 12 pixels above the taskbar.
+            double maxScroll;
+            var panel = Panel(s, true, new Rect(DeskW - 356, 12, 344, 0), Scene.H - BarH - 24, out panelScroll, out maxScroll);
             var toast = Toast(s, new Rect(DeskW - 376, DeskH - BarH - 160, 364, 0));
             var timeline = new List<Scene>();
             Func<double, double> ease = t => 1 - Math.Pow(1 - Math.Max(0, Math.Min(1, t)), 3);
@@ -425,7 +471,21 @@ namespace AIMeter
             }
             for (int i = 0; i < 4; i++) timeline.Add(new Scene { Mouse = target, Hover = true });
             for (int i = 0; i < 6; i++) timeline.Add(new Scene { Mouse = target, Hover = true, PanelOffset = 40 * (1 - ease(i / 5.0)), PanelOpacity = ease(i / 5.0) });
-            for (int i = 0; i < 45; i++) timeline.Add(new Scene { Mouse = i < 8 ? (Point?)target : null, Hover = i < 8, PanelOffset = 0, PanelOpacity = 1 });
+            for (int i = 0; i < 22; i++) timeline.Add(new Scene { Mouse = i < 8 || maxScroll > 0 ? (Point?)target : null, Hover = i < 8 || maxScroll > 0, PanelOffset = 0, PanelOpacity = 1 });
+            if (maxScroll > 0)
+            {
+                // Bring the pointer over the cards, scroll to the last one, then hold.
+                var over = new Point(Scene.W - 356 + 220, Scene.H * 0.5);
+                Func<double, double> smooth = t => t * t * (3 - 2 * t);
+                for (int i = 0; i <= 10; i++)
+                {
+                    double t = ease(i / 10.0);
+                    timeline.Add(new Scene { Mouse = new Point(target.X + (over.X - target.X) * t, target.Y + (over.Y - target.Y) * t), Hover = i < 2, PanelOffset = 0, PanelOpacity = 1 });
+                }
+                for (int i = 0; i <= 30; i++) timeline.Add(new Scene { Mouse = over, PanelOffset = 0, PanelOpacity = 1, PanelScroll = maxScroll * smooth(i / 30.0) });
+                for (int i = 0; i < 40; i++) timeline.Add(new Scene { Mouse = i < 10 ? (Point?)over : null, PanelOffset = 0, PanelOpacity = 1, PanelScroll = maxScroll });
+            }
+            else for (int i = 0; i < 23; i++) timeline.Add(new Scene { PanelOffset = 0, PanelOpacity = 1 });
 
             int n = 0;
             foreach (var sc in timeline)
@@ -435,6 +495,156 @@ namespace AIMeter
                 frame.Children.Clear();   // Reuse the panel and notification in the following frame.
             }
             return n;
+        }
+
+        // Settings → AI apps.
+        // The page is the real one, listing sample clients from fixture folders: which apps it finds and what their
+        // files contain come from the fixture, never from the PC that renders the images.
+        private const string SampleHome = @"C:\Users\you", SampleWslHome = @"\\wsl.localhost\Ubuntu\home\you";
+        private const string SampleRelay = @"C:\Users\you\AppData\Roaming\AIMeter\mcp.ps1";
+        private const int AppsWidth = 1000, AppsHeight = 740;
+
+        /// <summary>Render the AI apps page in both themes and the frames of a GIF that connects two apps and copies a command.</summary>
+        private static int AppsMedia(string outDir, string framesDir)
+        {
+            string root = IOPath.Combine(IOPath.GetTempPath(), "aimeter-apps-" + Guid.NewGuid().ToString("N"));
+            string home = IOPath.Combine(root, "home"), appData = IOPath.Combine(home, @"AppData\Roaming"), wsl = IOPath.Combine(root, "wsl");
+            var previous = SettingsWindow.KnownApps;
+            try
+            {
+                // Installed: Claude Desktop, VS Code, Claude Code, Codex and OpenCode on Windows; Claude Code and Pi in WSL.
+                Directory.CreateDirectory(IOPath.Combine(appData, "Claude"));
+                Directory.CreateDirectory(IOPath.Combine(appData, @"Code\User"));
+                Directory.CreateDirectory(IOPath.Combine(home, ".codex"));
+                Directory.CreateDirectory(IOPath.Combine(home, @".config\opencode"));
+                Directory.CreateDirectory(IOPath.Combine(wsl, @".pi\agent"));
+                File.WriteAllText(IOPath.Combine(home, ".claude.json"), "{}");
+                File.WriteAllText(IOPath.Combine(wsl, ".claude.json"), "{}");
+                SettingsWindow.KnownApps = () => McpClients.Known(home, appData, wsl);
+                Func<string, string, McpClients.Client> client = (id, where) => SettingsWindow.KnownApps().First(c => c.Id == id && c.Where == where);
+                McpClients.Connect(client("claude-desktop", "Windows"), SampleRelay);
+                Action<FrameworkElement> sample = el => { ReplaceText(el, wsl, SampleWslHome); ReplaceText(el, home, SampleHome); };
+
+                var controller = new Controller(false, null, null);
+                typeof(Controller).GetProperty("Settings").SetValue(controller, S, null);
+                foreach (var dark in new[] { true, false })
+                {
+                    SetTheme(dark);
+                    var content = AppsPage(controller, sample);
+                    Save(WindowShot(content, dark, AppsWidth, AppsHeight, "AI apps · Sample apps and paths"), IOPath.Combine(outDir, dark ? "ai-apps-dark.png" : "ai-apps-light.png"), 2);
+                }
+                SetTheme(true);
+                return AppsFrames(controller, sample, framesDir, () => McpClients.Connect(client("claude-code", "Windows"), SampleRelay),
+                                  () => McpClients.Connect(client("codex", "Windows"), SampleRelay));
+            }
+            finally
+            {
+                SettingsWindow.KnownApps = previous;
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        /// <summary>The Settings window's content open on AI apps, detached from its window so that it can be framed.</summary>
+        private static FrameworkElement AppsPage(Controller controller, Action<FrameworkElement> sample)
+        {
+            var window = new SettingsWindow(controller);
+            window.Open("apps");
+            var content = (FrameworkElement)window.Content;
+            window.Content = null;
+            content.Tag = window;
+            sample(content);
+            return content;
+        }
+
+        /// <summary>
+        /// Connect Claude Code and Codex with their switches, then scroll to the command line and copy Codex's WSL command.
+        /// Each click rebuilds the page from the fixture files, as the real switch does after editing the app's file.
+        /// </summary>
+        private static int AppsFrames(Controller controller, Action<FrameworkElement> sample, string dir, Action connectClaudeCode, Action connectCodex)
+        {
+            Directory.CreateDirectory(dir);
+            foreach (var f in Directory.GetFiles(dir, "f*.png")) File.Delete(f);
+            var content = AppsPage(controller, sample);
+            var window = (SettingsWindow)content.Tag;
+            var scene = WindowShot(content, true, AppsWidth, AppsHeight, "AI apps · Sample apps and paths");
+            var scroll = (ScrollViewer)typeof(SettingsWindow).GetField("scroll", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(window);
+            var cursor = Cursor();
+            scene.Children.Add(cursor);
+            Func<double, double> ease = t => t * t * (3 - 2 * t);
+            Point mouse = new Point(560, 300);
+            int n = 0;
+            Action frame = () =>
+            {
+                Canvas.SetLeft(cursor, mouse.X); Canvas.SetTop(cursor, mouse.Y);
+                Save(scene, IOPath.Combine(dir, "f" + (n++).ToString("D3") + ".png"), 1);
+            };
+            Action<int> hold = count => { for (int i = 0; i < count; i++) frame(); };
+            Action<Point, int> move = (to, count) =>
+            {
+                var from = mouse;
+                for (int i = 1; i <= count; i++) { double t = ease(i / (double)count); mouse = new Point(from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t); frame(); }
+            };
+            // The scene places the window's content 60 pixels from its top-left corner.
+            Func<FrameworkElement, Point> centre = el =>
+            {
+                scene.UpdateLayout();
+                var p = el.TranslatePoint(new Point(el.ActualWidth / 2, el.ActualHeight / 2), content);
+                return new Point(60 + p.X - 2, 60 + p.Y - 4);
+            };
+            Action rebuild = () =>
+            {
+                double offset = scroll.VerticalOffset;
+                window.Build(); sample(content); scene.UpdateLayout();
+                scroll.ScrollToVerticalOffset(offset); scene.UpdateLayout();
+            };
+
+            hold(15);
+            move(centre(RowControl(content, "Claude Code", 0)), 14);
+            hold(3); connectClaudeCode(); rebuild(); hold(14);
+            move(centre(RowControl(content, "Codex", 0)), 10);
+            hold(3); connectCodex(); rebuild(); hold(14);
+
+            // Scroll to "From the command line", as a mouse wheel would.
+            move(new Point(mouse.X - 120, mouse.Y + 40), 6);
+            scene.UpdateLayout();
+            double end = scroll.ScrollableHeight;
+            for (int i = 1; i <= 18; i++) { scroll.ScrollToVerticalOffset(end * ease(i / 18.0)); scene.UpdateLayout(); frame(); }
+            hold(4);
+            var copy = (Button)((Panel)RowControl(content, "Codex", 1)).Children[1];
+            move(centre(copy), 10);
+            hold(3); SettingsWindow.ShowCopied(copy, TimeSpan.FromSeconds(30)); scene.UpdateLayout(); hold(4);
+            // Step aside so that the confirmation on the button can be read.
+            move(new Point(mouse.X + 40, mouse.Y + 46), 6);
+            hold(26);
+            return n;
+        }
+
+        /// <summary>The control of the index-th Settings row titled <paramref name="title"/>, in page order.</summary>
+        private static FrameworkElement RowControl(DependencyObject root, string title, int index)
+        {
+            var rows = new List<Grid>();
+            FindRows(root, title, rows);
+            return rows[index].Children.OfType<FrameworkElement>().First(c => Grid.GetColumn(c) == 2);
+        }
+
+        private static void FindRows(DependencyObject node, string title, List<Grid> rows)
+        {
+            var text = node as TextBlock;
+            if (text != null && text.Text == title)
+            {
+                var texts = LogicalTreeHelper.GetParent(text) as StackPanel;
+                var row = texts == null ? null : LogicalTreeHelper.GetParent(texts) as Grid;
+                if (row != null && row.Children.OfType<FrameworkElement>().Any(c => Grid.GetColumn(c) == 2)) rows.Add(row);
+            }
+            foreach (var child in LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>()) FindRows(child, title, rows);
+        }
+
+        /// <summary>Replace a fixture path in every text of the page with the sample path shown in its place.</summary>
+        private static void ReplaceText(DependencyObject node, string from, string to)
+        {
+            var text = node as TextBlock;
+            if (text != null && text.Text.Contains(from)) text.Text = text.Text.Replace(from, to);
+            foreach (var child in LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>()) ReplaceText(child, from, to);
         }
 
         // Rendering and encoding.

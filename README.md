@@ -13,7 +13,7 @@
 
 </div>
 
-<p align="center"><img src="docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip: Claude, ChatGPT and Copilot limits and a local model loaded in Ollama"></p>
+<p align="center"><img src="docs/media/hero-taskbar.png" alt="The AI Meter pill inside the Windows 11 taskbar, with its tooltip: Claude, ChatGPT, Antigravity and OpenRouter limits and a local model loaded in Ollama"></p>
 
 That's all of it, most of the time: a pill **inside** the taskbar. No widget to arrange, no window stuck on top of your work. Hover for the summary, click for everything.
 
@@ -26,7 +26,7 @@ That's all of it, most of the time: a pill **inside** the taskbar. No widget to 
 - **Your subscriptions, before the wall.** Claude, ChatGPT / Codex, GitHub Copilot, Google Antigravity, Cursor, OpenRouter, Cloudflare Workers AI, Vercel AI Gateway, Experiential Labs, DeepSeek, Kimi, plus, for the AI apps you connect, the model lists of NVIDIA API Catalog and Gemini API. For the services with limits: 5-hour and weekly limits, a forecast ("at this pace it runs out at 15:40"), a notification at 20% and 5% that tells you which service still has room, and a tip before a reset when part of a limit would go unused. Pick which limit each service shows in the pill, and get notified whenever the limits you choose reset.
 - **Private and open.** No telemetry; the only network requests are each service's own usage endpoint. Apache 2.0 licensed, and a new service is a [20-line JSON file](docs/PROVIDERS.md).
 
-<p align="center"><img src="docs/media/demo.gif" alt="A notification warns that the Claude session is running low, then a click on the pill opens the panel with every service, local models and agents" width="440"></p>
+<p align="center"><img src="docs/media/demo.gif" alt="A notification warns that the Claude session is running low, then a click on the pill opens the panel, which scrolls through Claude, ChatGPT, Antigravity, OpenRouter with its budget and today's models, local models and agents" width="440"></p>
 
 <table>
 <tr>
@@ -81,6 +81,13 @@ Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now,
 | **AI apps (MCP)** | Claude Desktop, Claude Code, Codex, Antigravity CLI, Hermes, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's MCP server, which changes nothing except its own `leases.json` when coding agents lease capacity. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
 | **Delegation (preview)** | A plugin for Claude Code and Codex hands self-contained tasks to a coding agent you already have (Pi or OpenCode) on a free model that AI Meter finds has room. Read-only by default; changes go to a new Git worktree. [Details](plugins/ai-meter/README.md). |
 | **Usage history** | Local quota cycles, spending, session tokens, models and tools, daily totals and consumption signals. Optional feedback records whether the result was worth the consumption. Open from the notification-area menu or Settings → Usage history. |
+
+<p align="center"><img src="docs/media/ai-apps.gif" alt="Settings, AI apps: switching on Claude Code and Codex, which then read AI Meter through MCP, and copying the command that adds AI Meter to Codex in WSL" width="720"></p>
+
+<details>
+<summary>See the AI apps page in the light theme</summary>
+<p align="center"><img src="docs/media/ai-apps-light.png" alt="The AI apps page in the light theme: apps found on the PC, each with its configuration file and a switch"></p>
+</details>
 
 For each service: remaining share of the **5-hour** and **weekly** limits with reset times, plus the active sessions with title, model and status.
 
