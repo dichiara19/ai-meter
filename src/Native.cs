@@ -461,16 +461,17 @@ namespace AIMeter
             catch (InvalidCastException) { }
         }
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetCurrentPackageFullName(ref int length, StringBuilder name);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetCurrentPackagePath(ref int length, StringBuilder path);
 
-        private static int packaged = -1;
+        private const int NoPackage = 0, OwnPackage = 1, ForeignPackage = 2;
+        private static int packageIdentity = -1;
 
 #if AIMETER_TEST
         /// <summary>Test seam: when set, replaces the package-identity check so tests can exercise the packaged branches.</summary>
         internal static bool? PackagedOverride;
 #endif
 
-        /// <summary>True if the app runs from the MSIX package (Microsoft Store), i.e. it has a package identity.</summary>
+        /// <summary>True if the app runs from its own MSIX package (Microsoft Store).</summary>
         public static bool IsPackaged
         {
             get
@@ -478,13 +479,44 @@ namespace AIMeter
 #if AIMETER_TEST
                 if (PackagedOverride.HasValue) return PackagedOverride.Value;
 #endif
-                if (packaged < 0)
+                return PackageIdentity == OwnPackage;
+            }
+        }
+
+        /// <summary>
+        /// True if this copy of AI Meter, installed outside any package, was started inside another app's package, such
+        /// as the Claude app's. It then has that package's identity and file-system virtualisation.
+        /// </summary>
+        public static bool InForeignPackage
+        {
+            get
+            {
+#if AIMETER_TEST
+                if (PackagedOverride.HasValue) return false;
+#endif
+                return PackageIdentity == ForeignPackage;
+            }
+        }
+
+        /// <summary>
+        /// The package identity of this process. A process has one when it runs from a package, or when a packaged app
+        /// started it inside its package; only in the first case is AI Meter's own code in the package's folder.
+        /// </summary>
+        private static int PackageIdentity
+        {
+            get
+            {
+                if (packageIdentity >= 0) return packageIdentity;
+                try
                 {
                     int n = 0;
-                    try { packaged = GetCurrentPackageFullName(ref n, null) == 15700 /* APPMODEL_ERROR_NO_PACKAGE */ ? 0 : 1; }
-                    catch (EntryPointNotFoundException) { packaged = 0; }
+                    if (GetCurrentPackagePath(ref n, null) == 15700 /* APPMODEL_ERROR_NO_PACKAGE */) return packageIdentity = NoPackage;
+                    var path = new StringBuilder(n);
+                    if (GetCurrentPackagePath(ref n, path) != 0) return packageIdentity = ForeignPackage;
+                    string folder = path.ToString().TrimEnd('\\') + "\\";
+                    return packageIdentity = AppDomain.CurrentDomain.BaseDirectory.StartsWith(folder, StringComparison.OrdinalIgnoreCase) ? OwnPackage : ForeignPackage;
                 }
-                return packaged == 1;
+                catch (EntryPointNotFoundException) { return packageIdentity = NoPackage; }
             }
         }
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string title);
