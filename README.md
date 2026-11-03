@@ -187,6 +187,7 @@ src/CodingAgents.cs    sessions of terminal coding agents (OpenCode, Pi, Gemini 
 src/RunningAgents.cs   session folders named by running Pi processes (Windows and WSL /proc)
 src/McpServer.cs       MCP server on a per-user named pipe, with its tools (only leases write)
 src/McpClients.cs      AI apps that can use it, their config edits, and the mcp.ps1 relay they start
+src/JsonText.cs        indented JSON for config files and MCP tool text
 src/GpuMemory.cs       video memory per process from the Windows GPU counters
 src/Forecast.cs        when each limit runs out at the current pace; low-limit and reset notifications, tips
 src/HistoryCollector.cs incremental, read-only local usage capture
