@@ -186,7 +186,7 @@ jobs:
           }
           # The overall result counts only the required tests; optional ones, such as Blocked executables (AI Meter
           # starts cmd, PowerShell and WSL by design), are informational and do not affect Store onboarding.
-          if ($overall -ne 'PASS') { throw "The Windows App Certification Kit result is $overall: see the AIMeter-wack artifact." }
+          if ($overall -ne 'PASS') { throw "The Windows App Certification Kit result is ${overall}: see the AIMeter-wack artifact." }
 
       - uses: actions/upload-artifact@v7
         if: always()
