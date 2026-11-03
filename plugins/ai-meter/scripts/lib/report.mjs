@@ -26,6 +26,7 @@ export function full(job, jobsFolder) {
   if (job.estimated) report.estimated = job.estimated;
   if (job.best_effort_available) report.best_effort_available = job.best_effort_available;
   if (job.worktree) report.worktree = job.worktree;
+  if (job.snapshot?.secrets_left_out?.length) report.secret_files_left_out = job.snapshot.secrets_left_out;
   if (job.skipped?.length) report.skipped = job.skipped;
   if (job.excluded) report.excluded = job.excluded;
   if (job.runtimes) report.runtimes = job.runtimes;

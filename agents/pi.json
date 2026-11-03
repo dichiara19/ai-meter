@@ -27,6 +27,9 @@
       "rate_limited": "an errorMessage that contains 429",
       "cost": "usage.cost.total of each assistant message, priced by Pi from its own model list: above 0, the request was priced as paid; 0 does not prove a free request"
     },
-    "notes": ["Pi sends about 4,600 tokens of system prompt with every request."]
+    "notes": [
+      "Pi sends about 4,600 tokens of system prompt with every request.",
+      "Pi has no permission rules: read_only gives it only its reading tools, which can still read any path named to them, so a task should not name paths outside the workspace."
+    ]
   }
 }

@@ -6,8 +6,9 @@
 //
 // Each job is a folder under the jobs folder (~/.aimeter/jobs, or AI_METER_JOBS): job.json (the state, written only
 // by the worker, apart from a worker that died), task.txt, events.jsonl (the agent's output) and stderr.txt. A
-// "cancel" file asks the worker to stop the agent. Folders of ended jobs are removed after a week; the worktrees of
-// tasks that changed files live elsewhere and are never removed by the plugin.
+// "cancel" file asks the worker to stop the agent. Folders of ended jobs are removed after a week. A read-only task
+// works in a snapshot next to the jobs folder, removed when the task ends; the worktrees of tasks that changed files
+// live there too and are never removed by the plugin (workspace.mjs).
 
 import { spawn, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -17,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canRead, readerFor, summarise } from "./agents.mjs";
 import { place, ToolError, withMeter } from "./meter.mjs";
-import { createWorktree, describeChanges, repositoryOf } from "./workspace.mjs";
+import { createSnapshot, createWorktree, describeChanges, removeSnapshot, repositoryOf } from "./workspace.mjs";
 
 const ENDED = new Set(["completed", "failed", "cancelled", "timed_out"]);
 const KEEP_DAYS = 7;
@@ -27,6 +28,7 @@ export const MAXIMUM_TIMEOUT_SECONDS = 7000;   // A lease lasts at most 7200 s, 
 
 export const root = () => process.env.AI_METER_JOBS || join(homedir(), ".aimeter", "jobs");
 const worktrees = () => join(dirname(root()), "worktrees");
+const snapshots = () => join(dirname(root()), "snapshots");
 const folderOf = (id) => join(root(), id);
 
 export function load(id) {
@@ -71,7 +73,7 @@ export function start(options) {
   if (!options.workspace || !existsSync(options.workspace)) throw new Error("workspace must be an existing folder: " + options.workspace);
   const mode = options.mode || "read_only";
   if (mode !== "read_only" && mode !== "modify") throw new Error("mode must be read_only or modify.");
-  if (mode === "modify") repositoryOf(options.workspace);
+  repositoryOf(options.workspace);
   const timeout = Math.min(Math.max(Number(options.timeout_seconds) || DEFAULT_TIMEOUT_SECONDS, 5), MAXIMUM_TIMEOUT_SECONDS);
 
   prune();
@@ -130,6 +132,7 @@ export async function cancel(id) {
   if (ENDED.has(job.status) || alive(job.worker_pid)) return job;
 
   stopProcess(job.agent_pid);
+  if (job.snapshot) removeSnapshot(job.snapshot);
   if (job.lease_id) await release(job.lease_id, { outcome: "cancelled" }).catch(() => {});
   job = { ...load(id), status: "cancelled", ended_at: new Date().toISOString() };
   save(job);
@@ -150,6 +153,7 @@ export async function runJob(id) {
     if (!chosen) return;
     await runAgent(job, chosen, task);
   } catch (error) {
+    if (job.snapshot) removeSnapshot(job.snapshot);
     job.status = "failed";
     job.error = error.message;
     job.ended_at = new Date().toISOString();
@@ -166,11 +170,14 @@ export async function runJob(id) {
  */
 async function choose(job) {
   const wanted = job.wanted;
+  // The folder is made only once a candidate is chosen, but describe_dispatch needs its path now.
   if (job.mode === "modify") {
     job.worktree = { path: join(worktrees(), job.id) };
     mkdirSync(worktrees(), { recursive: true });
+  } else {
+    job.snapshot = { path: join(snapshots(), job.id) };
   }
-  const folder = job.worktree ? job.worktree.path : job.workspace;
+  const folder = (job.worktree || job.snapshot).path;
 
   return withMeter(async (meter) => {
     const found = await meter.call("list_candidates", {
@@ -236,14 +243,16 @@ async function runAgent(job, chosen, task) {
   const { plan } = chosen;
   const folder = folderOf(job.id);
 
-  if (job.worktree) {
-    try {
-      job.worktree = createWorktree(job.workspace, job.id, job.worktree.path);
-    } catch (error) {
-      await release(job.lease_id, { outcome: "cancelled", requests: 0 }).catch(() => {});
-      throw error;
-    }
+  try {
+    if (job.worktree) job.worktree = createWorktree(job.workspace, job.id, job.worktree.path);
+    else job.snapshot = createSnapshot(job.workspace, job.snapshot.path);
+  } catch (error) {
+    if (job.snapshot) removeSnapshot(job.snapshot);
+    await release(job.lease_id, { outcome: "cancelled", requests: 0 }).catch(() => {});
+    throw error;
   }
+  if (job.snapshot?.secrets_left_out.length) job.warnings = [...(job.warnings || []), "secret_files_left_out"];
+  if (job.worktree?.committed_secrets_visible) job.warnings = [...(job.warnings || []), "committed_secret_files_visible"];
 
   const reader = readerFor(plan.runtime);
   const child = spawn(plan.program, plan.arguments, {
@@ -308,6 +317,7 @@ async function runAgent(job, chosen, task) {
   });
   events.end();
   errors.end();
+  if (job.snapshot) removeSnapshot(job.snapshot);
 
   const summary = summarise(reader, exitCode, stopped);
   if (summary.answer.length > ANSWER_LIMIT) {
@@ -360,14 +370,17 @@ function stopProcess(pid, child) {
   setTimeout(() => alive(pid) && process.kill(pid, "SIGKILL"), 5000).unref();
 }
 
-/** Remove the folders of jobs that ended more than a week ago. */
+/** Remove the folders of jobs that ended more than a week ago, with any snapshot a dead worker left behind. */
 function prune() {
   if (!existsSync(root())) return;
   const limit = Date.now() - KEEP_DAYS * 86400000;
   for (const name of readdirSync(root())) {
     const file = join(folderOf(name), "job.json");
     try {
-      if (statSync(file).mtimeMs < limit && ENDED.has(JSON.parse(readFileSync(file, "utf8")).status)) rmSync(folderOf(name), { recursive: true, force: true });
+      if (statSync(file).mtimeMs < limit && ENDED.has(JSON.parse(readFileSync(file, "utf8")).status)) {
+        rmSync(folderOf(name), { recursive: true, force: true });
+        rmSync(join(snapshots(), name), { recursive: true, force: true });
+      }
     } catch {
       // Not a job folder, or one being written.
     }
