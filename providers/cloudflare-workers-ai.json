@@ -5,7 +5,7 @@
   "description": "Neurons used today against the free daily allocation of your Cloudflare account.",
   "color": { "light": "#C2550A", "dark": "#F6821F" },
   "auth": {
-    "type": "key", "ids": ["cloudflare-workers-ai"], "env": ["CLOUDFLARE_API_KEY"], "page": "https://dash.cloudflare.com/profile/api-tokens",
+    "type": "key", "ids": ["cloudflare-workers-ai"], "env": ["CLOUDFLARE_API_KEY"], "page": "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22account_analytics%22%2C%22type%22%3A%22read%22%7D%5D&accountId=*&zoneId=all&name=AI%20Meter",
     "notice": "Add a Cloudflare API token with the Account Analytics: Read permission in Settings"
   },
   "keys": {
