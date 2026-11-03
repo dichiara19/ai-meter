@@ -25,6 +25,8 @@ try {
 }
 finally { Remove-Item -LiteralPath $resources -Recurse -Force }
 $testData = Join-Path ([IO.Path]::GetTempPath()) ('AIMeter-tests-' + [Guid]::NewGuid().ToString('N'))
+# Tests that check a built-in service definition read it from the repository.
+$env:AIMETER_REPOSITORY = $root
 try {
     [AIMeter.RegressionTests]::Run($testData)
 }

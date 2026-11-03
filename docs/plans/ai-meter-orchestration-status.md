@@ -247,6 +247,7 @@ Three things the PR marked as unverified are still unverified after the release,
   - **Known flaky test.** "A client that disconnects abruptly leaves the MCP pipe serving" timed out once in three runs; it predates M3.
     - Hypothesis: after `IOException` the pipe host sleeps 5 s before creating a new instance, the same as the test's connect timeout.
     - To fix separately.
+    - Fixed on 2026-11-03 (follow-up to PR #44): the hypothesis held. A client that leaves before the connection is set up now gets a new instance at once. A scratch loop went from 29/40 to 100/100 passes.
 
 - **2026-11-02, M3 in progress.**
   - **Selection.** `src/Candidates.cs` selects execution candidates: model, runtime and credential.

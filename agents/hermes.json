@@ -1,0 +1,11 @@
+{
+  "id": "hermes",
+  "name": "Hermes",
+  "order": 40,
+  "programs": { "windows": ["hermes"], "wsl": ["hermes"] },
+  "folders": ["AppData/Local/hermes", ".hermes"],
+  "keys": [
+    { "file": "AppData/Local/hermes/.env", "format": "env" },
+    { "file": ".hermes/.env", "format": "env" }
+  ]
+}

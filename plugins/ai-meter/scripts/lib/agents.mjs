@@ -2,6 +2,10 @@
 // (docs/plans/spike-agents.md). A reader takes one parsed event at a time and, at the end, sums up the task for
 // release_capacity and for the coordinator: outcome, requests, tokens, rate limits, cost and the agent's final answer.
 //
+// A task is completed only on positive evidence: the agent's own final event with a normal end. An answer cut off
+// for length, an unknown end, or output with none of the expected events is a failure with the reason, never a
+// success with an empty answer. Tokens are null, not zero, when no event reported any.
+//
 // Cost: each agent prices its requests from its own model list. A request priced above zero was paid, so `paid`
 // tells the plugin to stop the agent; a zero price does not prove the request was free (an OpenRouter BYOK fallback
 // is billed by the provider, out of the agent's sight). OpenRouter does name a BYOK provider in its error bodies
@@ -19,6 +23,12 @@ class Reader {
     this.error = null;
     this.byok = false;
     this.answer = "";
+    this.usageSeen = false;
+  }
+
+  /** Why the run did not end normally, or null when it did. */
+  incomplete() {
+    return null;
   }
 
   fail(message) {
@@ -49,6 +59,7 @@ class PiReader extends Reader {
 
     const message = event.message;
     const usage = message.usage || {};
+    if (message.usage) this.usageSeen = true;
     this.inputTokens += (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
     this.outputTokens += usage.output || 0;
     this.price(usage.cost?.total);
@@ -59,19 +70,29 @@ class PiReader extends Reader {
   }
 
   outcome() {
-    if (!this.settled) return "failed";   // It exited before its last event.
-    if (this.stopReason === "error") return "failed";
     if (this.stopReason === "aborted") return "cancelled";
-    return "completed";
+    return this.stopReason === "error" || this.incomplete() ? "failed" : "completed";
+  }
+
+  incomplete() {
+    if (!this.settled) return "Pi exited before agent_settled.";
+    if (this.stopReason === "error") return "Pi's last request failed.";   // Its errorMessage, when there is one, says why.
+    if (this.stopReason === "length") return "Pi's answer was cut off: the model reached its output limit (stopReason length).";
+    if (this.stopReason !== "stop") return "Pi ended without a final answer (stopReason " + (this.stopReason || "missing") + ").";
+    return null;
   }
 }
 
-/** OpenCode 1.x with --format json. The exit code is reliable: 1 with an error event on failure. */
+/**
+ * OpenCode 1.x with --format json. The exit code is reliable: 1 with an error event on failure. A run that succeeded
+ * ends with a step_finish whose reason is "stop"; "tool-calls" means the model wanted to go on.
+ */
 class OpenCodeReader extends Reader {
   constructor() {
     super();
     this.step = [];
     this.exitCode = null;
+    this.lastReason = null;
   }
 
   feed(event) {
@@ -79,6 +100,8 @@ class OpenCodeReader extends Reader {
     if (event.type === "text" && event.part?.text) this.step.push(event.part.text);
     if (event.type === "step_finish") {
       this.requests++;
+      this.lastReason = event.part?.reason || "missing";
+      if (event.part?.tokens) this.usageSeen = true;
       const tokens = event.part?.tokens || {};
       this.inputTokens += (tokens.input || 0) + (tokens.cache?.read || 0) + (tokens.cache?.write || 0);
       this.outputTokens += (tokens.output || 0) + (tokens.reasoning || 0);
@@ -89,7 +112,15 @@ class OpenCodeReader extends Reader {
   }
 
   outcome() {
-    return this.exitCode === 0 && !this.error ? "completed" : "failed";
+    return this.exitCode === 0 && !this.error && !this.incomplete() ? "completed" : "failed";
+  }
+
+  incomplete() {
+    if (this.exitCode !== 0 || this.error) return null;   // The exit code or the error says why.
+    if (!this.requests) return "OpenCode exited without any step_finish event: its output was not understood.";
+    if (this.lastReason === "length") return "OpenCode's answer was cut off: the model reached its output limit (reason length).";
+    if (this.lastReason !== "stop") return "OpenCode ended without a final answer (last step reason " + this.lastReason + ").";
+    return null;
   }
 }
 
@@ -106,22 +137,30 @@ export function readerFor(runtime) {
   return new READERS[runtime]();
 }
 
+const STOPPED_ERRORS = {
+  output_limit: "Stopped: the agent's output went past the plugin's limit.",
+};
+
 /**
- * The summary of a task. stopped is "cancelled", "timed_out" or "paid" when the plugin ended it; tokens are then
- * unknown. A task stopped for a paid request failed.
+ * The summary of a task. stopped is "cancelled", "timed_out", "paid" or "output_limit" when the plugin ended it;
+ * tokens are then unknown. A task stopped for a paid request or too much output failed.
  */
 export function summarise(reader, exitCode, stopped) {
   reader.exitCode = exitCode;
+  const failedByPlugin = stopped === "paid" || stopped === "output_limit";
+  const tokensKnown = !stopped && reader.usageSeen;
   return {
-    outcome: stopped === "paid" ? "failed" : stopped || reader.outcome(),
+    outcome: failedByPlugin ? "failed" : stopped || reader.outcome(),
     requests: reader.requests,
     rate_limited: reader.rateLimited,
-    input_tokens: stopped ? null : reader.inputTokens,
-    output_tokens: stopped ? null : reader.outputTokens,
+    input_tokens: tokensKnown ? reader.inputTokens : null,
+    output_tokens: tokensKnown ? reader.outputTokens : null,
     cost: reader.cost,
     paid_request: reader.paid,
     byok_fallback: reader.byok,
-    error: stopped === "paid" ? "Stopped: a request was priced as paid (" + reader.cost + "), so the free route was not used." : reader.error,
+    error:
+      stopped === "paid" ? "Stopped: a request was priced as paid (" + reader.cost + "), so the free route was not used."
+      : STOPPED_ERRORS[stopped] || reader.error || (stopped ? null : reader.incomplete()),
     answer: reader.answer,
   };
 }

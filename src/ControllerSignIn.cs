@@ -18,8 +18,6 @@ namespace AIMeter
 {
     internal partial class Controller
     {
-        private DispatcherTimer loginWatch;
-
         /// <summary>Sign in through Claude Code, GitHub for Copilot, or the selected service's own mechanism.</summary>
         public void Login(string id)
         {
@@ -49,6 +47,17 @@ namespace AIMeter
         public void EnterApiKey(ServiceDefinition d, string slot)
         {
             var w = new ApiKeyWindow(d, slot);
+            w.Saved += () => { RefreshNow(); if (settingsWindow != null) settingsWindow.Build(); };
+            w.Show();
+            w.Activate();
+        }
+
+        /// <summary>Ask for the Admin key that reads how much of the Claude plan's API credits has been used.</summary>
+        public void EnterClaudeAdminKey()
+        {
+            var w = new ApiKeyWindow(ClaudeProvider.AdminKeyId, "Claude Console", "Admin key",
+                "An Admin key (sk-ant-admin01-…) of the Console organisation linked to your plan. Only an organisation admin can create it.",
+                "https://platform.claude.com/settings/admin-keys");
             w.Saved += () => { RefreshNow(); if (settingsWindow != null) settingsWindow.Build(); };
             w.Show();
             w.Activate();
@@ -89,33 +98,25 @@ namespace AIMeter
             RefreshNow();
         }
 
-        /// <summary>Open Claude Code sign-in in a terminal; the CLI handles authentication.</summary>
+        private ClaudeLoginWindow claudeLogin;
+
+        /// <summary>Sign in through Claude Code in AI Meter's own window, without a console; the CLI handles authentication.</summary>
         public void LoginClaude()
         {
-            try
-            {
-                if (UseWslForLogin())
-                    Process.Start(new ProcessStartInfo("wsl.exe", "-d " + Settings.WslDistro + " -- bash -lc \"claude auth login; echo; read -p '" + L.T("Done. Press Enter to close.").Replace("'", "") + "'\"") { UseShellExecute = true });
-                else
-                {
-                    string cli = ClaudeProvider.CliPath();
-                    if (cli == null) { MessageBox.Show(L.T("Claude Code was not found on this PC."), "AI Meter"); return; }
-                    Process.Start(new ProcessStartInfo("cmd.exe", "/c \"\"" + cli + "\" auth login & pause\"") { UseShellExecute = true });
-                }
-            }
-            catch (System.ComponentModel.Win32Exception) { return; }
+            if (claudeLogin != null) { claudeLogin.Activate(); return; }
+            claudeLogin = new ClaudeLoginWindow(ClaudeLoginCommand);
+            claudeLogin.SignedIn += () => { RefreshNow(); if (settingsWindow != null) settingsWindow.Build(); };
+            claudeLogin.Closed += (o, e) => claudeLogin = null;
+            claudeLogin.Show();
+            claudeLogin.Activate();
+        }
 
-            // Check briefly for completed sign-in, for at most five minutes.
-            if (loginWatch != null) loginWatch.Stop();
-            int checks = 0;
-            loginWatch = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
-            loginWatch.Tick += (o, e) =>
-            {
-                var c = Last == null ? null : Last.Providers.FirstOrDefault(p => p.Id == "claude");
-                if (++checks > 20 || (c != null && c.Usage != null && c.Usage.Source == "live")) { loginWatch.Stop(); if (settingsWindow != null) settingsWindow.Build(); return; }
-                RefreshNow();
-            };
-            loginWatch.Start();
+        /// <summary>The sign-in command where Claude Code is used, or null when it is found neither there nor on Windows.</summary>
+        private ProcessStartInfo ClaudeLoginCommand()
+        {
+            if (UseWslForLogin()) return new ProcessStartInfo("wsl.exe", "-d " + Settings.WslDistro + " -- bash -lc \"claude auth login\"");
+            string cli = ClaudeProvider.CliPath();
+            return cli == null ? null : new ProcessStartInfo(cli, "auth login");
         }
 
         /// <summary>

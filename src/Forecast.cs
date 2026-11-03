@@ -355,7 +355,8 @@ namespace AIMeter
 
         private static Tuple<string, string> Low(Snapshot s, ProviderState p, UsageWindow w)
         {
-            string title = L.F("{0} · {1}: {2}% left", p.Name, Ui.LabelOf(w), Math.Round(w.Remaining));
+            // A notification always says what is left, as money for a credit limit, whatever the surfaces show.
+            string title = L.F("{0} · {1}: {2}", p.Name, Ui.LabelOf(w), Ui.Value(w, null, Ui.ValueStyle.Long, true));
             var text = new StringBuilder();
             text.Append(L.F("Resets {0}.", When(w.ResetsAt.Value)));
             if (w.RunsOutAt.HasValue) text.Append(' ').Append(L.F("At this pace it runs out {0}.", When(w.RunsOutAt.Value)));
@@ -364,7 +365,7 @@ namespace AIMeter
                 .Select(x => Tuple.Create(x, Ui.Primary(x)))
                 .Where(x => x.Item2 != null && x.Item1.Usage.Room(x.Item2) >= 40)
                 .OrderByDescending(x => x.Item1.Usage.Room(x.Item2)).FirstOrDefault();
-            if (other != null) text.Append(' ').Append(L.F("{0} still has {1}% left.", other.Item1.Name, Math.Round(other.Item1.Usage.Room(other.Item2))));
+            if (other != null) text.Append(' ').Append(L.F("{0} still has {1} left.", other.Item1.Name, Ui.Value(other.Item2, other.Item1.Usage, Ui.ValueStyle.Number, true)));
             return Tuple.Create(title, text.ToString());
         }
 

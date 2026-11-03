@@ -22,10 +22,16 @@ namespace AIMeter
 
         /// <summary>An optional slot saves an extra credential as &lt;id&gt;.&lt;slot&gt;; null selects the main key.</summary>
         public ApiKeyWindow(ServiceDefinition d, string slot)
+            : this(slot == null ? d.Id : d.Id + "." + slot, d.Name, slot == null ? null : Json.Obj(Json.Obj(d.Raw, "keys"), slot), slot, d.KeyPage) { }
+
+        /// <summary>An extra key of a service implemented in code, described like a definition's "keys" entry.</summary>
+        public ApiKeyWindow(string keyId, string serviceName, string label, string description, string keyPage)
+            : this(keyId, serviceName, new Dictionary<string, object> { { "label", label }, { "description", description }, { "page", keyPage } }, null, keyPage) { }
+
+        private ApiKeyWindow(string keyId, string serviceName, Dictionary<string, object> extra, string slot, string mainKeyPage)
         {
-            var extra = slot == null ? null : Json.Obj(Json.Obj(d.Raw, "keys"), slot);
-            string keyPage = extra != null ? Json.Str(extra, "page") : d.KeyPage;
-            Title = extra != null ? L.T(Json.Str(extra, "label") ?? slot) + " · " + d.Name : L.F("Connect {0}", d.Name);
+            string keyPage = extra != null ? Json.Str(extra, "page") : mainKeyPage;
+            Title = extra != null ? L.T(Json.Str(extra, "label") ?? slot) + " · " + serviceName : L.F("Connect {0}", serviceName);
             Width = 460;
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
@@ -42,7 +48,7 @@ namespace AIMeter
             h.FontFamily = Theme.DisplayFont;
             root.Children.Add(h);
             var info = Ui.Text((extra != null && Json.Str(extra, "description") != null ? L.T(Json.Str(extra, "description")) + " " : "")
-                + L.F("Paste an API key of your {0} account. AI Meter uses it only to read your usage; it is encrypted with Windows data protection and stays on this PC.", d.Name), 13, "Text2");
+                + L.F("Paste an API key of your {0} account. AI Meter uses it only to read your usage; it is encrypted with Windows data protection and stays on this PC.", serviceName), 13, "Text2");
             info.TextWrapping = TextWrapping.Wrap;
             info.TextTrimming = TextTrimming.None;
             info.Margin = new Thickness(0, 8, 0, 16);
@@ -73,7 +79,7 @@ namespace AIMeter
             DockPanel.SetDock(cancel, Dock.Right);
             var save = new Button { Content = L.T("Save"), Margin = new Thickness(0, 0, 8, 0), IsEnabled = false, IsDefault = true };
             save.SetResourceReference(StyleProperty, "AccentButton");
-            save.Click += (o, e) => { ApiKeys.Save(slot == null ? d.Id : d.Id + "." + slot, box.Password); if (Saved != null) Saved(); Close(); };
+            save.Click += (o, e) => { ApiKeys.Save(keyId, box.Password); if (Saved != null) Saved(); Close(); };
             DockPanel.SetDock(save, Dock.Right);
             buttons.Children.Add(cancel);
             buttons.Children.Add(save);

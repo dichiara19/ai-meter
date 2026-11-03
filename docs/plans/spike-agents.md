@@ -1,5 +1,7 @@
 # Spike: running coding agents without interaction (M4)
 
+> **Historical record.** These are the results of the M4 spike, kept as evidence. The current behaviour is in the agent definitions (`agents/*.json`), [docs/MCP.md](../MCP.md#agent-definitions) and the plugin's [README](../../plugins/ai-meter/README.md); where they differ from this file, they win.
+
 How a coordinator plugin can start a coding agent on a free model, pass the task, follow it, read the outcome and stop it. Live checks ran on Windows 11 with WSL Ubuntu 24.04, on 2026-11-02. Everything not run live is marked **not verified**.
 
 The results feed `describe_dispatch` ([contracts §3.1](orchestration-contracts.md#31-describe_dispatch)) and the plugins (M5).

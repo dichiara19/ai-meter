@@ -116,6 +116,32 @@ namespace AIMeter
             catch (UnauthorizedAccessException) { }
         }
 
+        /// <summary>Marks a copy restarted by RestartOutsidePackage, so that it never restarts again.</summary>
+        private const string OutsidePackageArg = "--outside-package";
+
+        /// <summary>
+        /// Start this copy again outside another app's MSIX package and return true, so that the caller exits. Inside such
+        /// a package, for instance when the Claude app starts AI Meter, Windows redirects writes to %APPDATA%\AIMeter into
+        /// that package's private folder: settings, keys and history would split into two diverging copies. A packaged
+        /// app's children start outside its package unless it says otherwise, so an ordinary start is enough; the marker
+        /// argument stops a second attempt if they do not, and that copy runs where it is.
+        /// </summary>
+        private static bool RestartOutsidePackage(string[] args)
+        {
+            if (!Native.InForeignPackage || args.Contains(OutsidePackageArg)) return false;
+            string target, launchArgs;
+            SplitLaunch(out target, out launchArgs);
+            var all = new List<string> { launchArgs };
+            all.AddRange(args.Select(a => "\"" + a.Replace("\"", "\\\"") + "\""));
+            all.Add(OutsidePackageArg);
+            try
+            {
+                Process.Start(new ProcessStartInfo(target, string.Join(" ", all.Where(a => a.Length > 0))) { UseShellExecute = false, WorkingDirectory = Home });
+                return true;
+            }
+            catch (System.ComponentModel.Win32Exception) { return false; }
+        }
+
         /// <summary>Open a folder in File Explorer, creating it first: Explorer shows Documents for a path that does not exist.</summary>
         internal static void OpenFolder(string folder)
         {
@@ -125,6 +151,7 @@ namespace AIMeter
 
         internal static void Run(string[] args)
         {
+            if (RestartOutsidePackage(args)) return;
             bool created;
             using (var mutex = new Mutex(true, @"Local\AIMeter.Instance", out created))
             {

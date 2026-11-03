@@ -9,7 +9,7 @@ using System.Text;
 namespace AIMeter
 {
     /// <summary>
-    /// Sessions of coding CLIs (OpenCode, Pi, Gemini CLI, Qwen Code, Goose, Crush, Cline, Kilo): title,
+    /// Sessions of coding CLIs (OpenCode, Pi, Gemini CLI, Qwen Code, Goose, Crush, Cline, Kilo, Hermes): title,
     /// folder, model in use and context occupied, from their local files on Windows and in WSL (if already running).
     /// Pi sessions are also read from the folders that running Pi processes name (RunningAgents). Sessions active in
     /// the last 30 minutes are shown. Read-only.
@@ -49,7 +49,7 @@ namespace AIMeter
             return last;
         }
 
-        /// <summary>Sessions found in any user folder (also used to test the formats).</summary>
+        /// <summary>Sessions found in any user folder, read as a Windows home (used to test the formats).</summary>
         internal List<Session> ScanHome(Probe p, string home) { return Scan(p, new List<Place> { new Place { Home = home, Where = "Windows" } }); }
 
         private List<Session> Scan(Probe p, List<Place> places)
@@ -66,6 +66,7 @@ namespace AIMeter
                 try { add(Goose(p, pl)); } catch (Exception) { }
                 try { add(Crush(p, pl)); } catch (Exception) { }
                 try { add(Cline(p, pl)); } catch (Exception) { }
+                try { add(Hermes(p, pl)); } catch (Exception) { }
             }
             try
             {
@@ -423,6 +424,55 @@ namespace AIMeter
                 f.Fresh = double.MaxValue;
                 return f;
             }).ToList();
+        }
+
+        // ================================================================ Hermes Agent
+        /// <summary>
+        /// Hermes keeps its sessions in state.db in its home: HERMES_HOME or %LOCALAPPDATA%\hermes on Windows (older
+        /// versions used ~/.hermes there too), ~/.hermes in WSL. Times are Unix seconds; a session in progress has no
+        /// ended_at, and its last active message is the user's or a tool's, or an assistant message without a finish reason.
+        /// </summary>
+        private static IEnumerable<Found> Hermes(Probe p, Place pl)
+        {
+            var homes = new List<string>();
+            if (pl.Where == "Windows")
+            {
+                if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HERMES_HOME"))) homes.Add(Environment.GetEnvironmentVariable("HERMES_HOME"));
+                homes.Add(Path.Combine(pl.Home, @"AppData\Local\hermes"));
+            }
+            homes.Add(Path.Combine(pl.Home, ".hermes"));
+            var list = new List<Found>();
+            foreach (var db in homes.Select(h => Path.Combine(h, "state.db")).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!File.Exists(db) || !Recent(Stamp(db))) continue;
+                list.AddRange((List<Found>)p.Cached("agent:hermes:" + db, Stamp(db), () =>
+                {
+                    var found = new List<Found>();
+                    string path = Openable(db);
+                    string cutoff = (DateTime.UtcNow.AddMinutes(-RecentMinutes) - new DateTime(1970, 1, 1)).TotalSeconds.ToString(CultureInfo.InvariantCulture);
+                    var rows = Sqlite.Rows(path, "SELECT id, title, cwd, model, billing_provider, COALESCE(last_activity_at, started_at), ended_at FROM sessions"
+                                                 + " WHERE parent_session_id IS NULL AND archived = 0 AND hidden = 0 AND COALESCE(last_activity_at, started_at) > " + cutoff
+                                                 + " ORDER BY COALESCE(last_activity_at, started_at) DESC LIMIT 4", 4);
+                    if (rows == null) return found;
+                    foreach (var r in rows)
+                    {
+                        var f = new Found { Agent = "Hermes", Title = S0(r, 1), Cwd = S0(r, 2), Model = S0(r, 3), Provider = S0(r, 4), File = db + "#" + S0(r, 0),
+                                            Updated = Json.FromUnix(N0(r, 5)) ?? DateTime.MinValue };
+                        var m = Sqlite.Rows(path, "SELECT role, finish_reason, timestamp FROM messages WHERE session_id = " + Sqlite.Quote(S0(r, 0))
+                                                  + " AND active = 1 ORDER BY id DESC LIMIT 1", 1);
+                        if (m != null && m.Count > 0)
+                        {
+                            string role = S0(m[0], 0);
+                            f.Pending = r[6] == null && (role == "user" || role == "tool" || (role == "assistant" && m[0][1] == null));
+                            var at = Json.FromUnix(N0(m[0], 2));
+                            if (at.HasValue && at.Value > f.Updated) f.Updated = at.Value;
+                        }
+                        found.Add(f);
+                    }
+                    return found;
+                }));
+            }
+            return list;
         }
 
         // ================================================================ utilities

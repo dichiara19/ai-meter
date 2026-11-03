@@ -120,18 +120,17 @@ namespace AIMeter
 
         private static void PackagedSkip()
         {
-            var field = typeof(Native).GetField("packaged", BindingFlags.Static | BindingFlags.NonPublic);
-            object previous = field.GetValue(null);
+            var previous = Native.PackagedOverride;
             try
             {
-                field.SetValue(null, 1);
+                Native.PackagedOverride = true;
                 Assert(Native.IsPackaged, "The fixture did not simulate the package.");
                 bool asked = false;
                 Assert(UpdateCheck.Find(false, url => { asked = true; return Stable; }) == null, "The package reported a GitHub release.");
                 Assert(UpdateCheck.Find(true, url => { asked = true; return Recent; }) == null, "The package reported a GitHub pre-release.");
                 Assert(!asked, "The package contacted GitHub for updates.");
             }
-            finally { field.SetValue(null, previous); }
+            finally { Native.PackagedOverride = previous; }
         }
 
         private static void Defaults()
