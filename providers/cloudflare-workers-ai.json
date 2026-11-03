@@ -1,0 +1,88 @@
+{
+  "id": "cloudflare-workers-ai",
+  "name": "Cloudflare Workers AI",
+  "monogram": "C",
+  "description": "Neurons used today against the free daily allocation of your Cloudflare account.",
+  "color": { "light": "#C2550A", "dark": "#F6821F" },
+  "auth": {
+    "type": "key", "ids": ["cloudflare-workers-ai"], "env": ["CLOUDFLARE_API_KEY"], "page": "https://dash.cloudflare.com/profile/api-tokens",
+    "notice": "Add a Cloudflare API token with the Account Analytics: Read permission in Settings"
+  },
+  "keys": {
+    "account": {
+      "label": "Account ID",
+      "description": "The 32-character ID of your Cloudflare account, shown in the dashboard under Account home and in its address after dash.cloudflare.com/.",
+      "notice": "Add your Cloudflare account ID in Settings to see your Neurons",
+      "env": ["CLOUDFLARE_ACCOUNT_ID"],
+      "beside": "metadata.accountId"
+    }
+  },
+  "request": {
+    "url": "https://api.cloudflare.com/client/v4/graphql", "method": "POST", "interval": 10,
+    "headers": { "Authorization": "Bearer {token}" },
+    "body": "{\"query\":\"query ($account: string!, $date: Date!) { viewer { accounts(filter: {accountTag: $account}) { aiInferenceAdaptiveGroups(limit: 1, filter: {date_geq: $date}) { count sum { totalNeurons } } } } }\",\"variables\":{\"account\":\"{key:account}\",\"date\":\"{date:utc}\"}}",
+    "error": "errors[0].message",
+    "errorNotice": "Cloudflare did not return your Neurons: check that the token has the Account Analytics: Read permission for this account"
+  },
+  "limits": [
+    { "label": "Free Neurons today", "short": "1d", "period": "day", "limit": 10000,
+      "used": "data.viewer.accounts[0].aiInferenceAdaptiveGroups[0].sum.totalNeurons",
+      "emptyIsZero": "data.viewer.accounts[0].aiInferenceAdaptiveGroups" }
+  ],
+  "notes": [
+    { "text": "{0} of 10,000 Neurons used today; Cloudflare's analytics can lag a few minutes", "values": [{ "path": "data.viewer.accounts[0].aiInferenceAdaptiveGroups[0].sum.totalNeurons" }],
+      "when": ["data.viewer.accounts[0].aiInferenceAdaptiveGroups[0].sum.totalNeurons"] }
+  ],
+  "i18n": {
+    "it": {
+      "Neurons used today against the free daily allocation of your Cloudflare account.": "Neuron usati oggi rispetto all'allocazione gratuita giornaliera del tuo account Cloudflare.",
+      "Add a Cloudflare API token with the Account Analytics: Read permission in Settings": "Aggiungi in Impostazioni un token API di Cloudflare con il permesso Account Analytics: Read",
+      "Account ID": "ID account",
+      "The 32-character ID of your Cloudflare account, shown in the dashboard under Account home and in its address after dash.cloudflare.com/.": "L'ID di 32 caratteri del tuo account Cloudflare, nella dashboard in Account home e nel suo indirizzo dopo dash.cloudflare.com/.",
+      "Add your Cloudflare account ID in Settings to see your Neurons": "Aggiungi in Impostazioni l'ID del tuo account Cloudflare per vedere i Neuron",
+      "Cloudflare did not return your Neurons: check that the token has the Account Analytics: Read permission for this account": "Cloudflare non ha restituito i Neuron: verifica che il token abbia il permesso Account Analytics: Read per questo account",
+      "Free Neurons today": "Neuron gratuiti oggi",
+      "{0} of 10,000 Neurons used today; Cloudflare's analytics can lag a few minutes": "{0} Neuron usati oggi su 10.000; le statistiche di Cloudflare possono arrivare con qualche minuto di ritardo"
+    },
+    "es": {
+      "Neurons used today against the free daily allocation of your Cloudflare account.": "Neurons usadas hoy frente a la asignación gratuita diaria de tu cuenta de Cloudflare.",
+      "Add a Cloudflare API token with the Account Analytics: Read permission in Settings": "Añade en Configuración un token de API de Cloudflare con el permiso Account Analytics: Read",
+      "Account ID": "ID de cuenta",
+      "The 32-character ID of your Cloudflare account, shown in the dashboard under Account home and in its address after dash.cloudflare.com/.": "El ID de 32 caracteres de tu cuenta de Cloudflare, en el panel en Account home y en su dirección después de dash.cloudflare.com/.",
+      "Add your Cloudflare account ID in Settings to see your Neurons": "Añade en Configuración el ID de tu cuenta de Cloudflare para ver tus Neurons",
+      "Cloudflare did not return your Neurons: check that the token has the Account Analytics: Read permission for this account": "Cloudflare no devolvió tus Neurons: comprueba que el token tenga el permiso Account Analytics: Read para esta cuenta",
+      "Free Neurons today": "Neurons gratuitas hoy",
+      "{0} of 10,000 Neurons used today; Cloudflare's analytics can lag a few minutes": "{0} de 10.000 Neurons usadas hoy; las estadísticas de Cloudflare pueden llegar con unos minutos de retraso"
+    },
+    "fr": {
+      "Neurons used today against the free daily allocation of your Cloudflare account.": "Neurons utilisés aujourd'hui sur l'allocation gratuite quotidienne de votre compte Cloudflare.",
+      "Add a Cloudflare API token with the Account Analytics: Read permission in Settings": "Ajoutez dans les Paramètres un jeton d'API Cloudflare avec l'autorisation Account Analytics: Read",
+      "Account ID": "ID de compte",
+      "The 32-character ID of your Cloudflare account, shown in the dashboard under Account home and in its address after dash.cloudflare.com/.": "L'ID de 32 caractères de votre compte Cloudflare, dans le tableau de bord sous Account home et dans son adresse après dash.cloudflare.com/.",
+      "Add your Cloudflare account ID in Settings to see your Neurons": "Ajoutez dans les Paramètres l'ID de votre compte Cloudflare pour voir vos Neurons",
+      "Cloudflare did not return your Neurons: check that the token has the Account Analytics: Read permission for this account": "Cloudflare n'a pas renvoyé vos Neurons : vérifiez que le jeton a l'autorisation Account Analytics: Read pour ce compte",
+      "Free Neurons today": "Neurons gratuits aujourd'hui",
+      "{0} of 10,000 Neurons used today; Cloudflare's analytics can lag a few minutes": "{0} Neurons utilisés aujourd'hui sur 10 000 ; les statistiques de Cloudflare peuvent avoir quelques minutes de retard"
+    },
+    "de": {
+      "Neurons used today against the free daily allocation of your Cloudflare account.": "Heute verbrauchte Neurons im Vergleich zum kostenlosen Tageskontingent deines Cloudflare-Kontos.",
+      "Add a Cloudflare API token with the Account Analytics: Read permission in Settings": "Füge in den Einstellungen ein Cloudflare-API-Token mit der Berechtigung Account Analytics: Read hinzu",
+      "Account ID": "Konto-ID",
+      "The 32-character ID of your Cloudflare account, shown in the dashboard under Account home and in its address after dash.cloudflare.com/.": "Die 32-stellige ID deines Cloudflare-Kontos, im Dashboard unter Account home und in seiner Adresse nach dash.cloudflare.com/.",
+      "Add your Cloudflare account ID in Settings to see your Neurons": "Füge in den Einstellungen die ID deines Cloudflare-Kontos hinzu, um deine Neurons zu sehen",
+      "Cloudflare did not return your Neurons: check that the token has the Account Analytics: Read permission for this account": "Cloudflare hat deine Neurons nicht geliefert: Prüfe, ob das Token die Berechtigung Account Analytics: Read für dieses Konto hat",
+      "Free Neurons today": "Kostenlose Neurons heute",
+      "{0} of 10,000 Neurons used today; Cloudflare's analytics can lag a few minutes": "Heute {0} von 10.000 Neurons verbraucht; die Statistiken von Cloudflare können einige Minuten verzögert sein"
+    },
+    "pt": {
+      "Neurons used today against the free daily allocation of your Cloudflare account.": "Neurons usados hoje em relação à cota gratuita diária da sua conta Cloudflare.",
+      "Add a Cloudflare API token with the Account Analytics: Read permission in Settings": "Adicione nas Configurações um token de API da Cloudflare com a permissão Account Analytics: Read",
+      "Account ID": "ID da conta",
+      "The 32-character ID of your Cloudflare account, shown in the dashboard under Account home and in its address after dash.cloudflare.com/.": "O ID de 32 caracteres da sua conta Cloudflare, no painel em Account home e no endereço depois de dash.cloudflare.com/.",
+      "Add your Cloudflare account ID in Settings to see your Neurons": "Adicione nas Configurações o ID da sua conta Cloudflare para ver seus Neurons",
+      "Cloudflare did not return your Neurons: check that the token has the Account Analytics: Read permission for this account": "A Cloudflare não retornou seus Neurons: verifique se o token tem a permissão Account Analytics: Read para esta conta",
+      "Free Neurons today": "Neurons gratuitos hoje",
+      "{0} of 10,000 Neurons used today; Cloudflare's analytics can lag a few minutes": "{0} de 10.000 Neurons usados hoje; as estatísticas da Cloudflare podem atrasar alguns minutos"
+    }
+  }
+}

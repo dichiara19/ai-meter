@@ -204,6 +204,36 @@ namespace AIMeter
             return token;
         }
 
+        /// <summary>
+        /// A value a request names as {key:slot}, such as an account id, besides the main secret: the one saved for the
+        /// slot in Settings, then the first of the slot's "env" variables that is set, then the slot's "beside" field
+        /// next to the key a coding agent keeps (or one of those variables exported in the same home). Null when absent.
+        /// </summary>
+        private string SlotValue(string slot)
+        {
+            string saved = ApiKeys.Get(D.Id + "." + slot);
+            if (saved != null) return saved;
+            var spec = Json.Obj(Json.Obj(D.Raw, "keys"), slot);
+            if (spec == null) return null;
+            var env = ServiceDefinition.Strings(spec, "env");
+            foreach (var name in env)
+            {
+                string v = ServiceDefinition.Env(name);
+                if (!string.IsNullOrEmpty(v)) return v.Trim();
+            }
+            return D.UsesKey ? KeyFinder.Beside(KeyFinder.Find(D), Json.Str(spec, "beside"), env) : null;
+        }
+
+        /// <summary>The {key:slot} names in a request's URL, headers and body, in order and without repeats.</summary>
+        private static List<string> RequestSlots(Dictionary<string, object> req)
+        {
+            var parts = new List<string> { Json.Str(req, "url"), Json.Str(req, "body") };
+            var headers = Json.Obj(req, "headers");
+            if (headers != null) parts.AddRange(headers.Values.Select(h => Convert.ToString(h, CultureInfo.InvariantCulture)));
+            return Regex.Matches(string.Join("\n", parts.Where(p => p != null)), @"\{key:([a-zA-Z0-9_-]+)")
+                .Cast<Match>().Select(m => m.Groups[1].Value).Distinct().ToList();
+        }
+
         /// <summary>Whether a credential expiry value lies within the next minute; unknown expiries are not treated as expired.</summary>
         private static bool ExpiresSoon(object expiry)
         {
@@ -235,8 +265,11 @@ namespace AIMeter
             catch (FormatException) { return null; }
         }
 
-        /// <summary>Expand token, JWT and environment placeholders with optional URL and suffix filters.</summary>
-        private static string Fill(string template, string token)
+        /// <summary>
+        /// Expand token, JWT, environment, extra key ({key:slot}) and date ({date:utc}, today's UTC date as yyyy-MM-dd)
+        /// placeholders with optional URL and suffix filters.
+        /// </summary>
+        private string Fill(string template, string token)
         {
             if (template == null) return null;
             return Regex.Replace(template, @"\{([a-zA-Z][^{}]*)\}", m =>
@@ -249,6 +282,8 @@ namespace AIMeter
                 if (src == "token") v = token;
                 else if (src.StartsWith("jwt.")) v = JPath.Str(JPath.Get(JwtClaims(token), src.Substring(4)));
                 else if (src.StartsWith("env:")) v = ServiceDefinition.Env(src.Substring(4));
+                else if (src.StartsWith("key:")) v = SlotValue(src.Substring(4));
+                else if (src == "date:utc") v = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                 else return m.Value;
                 v = v ?? "";
                 while (filters.Length > 0)
@@ -279,6 +314,25 @@ namespace AIMeter
                 spend = null;
                 return;
             }
+            // A request that names an extra value it cannot fill is not sent: Settings then offers that slot.
+            string missing = null;
+            foreach (var slot in RequestSlots(req))
+            {
+                bool absent = SlotValue(slot) == null;
+                lock (NeedsExtraKey)
+                {
+                    if (absent) NeedsExtraKey.Add(D.Id + "." + slot);
+                    else NeedsExtraKey.Remove(D.Id + "." + slot);
+                }
+                if (absent && missing == null) missing = slot;
+            }
+            if (missing != null)
+            {
+                problem = Json.Str(Json.Obj(Json.Obj(D.Raw, "keys"), missing), "notice") ?? "Add your API key in Settings to see your usage";
+                live = null;
+                spend = null;
+                return;
+            }
             string scope = SpendTracker.Scope(D.Id, token, "");
             if (scope != credentialScope)
             {
@@ -295,6 +349,15 @@ namespace AIMeter
                 string text = Send(req, token);
                 SaveRaw("-usage-raw.json", text);
                 var doc = Json.ParseAny(text);
+                // GraphQL APIs report failures, such as a missing permission, in a 200 answer: "error" is their path.
+                if (Json.Str(req, "error") != null && JPath.Get(doc, Json.Str(req, "error")) != null)
+                {
+                    problem = Json.Str(req, "errorNotice") ?? "The service answered without usage data";
+                    live = null;
+                    usageDoc = null;
+                    spend = null;
+                    return;
+                }
                 plan = JPath.Str(JPath.Get(doc, Json.Str(D.Raw, "plan")));
                 if (Json.Str(D.Raw, "plan") == null) plan = null;
                 live = Map(doc, D.Raw);
@@ -560,10 +623,13 @@ namespace AIMeter
             return true;
         }
 
+        /// <summary>The number at a path of the answer, or a number written in the definition, such as a documented limit.</summary>
         private static double? Number(object doc, Dictionary<string, object> spec, string key)
         {
-            string path = Json.Str(spec, key);
-            return path == null ? null : JPath.Num(JPath.Get(doc, path));
+            object v;
+            if (spec == null || !spec.TryGetValue(key, out v) || v == null) return null;
+            var path = v as string;
+            return path == null ? JPath.Num(v) : JPath.Num(JPath.Get(doc, path));
         }
 
         private static string Currency(object doc, Dictionary<string, object> spec)
@@ -612,6 +678,11 @@ namespace AIMeter
 
             double? used = Number(doc, spec, "used"), limit = Number(doc, spec, "limit"), remaining = Number(doc, spec, "remaining");
             if (used == null && remaining != null && limit != null) used = limit - remaining;
+            // A missing value is unknown, not zero, except where the service answers with no rows for no usage:
+            // "emptyIsZero" is the path of that list, and only a list that is present and empty means zero.
+            string emptyPath = Json.Str(spec, "emptyIsZero");
+            var rows = emptyPath == null ? null : JPath.Get(doc, emptyPath) as IList;
+            if (used == null && rows != null && rows.Count == 0) used = 0;
             double? pct = Number(doc, spec, "percent");
             if (pct != null) pct *= Json.Num(spec, "percentScale") ?? 1;
             else if (used != null && limit != null && limit > 0) pct = used.Value / limit.Value * 100;
