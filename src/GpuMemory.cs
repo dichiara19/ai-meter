@@ -128,5 +128,25 @@ namespace AIMeter
             double gb = bytes / 1073741824.0;
             return gb >= 10 ? L.F("{0:0} GB", gb) : gb >= 1 ? L.F("{0:0.0} GB", gb) : L.F("{0:0} MB", bytes / 1048576.0);
         }
+
+        /// <summary>A part of the memory and its total in the total's unit, such as "1.7/16 GB", for the narrow taskbar pill.</summary>
+        public static string Pair(long part, long total)
+        {
+            bool gb = total >= 1073741824L;
+            double unit = gb ? 1073741824.0 : 1048576.0;
+            Func<double, string> number = v => v.ToString(gb && v < 10 ? "0.0" : "0", L.Culture);
+            return number(part / unit) + "/" + number(total / unit) + (gb ? " GB" : " MB");
+        }
+
+        /// <summary>
+        /// Video memory as the limits read (Settings → Where to see it): what is free by default, or what is in use,
+        /// with the total in <see cref="Ui.ValueStyle.Long"/> style; the pill shows the pair alone.
+        /// </summary>
+        public static string Value(long used, long total, Ui.ValueStyle style)
+        {
+            long part = Ui.ShowUsed ? used : Math.Max(0, total - used);
+            if (style == Ui.ValueStyle.Number) return Pair(part, total);
+            return L.F(Ui.ShowUsed ? "{0} in use of {1}" : "{0} free of {1}", Format(part), Format(total));
+        }
     }
 }
