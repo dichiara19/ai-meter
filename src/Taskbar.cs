@@ -58,12 +58,55 @@ namespace AIMeter
     }
 
     /// <summary>
+    /// Learns at once when a full-screen app opens or closes, as Windows tells the "application desktop toolbars":
+    /// a hidden window registers as one that reserves no screen space and receives ABN_FULLSCREENAPP. The
+    /// notification does not say on which monitor, so the callback checks for itself. Registration is renewed when
+    /// File Explorer restarts (TaskbarCreated), and removed on Dispose, as Windows asks.
+    /// </summary>
+    internal sealed class FullScreenWatch : IDisposable
+    {
+        private readonly HwndSource window;
+        private readonly uint callback = Native.RegisterWindowMessage("AIMeter.FullScreen");
+        private readonly uint taskbarCreated = Native.RegisterWindowMessage("TaskbarCreated");
+        private readonly Action changed;
+
+        public FullScreenWatch(Action changed)
+        {
+            this.changed = changed;
+            window = new HwndSource(new HwndSourceParameters("AI Meter - full screen")
+            {
+                WindowStyle = Native.WS_POPUP, ExtendedWindowStyle = Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE, Width = 0, Height = 0,
+            });
+            window.AddHook(Hook);
+            Native.RegisterAppBar(window.Handle, callback);
+        }
+
+        private IntPtr Hook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if ((uint)msg == callback && (int)wParam == Native.ABN_FULLSCREENAPP) changed();
+            else if ((uint)msg == taskbarCreated) { Native.RegisterAppBar(hwnd, callback); changed(); }
+            return IntPtr.Zero;
+        }
+
+        public void Dispose()
+        {
+            Native.RemoveAppBar(window.Handle);
+            window.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Pill on the taskbar. Windows 11 no longer has "deskbands", so the pill is a borderless window owned by the
     /// taskbar (Shell_TrayWnd): an owned window always stays above its owner, so it never ends up beneath the taskbar
-    /// when the taskbar is clicked, and it goes behind a full-screen app with the taskbar. It is not a child window
-    /// of the taskbar: Windows delivers touch on the taskbar to the taskbar itself, never to another process's child
-    /// window, so a finger could not press it. It follows an auto-hiding taskbar as the taskbar moves, and is
-    /// recreated if File Explorer restarts. Uses the Windows colour mode (the taskbar's), not the app mode.
+    /// when the taskbar is clicked. It is not a child window of the taskbar: Windows delivers touch on the taskbar to
+    /// the taskbar itself, never to another process's child window, so a finger could not press it.
+    /// The taskbar is always on top, and Windows lets a full-screen app cover it by treating that app specially, not
+    /// by lowering the taskbar: the pill, on top with its owner, would stay over the video or the game. So it hides
+    /// itself while a full-screen app covers the taskbar's monitor (FullScreenWatch tells at once, and every check
+    /// looks again). In the z-order it stays just above the taskbar: never raised to the top when it moves, and put
+    /// back above the taskbar when File Explorer raises the taskbar over it, as it does when a full-screen app closes.
+    /// It follows an auto-hiding taskbar as the taskbar moves, and is recreated if File Explorer restarts. Uses the
+    /// Windows colour mode (the taskbar's).
     /// </summary>
     internal sealed class TaskbarPill
     {
@@ -81,6 +124,7 @@ namespace AIMeter
         private string placedKey;      // Taskbar, notification area and side at the last placement.
         private int px, py, pw, ph;    // Last applied position.
         private bool visible = true;
+        private bool covered;          // A full-screen app covers the taskbar's monitor: hidden until it leaves.
         public bool Dark { get; private set; }
         public bool OnLeft { get; private set; }
         public bool Usable { get; private set; }
@@ -174,10 +218,27 @@ namespace AIMeter
             lastRect = default(Native.RECT);
         }
 
+        /// <summary>
+        /// Hide the pill while a full-screen app covers the taskbar's monitor, and bring it back afterwards; keep it
+        /// just above the taskbar, which File Explorer raises over it when a full-screen app closes.
+        /// </summary>
+        public void CheckCovered()
+        {
+            bool now = bar != IntPtr.Zero && Native.FullScreenOver(bar);
+            if (!now && source != null && visible) Native.KeepJustAbove(source.Handle, bar);
+            if (now == covered) return;
+            covered = now;
+            if (source == null) return;
+            if (covered) Native.ShowWindow(source.Handle, 0);
+            else { placedKey = null; Place(); }
+        }
+
         private void Reconcile()
         {
             if (!visible) return;
             if (source == null || bar == IntPtr.Zero || !Native.IsWindow(bar) || bar != Native.FindTaskbar()) { Attach(); placedKey = null; }
+            // Also a safety net for a full-screen change whose notification did not arrive.
+            CheckCovered();
             // A check of a few microseconds: the pill moves only if the taskbar or notification area changed.
             if (Key() != placedKey) Place();
         }
@@ -188,6 +249,7 @@ namespace AIMeter
         public void Place()
         {
             if (source == null || !visible) return;
+            if (covered) { Native.ShowWindow(source.Handle, 0); return; }
             var info = TaskbarInfo.Read();
             Usable = info.Usable;
             if (!Usable) { Native.ShowWindow(source.Handle, 0); placedKey = null; return; }
@@ -213,10 +275,12 @@ namespace AIMeter
             y += at.Top;
             if (x != px || y != py || w != pw || h != ph || placedKey == null)
             {
-                Native.SetWindowPos(source.Handle, IntPtr.Zero, x, y, w, h, Native.SWP_NOACTIVATE);
+                // Without SWP_NOZORDER the pill would rise to the top of the always-on-top windows at every move.
+                Native.SetWindowPos(source.Handle, IntPtr.Zero, x, y, w, h, Native.SWP_NOACTIVATE | Native.SWP_NOZORDER);
                 Native.ShowWindow(source.Handle, 4 /* SW_SHOWNOACTIVATE */);
                 px = x; py = y; pw = w; ph = h;
             }
+            Native.KeepJustAbove(source.Handle, bar);
             lastRect = info.Rect;
             placedKey = Key();
         }

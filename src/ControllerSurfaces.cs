@@ -195,6 +195,16 @@ namespace AIMeter
             // foreground, this asynchronous event can arrive after the tap has opened the panel: that is not outside.
             bool pillPress = hwnd == Native.FindTaskbar() && DateTime.Now - pillPressedAt < PressEffects;
             if (flyout.IsVisible && flyout.TaskbarMode && !pillPress && !Native.IsOwnWindow(hwnd)) flyout.Hide();
+            CheckFullScreen();
+        }
+
+        /// <summary>
+        /// Called when the foreground window changes and when Windows reports a full-screen app opening or closing:
+        /// the taskbar pill always hides behind a full-screen app, like the taskbar; the overlay too when its setting asks.
+        /// </summary>
+        private void CheckFullScreen()
+        {
+            if (dock != null) dock.CheckCovered();
             bool busy = Native.UserIsBusyFullscreen();
             if (busy == fullscreenBusy) return;
             fullscreenBusy = busy;
@@ -209,11 +219,7 @@ namespace AIMeter
                 if (hide && pill.IsVisible) pill.Hide();
                 else if (!hide && !pill.IsVisible) pill.Show();
             }
-            if (dock != null)
-            {
-                // The docked pill follows the taskbar automatically in fullscreen and auto-hide modes.
-                dock.Place();
-            }
+            if (dock != null) dock.Place();   // It hides itself while a full-screen app covers the taskbar (CheckCovered).
             UpdateVisibility();
         }
 
