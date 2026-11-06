@@ -51,6 +51,7 @@ namespace AIMeter
         private readonly DispatcherTimer hideDetails = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         private Native.WinEventProc foregroundProc;   // Keep the delegate alive whilst the hook can call it.
         private bool fullscreenBusy;
+        private FullScreenWatch fullScreenWatch;
 
         private readonly AutoResetEvent wake = new AutoResetEvent(false);
         private volatile bool paused;
@@ -104,6 +105,8 @@ namespace AIMeter
             SystemEvents.DisplaySettingsChanged += (o, e) => ui.BeginInvoke(new Action(() => { if (desktop != null) desktop.Place(); if (pill != null) pill.Place(); if (dock != null) { dock.Place(); UpdatePillVisibility(); } }));
             foregroundProc = OnForegroundChanged;
             Native.SetWinEventHook(Native.EVENT_SYSTEM_FOREGROUND, Native.EVENT_SYSTEM_FOREGROUND, IntPtr.Zero, foregroundProc, 0, 0, 0);
+            // A video or a game can go full screen without another window coming to the foreground.
+            fullScreenWatch = new FullScreenWatch(CheckFullScreen);
             ThreadPool.RegisterWaitForSingleObject(showSignal, (s, t) => ui.BeginInvoke(new Action(ToggleFlyout)), null, -1, false);
             ThreadPool.RegisterWaitForSingleObject(settingsSignal, (s, t) => ui.BeginInvoke(new Action(OpenSettings)), null, -1, false);
 
@@ -335,6 +338,7 @@ namespace AIMeter
             SystemEvents.SessionSwitch -= OnSessionSwitch;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            if (fullScreenWatch != null) fullScreenWatch.Dispose();   // Windows asks appbars to unregister.
             tray.Visible = false;
             tray.Dispose();
             Application.Current.Shutdown();

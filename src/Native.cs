@@ -252,6 +252,88 @@ namespace AIMeter
             return st == 2 || st == 3 || st == 4; // BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION_MODE
         }
 
+        [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
+        [DllImport("user32.dll")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr h, StringBuilder name, int size);
+        [StructLayout(LayoutKind.Sequential)] private struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public uint dwFlags; }
+        private const int WS_CAPTION = 0x00C00000;
+
+        /// <summary>
+        /// Whether a full-screen app covers the monitor of the given window (the taskbar): an exclusive-mode game or a
+        /// presentation, or a foreground window without a title bar that covers the whole monitor, as a video player,
+        /// a browser in full screen or a borderless game does. A maximised window keeps its title bar, so it is not
+        /// full screen even when it covers an auto-hiding taskbar. The desktop and the taskbar themselves never count.
+        /// </summary>
+        public static bool FullScreenOver(IntPtr reference)
+        {
+            int st;
+            if (SHQueryUserNotificationState(out st) == 0 && (st == 3 || st == 4)) return true;   // D3D full screen, presentation
+            IntPtr fg = GetForegroundWindow();
+            if (fg == IntPtr.Zero || reference == IntPtr.Zero || IsOwnWindow(fg)) return false;
+            var name = new StringBuilder(64);
+            GetClassName(fg, name, name.Capacity);
+            if (IsShellSurface(name.ToString())) return false;
+            IntPtr monitor = MonitorFromWindow(reference, 2 /* MONITOR_DEFAULTTONEAREST */);
+            if (MonitorFromWindow(fg, 2) != monitor) return false;
+            var info = new MONITORINFO { cbSize = Marshal.SizeOf(typeof(MONITORINFO)) };
+            RECT r;
+            if (!GetMonitorInfo(monitor, ref info) || !GetWindowRect(fg, out r)) return false;
+            return CoversMonitor(r, info.rcMonitor, (GetWindowLong(fg, GWL_STYLE) & WS_CAPTION) == WS_CAPTION);
+        }
+
+        /// <summary>The desktop and the taskbars, which are in the foreground when nothing else is.</summary>
+        internal static bool IsShellSurface(string windowClass)
+        {
+            return windowClass == "Progman" || windowClass == "WorkerW" || windowClass == "Shell_TrayWnd" || windowClass == "Shell_SecondaryTrayWnd";
+        }
+
+        /// <summary>A window covers a monitor in full screen when it has no title bar and reaches every edge.</summary>
+        internal static bool CoversMonitor(RECT window, RECT monitor, bool hasTitleBar)
+        {
+            return !hasTitleBar && window.Left <= monitor.Left && window.Top <= monitor.Top && window.Right >= monitor.Right && window.Bottom >= monitor.Bottom;
+        }
+
+        [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr h, uint cmd);
+        private const uint GW_HWNDPREV = 3;
+
+        /// <summary>
+        /// Put a window just above another when it has ended up beneath it in the z-order, leaving it where it is
+        /// otherwise and every window above the other where they are: the taskbar pill above the taskbar, which
+        /// File Explorer raises over it when a full-screen app closes, but never above what covers the taskbar.
+        /// Returns whether it moved the window.
+        /// </summary>
+        public static bool KeepJustAbove(IntPtr window, IntPtr other)
+        {
+            if (window == IntPtr.Zero || other == IntPtr.Zero) return false;
+            bool beneath = false;
+            for (IntPtr h = GetWindow(window, GW_HWNDPREV); h != IntPtr.Zero; h = GetWindow(h, GW_HWNDPREV))
+                if (h == other) { beneath = true; break; }
+            if (!beneath) return false;
+            // Placed after the window that is just above the other one, that is, between the two.
+            IntPtr above = GetWindow(other, GW_HWNDPREV);
+            SetWindowPos(window, above != IntPtr.Zero ? above : HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            return true;
+        }
+
+        // Application desktop toolbars ("appbars"): a registered window is told when a full-screen app opens or closes.
+        public const int ABN_FULLSCREENAPP = 2;
+
+        /// <summary>Register a window as an appbar that reserves no space, to receive ABN_FULLSCREENAPP as the given message.</summary>
+        public static bool RegisterAppBar(IntPtr hwnd, uint callback)
+        {
+            var d = new APPBARDATA { hWnd = hwnd, uCallbackMessage = callback };
+            d.cbSize = Marshal.SizeOf(d);
+            return SHAppBarMessage(0 /* ABM_NEW */, ref d) != IntPtr.Zero;
+        }
+
+        /// <summary>Remove an appbar registration; Windows asks for it before the window is destroyed.</summary>
+        public static void RemoveAppBar(IntPtr hwnd)
+        {
+            var d = new APPBARDATA { hWnd = hwnd };
+            d.cbSize = Marshal.SizeOf(d);
+            SHAppBarMessage(1 /* ABM_REMOVE */, ref d);
+        }
+
         public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time);
         [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr mod, WinEventProc proc, uint pid, uint tid, uint flags);
         [DllImport("user32.dll")] public static extern bool UnhookWinEvent(IntPtr hook);
