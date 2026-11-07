@@ -164,10 +164,56 @@ for (const [runtime, candidate] of [["pi", pi], ["opencode", openCode]]) {
     assert.equal(job.summary.paid_request, true);
     assert.equal(job.summary.cost, 0.0021);
     assert.match(job.summary.error, /priced as paid/);
-    assert.deepEqual(released(calls), { lease_id: "lease-1", outcome: "failed", requests: 1, rate_limited: 0 });
+    assert.deepEqual(released(calls), { lease_id: "lease-1", outcome: "failed", requests: 1, rate_limited: 0, cost: 0.0021 });
     assert.throws(() => process.kill(job.agent_pid, 0), "the agent is gone");
   });
 }
+
+const cloudflare = { service: "cloudflare-workers-ai", model: "@cf/openai/gpt-oss-120b", runtime: { name: "pi", where: "wsl" }, pool: "cloudflare-workers-ai:neurons", warnings: ["free_tier_budget"] };
+const budget = (maxCost) => ({ metric: "neurons_per_day", unit: "neurons", limit: 10000, used: 2500, reserve: 1000, spendable: maxCost / 0.000011, max_cost: maxCost, currency: "USD" });
+
+test("free-tier candidates are asked for only when the job allows them", async () => {
+  const { workspace, calls } = setUp({ candidates: [], free_tier: [cloudflare], budget: budget(0.05) });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.equal(calls().find((c) => c.tool === "list_candidates").arguments.include_free_tier, undefined);
+  assert.equal(calls().filter((c) => c.tool === "claim_capacity").length, 0);
+});
+
+test("a free-tier task priced within its budget completes, and its cost goes back with the lease", async () => {
+  const { workspace, calls } = setUp({ candidates: [], free_tier: [cloudflare], budget: budget(0.05), behaviour: { pi: "priced" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace, allow_free_tier: true }).id, 20);
+
+  assert.equal(job.status, "completed");
+  assert.equal(calls().find((c) => c.tool === "list_candidates").arguments.include_free_tier, true);
+  assert.equal(job.summary.paid_request, false, "a price within the budget does not stop the agent");
+  assert.equal(job.summary.allowance, 0.05);
+  assert.equal(job.budget.max_cost, 0.05);
+  assert.equal(released(calls).cost, 0.0021, "AI Meter counts the cost before Cloudflare reports it");
+});
+
+test("a free-tier task whose requests cost more than its budget is stopped and fails", async () => {
+  const { workspace, calls } = setUp({ candidates: [], free_tier: [cloudflare], budget: budget(0.001), behaviour: { pi: "paid" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace, allow_free_tier: true }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.equal(job.summary.paid_request, true);
+  assert.match(job.summary.error, /past the free allocation's budget of 0\.001 USD/);
+  assert.equal(released(calls).cost, 0.0021);
+  assert.throws(() => process.kill(job.agent_pid, 0), "the agent is gone");
+});
+
+test("a free-tier lease without a budget is given back and the candidate skipped", async () => {
+  // AI Meter orders candidates by room, so a free tier can come before an ordinary one.
+  const { workspace, calls } = setUp({ candidates: [], free_tier: [cloudflare, pi] });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace, allow_free_tier: true }).id, 20);
+
+  assert.equal(job.status, "completed");
+  assert.equal(job.candidate.service, "openrouter");
+  assert.match(job.skipped.find((s) => s.service === "cloudflare-workers-ai").reason, /no budget/);
+  assert.deepEqual(released(calls), { lease_id: "lease-1", outcome: "cancelled", requests: 0 }, "the budgetless lease is released first");
+});
 
 const estimated = { source: "agent:pi", tools: true, context_tokens: 131072, unverified: ["price", "tools", "limits"] };
 const bestEffortPi = { ...pi, service: "nvidia", model: "meta/llama-4", pool: "nvidia:account", warnings: ["best_effort"], estimated };

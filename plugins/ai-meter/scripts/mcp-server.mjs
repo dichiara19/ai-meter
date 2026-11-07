@@ -24,6 +24,10 @@ const needs = {
   min_context: integer("Smallest context window the task needs, in tokens."),
   cost_policy: choice("free_only (default): only models whose list states a zero price. free_or_unconfirmed: also models whose price the service does not state.", "free_only", "free_or_unconfirmed"),
 };
+const freeTier = (verb) => ({
+  type: "boolean",
+  description: verb + " free-tier models (Cloudflare Workers AI): priced, but free within a daily allocation. The plugin stops the agent when its requests reach the budget AI Meter grants; one request can still cross it, and on a paid plan that request is billed. Only with the user's agreement. Default false.",
+});
 const bestEffort = (verb) => ({
   type: "boolean",
   description: verb + " best-effort candidates: models whose service states no price or capabilities, filled in from an agent's own model list. They may fail, stop or meet unstated limits. Only with the user's agreement. Default false.",
@@ -51,6 +55,7 @@ const TOOLS = [
         where: choice("Only agents in this place.", "windows", "wsl"),
         distro: text("Only agents in this WSL distribution."),
         allow_best_effort: bestEffort("Also use, after every ordinary candidate,"),
+        allow_free_tier: freeTier("Also use"),
         timeout_seconds: integer(`Stop the agent after this long: default ${jobs.DEFAULT_TIMEOUT_SECONDS}, at most ${jobs.MAXIMUM_TIMEOUT_SECONDS}.`),
         wait_seconds: waitSeconds,
       },
@@ -75,7 +80,7 @@ const TOOLS = [
   {
     name: "delegate_candidates",
     description: "Where a task could run now for free, from AI Meter: candidates in order, each pool's room, why other models are left out and which agents were found. Starts nothing.",
-    inputSchema: { type: "object", properties: { ...needs, include_best_effort: bestEffort("Also list") } },
+    inputSchema: { type: "object", properties: { ...needs, include_best_effort: bestEffort("Also list"), include_free_tier: freeTier("Also list") } },
   },
 ];
 

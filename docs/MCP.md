@@ -91,9 +91,9 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `list_free_models` | Free models with id, context window, output limit, tool and reasoning support, last free day, how the price is known (`free`) and their limits (`limits`, see below); filters `tools`, `min_context`, `min_output_tokens` and `include_unconfirmed` |
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
-| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, in a fixed order; each pool's room; why every other model is left out; which agents were found but cannot be used; and, when asked, best-effort candidates built on the agents' own model lists. See below |
+| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, in a fixed order; each pool's room; why every other model is left out; which agents were found but cannot be used; and, when asked, best-effort candidates built on the agents' own model lists and free-tier candidates (Cloudflare Workers AI). See below |
 | `describe_dispatch` | How to start a candidate: program, argument list and environment for a verified agent and place. The task goes on stdin, never in the arguments. See below |
-| `claim_capacity`, `renew_capacity`, `release_capacity` | Cooperative capacity leases on a candidate's pool. These are the only tools that change anything: AI Meter's own lease book. See below |
+| `claim_capacity`, `renew_capacity`, `release_capacity` | Cooperative capacity leases on a candidate's pool, with the budget of a free tier. These are the only tools that change anything: AI Meter's own lease book. See below |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
 
 All tools except `list_local_models` and `suggest_service` accept an optional `service` (`claude`, `openai`, `copilot`, `openrouter`…).
@@ -122,7 +122,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 ```
 
 - **`free.status`.**
-  - `confirmed_free`: the service's list states a zero price.
+  - `confirmed_free`: the service's list states a zero price (`kind: "zero_price"`), or the service documents a free allocation (`kind: "free_tier"`, see [Free tiers](#free-tiers-cloudflare-workers-ai)).
   - `unknown`: the service lists no prices, as with NVIDIA and Gemini. Whether such a model is free depends on the account or project, which the key cannot read. These models are listed only with `include_unconfirmed: true`, and `free.note` explains why.
 - **`per_request`.** The context window and the reply size the service states for one request. Unknown values are `null`, and filters leave those models out.
 - **`pool`.** The counter the limits draw from. Models with the same pool share it, so never add their limits up. `{model}` pools, such as Gemini's, are per model.
@@ -149,6 +149,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 - `tools`, `min_context` and `min_output_tokens`: what the task needs;
 - `service`: only this service;
 - `cost_policy`: `free_only` (default) admits only models whose list states a zero price. `free_or_unconfirmed` also admits models whose price the service does not state, such as NVIDIA and Gemini models;
+- `include_free_tier`: also admit free-tier models, which are priced but free within a daily allocation ([Free tiers](#free-tiers-cloudflare-workers-ai)). Off by default, whatever the `cost_policy`;
 - `refresh` and `max_age_seconds`, as in the other tools.
 
 **A candidate is a model, a runtime and a credential.**
@@ -180,13 +181,16 @@ Each model from `list_free_models` says how its price is known and what limits a
 | `reason` | Meaning |
 |---|---|
 | `price_not_confirmed` | The service does not state a zero price, and the policy is `free_only` |
+| `free_tier_not_allowed` | A free-tier model, and the request did not set `include_free_tier` |
+| `agent_price_unknown` | A free-tier model that no agent with a key lists at a price, so the plugin could not see what a task spends |
+| `allowance_unknown` | A free tier whose use today is unknown, for example while its usage cannot be read: no task starts on a budget nobody knows |
 | `no_tools`, `tools_unknown` | The task needs tool calls; the model has none, or its list does not say |
 | `context_too_small`, `context_unknown`, `output_too_small`, `output_unknown` | The task needs more than the model takes, or the limit is not stated |
 | `no_runtime` | No supported agent is set up on Windows, nor in a running WSL distribution (see `runtimes.unsupported`) |
 | `runtime_has_no_key` | No agent that is set up has a key of its own for this service |
 | `key_discovery_off` | Key discovery is turned off, so the agents' keys cannot be checked |
 | `rate_limited` | The service answered "too many requests"; `until` is when AI Meter may ask again |
-| `exhausted` | A counter the service reports is used up; `until` is its reset |
+| `exhausted` | A counter the service reports is used up, or a free tier has nothing left beyond its reserve; `until` is its reset |
 
 AI Meter sees only the rate limits of its own reads and the counters services report. Rate limits an agent hits during a task are counted when its plugin releases the task's lease.
 
@@ -194,6 +198,7 @@ AI Meter sees only the rate limits of its own reads and the counters services re
 
 | Warning | Meaning |
 |---|---|
+| `free_tier_budget` | The model is priced and free only within a daily allocation. Stop the agent as soon as its requests cost more than the `budget.max_cost` that `claim_capacity` returns, and release the lease with their `cost` |
 | `openrouter_byok_fallback` | OpenRouter can retry a `:free` request that hit the free route's limit on a provider key the user linked to OpenRouter (BYOK), billed to that provider account. The catalogue's zero price cannot show this. Watch `output.cost` and stop the agent at the first request priced above zero, or ask the user to unlink BYOK keys before delegating |
 
 ### Best-effort candidates
@@ -215,6 +220,26 @@ Checked on 2026-11-02 against public lists:
 - all 21 NVIDIA models in Pi's list have tool calling according to models.dev;
 - of the 386 OpenRouter models Pi lists, 377 have tools on OpenRouter. Pi marks 8 of the others as image models (`type: "image"`), which are not counted as having tools here. The one Pi lists as a chat model, the `openrouter/fusion` router, is the kind of exception best effort is for.
 
+### Free tiers: Cloudflare Workers AI
+
+Cloudflare prices every Workers AI model in Neurons, but the first 10,000 Neurons of each UTC day are free, on the Workers Free and Paid plans alike. Past them, the Free plan refuses requests and the Paid plan bills $0.011 per 1,000. A task on these models is therefore free only while it stays within what is left today.
+
+- **The list.** AI Meter reads the models from [models.dev](https://models.dev)'s public catalogue every 12 hours, with no key. It is the catalogue Pi and OpenCode price Cloudflare's models from, so the ids and prices match what the agents report. Each model has `free: { "status": "confirmed_free", "kind": "free_tier" }` and the pool `cloudflare-workers-ai:neurons`.
+- **The limit.** The pool's `neurons_per_day` limit is 10,000, with today's use read from Cloudflare's analytics (`provider_reported`), which can lag a few minutes. The documented 300 requests per minute is listed too.
+- **Consent.** They are candidates only with `include_free_tier: true`, never best effort.
+- **The agent must price them.** A free-tier model is offered only through an agent whose own model list prices it, the opposite of free models. Otherwise the agent would report a cost of zero and the plugin could not see what the task spends (`agent_price_unknown`).
+- **The budget.** `headroom.budget` in `pools` and in `list_free_models`, and `budget` in the answer of `claim_capacity`:
+
+  ```json
+  "budget": { "metric": "neurons_per_day", "unit": "neurons", "limit": 10000, "used": 2500, "reserve": 1000,
+              "spendable": 6500, "max_cost": 0.0715, "currency": "USD", "usd_per_unit": 0.000011, "leased_cost_today": 0, "resets_at": "…" }
+  ```
+
+  - `used` is the larger of Cloudflare's count and the cost released with today's leases (`leased_cost_today`, converted to Neurons), so a task that just ended counts before Cloudflare reports it. The two are never added up.
+  - `reserve` (1,000 Neurons) is never offered: it absorbs the request that crosses the limit and the analytics lag.
+  - `max_cost` is what the agent's requests may cost, in US dollars, before the plugin stops the agent. The plugin stops it after the request that crosses it, so one request can still go past: on the Paid plan, that request is billed.
+  - Without a reading of today's use the budget is unknown, and the pool is closed (`allowance_unknown`). With nothing left beyond the reserve it is `exhausted` until midnight UTC.
+
 ### Running a task: `describe_dispatch` and capacity leases
 
 AI Meter starts nothing. A coordinator plugin runs the agent ([ADR 0002](adr/0002-delegation-through-coordinator-plugins.md)), following these steps:
@@ -222,8 +247,8 @@ AI Meter starts nothing. A coordinator plugin runs the agent ([ADR 0002](adr/000
 2. `describe_dispatch` for the candidate. It reserves nothing, so a plugin can describe first and claim only for an agent it can start.
 3. `claim_capacity` with the candidate's `service`, `model` and `runtime`.
 4. Start `program` with `arguments` and `environment`, without a shell. Write the task to stdin, then close it.
-5. Read the output as `output` describes. `renew_capacity` during long tasks.
-6. `release_capacity` with the outcome.
+5. Read the output as `output` describes. `renew_capacity` during long tasks. For a free tier, stop the agent once its requests cost more than the lease's `budget.max_cost`.
+6. `release_capacity` with the outcome, and the `cost` the agent reported.
 
 The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code and Codex follows these steps.
 
@@ -242,9 +267,10 @@ The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code 
 **Leases.**
 - `claim_capacity` refuses when the pool has no room. The answer includes the pool's `headroom`, with `blocking.reason`: `exhausted`, `rate_limited` or `leased`.
 - A lease lasts `ttl_seconds` (default 1800, at most 7200) unless renewed. Unreleased leases expire with an unknown outcome.
-- `release_capacity` takes `outcome`, `requests`, `rate_limited`, `retry_after_seconds` and the tokens. A rate limit closes the pool until `retry_after_seconds`, or for a minute.
+- `claim_capacity` for a free-tier pool also returns its `budget` (see [Free tiers](#free-tiers-cloudflare-workers-ai)).
+- `release_capacity` takes `outcome`, `requests`, `rate_limited`, `retry_after_seconds`, the tokens and `cost`, in US dollars as the agent priced the requests. A rate limit closes the pool until `retry_after_seconds`, or for a minute. The cost counts against a free tier's budget at once.
 - Active leases count in every `headroom` (`leased`). Released outcomes fill `observed` in `list_free_models`, with `coverage: "ai_meter_leases_only"`: tasks run without leases are not counted.
-- AI Meter keeps the leases in `%APPDATA%\AIMeter\leases.json`. It stores only pool, service, model, agent, client label, times and outcome counters, for 30 days. Never task text, code, logs or keys.
+- AI Meter keeps the leases in `%APPDATA%\AIMeter\leases.json`. It stores only pool, service, model, agent, client label, times and outcome counters (the cost among them), for 30 days. Never task text, code, logs or keys.
 
 ### Agent definitions
 

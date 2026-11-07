@@ -24,6 +24,7 @@ export function full(job, jobsFolder) {
   }
   if (job.warnings?.length) report.warnings = job.warnings;
   if (job.estimated) report.estimated = job.estimated;
+  if (job.budget) report.budget = job.budget;
   if (job.best_effort_available) report.best_effort_available = job.best_effort_available;
   if (job.worktree) report.worktree = job.worktree;
   if (job.snapshot?.secrets_left_out?.length) report.secret_files_left_out = job.snapshot.secrets_left_out;

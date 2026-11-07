@@ -10,6 +10,9 @@
 // tells the plugin to stop the agent; a zero price does not prove the request was free (an OpenRouter BYOK fallback
 // is billed by the provider, out of the agent's sight). OpenRouter does name a BYOK provider in its error bodies
 // ("is_byok":true), so an error that shows one is reported as byok_fallback.
+// A free tier (Cloudflare Workers AI) is the exception: its requests are priced, and free only within a daily
+// allocation. AI Meter's claim_capacity grants such a task a budget in US dollars (allowance); `paid` then means the
+// requests cost more than that budget, beyond which they would be billed or refused.
 
 /** Shared counters; the readers below add to them. */
 class Reader {
@@ -19,6 +22,7 @@ class Reader {
     this.outputTokens = 0;
     this.rateLimited = 0;
     this.cost = 0;
+    this.allowance = 0;   // US dollars the requests may cost: 0 for free models, a free tier's budget otherwise.
     this.paid = false;
     this.error = null;
     this.byok = false;
@@ -40,7 +44,7 @@ class Reader {
   price(cost) {
     if (typeof cost !== "number" || !(cost > 0)) return;
     this.cost += cost;
-    this.paid = true;
+    if (this.cost > this.allowance) this.paid = true;
   }
 }
 
@@ -156,10 +160,12 @@ export function summarise(reader, exitCode, stopped) {
     input_tokens: tokensKnown ? reader.inputTokens : null,
     output_tokens: tokensKnown ? reader.outputTokens : null,
     cost: reader.cost,
+    ...(reader.allowance > 0 ? { allowance: reader.allowance } : {}),
     paid_request: reader.paid,
     byok_fallback: reader.byok,
     error:
-      stopped === "paid" ? "Stopped: a request was priced as paid (" + reader.cost + "), so the free route was not used."
+      stopped === "paid" && reader.allowance > 0 ? "Stopped: the requests cost " + reader.cost + " USD, past the free allocation's budget of " + reader.allowance + " USD."
+      : stopped === "paid" ? "Stopped: a request was priced as paid (" + reader.cost + "), so the free route was not used."
       : STOPPED_ERRORS[stopped] || reader.error || (stopped ? null : reader.incomplete()),
     answer: reader.answer,
   };

@@ -14,7 +14,8 @@ namespace AIMeter
     /// clients that do not use them are invisible, and the answers say so. A lease that is not released expires on its
     /// own with an unknown outcome, so a crashed plugin cannot block a pool.
     ///
-    /// The book keeps only pools, models, agents, client labels, times and outcome counters: never task text, code,
+    /// The book keeps only pools, models, agents, client labels, times and outcome counters (the cost among them, which
+    /// a free tier's budget counts before the service's own count catches up): never task text, code,
     /// logs, paths or keys. It is saved as a small JSON file next to the settings; outcome counters are kept for 30 days.
     /// All members are thread-safe: MCP clients call them from their own threads.
     ///
@@ -177,6 +178,7 @@ namespace AIMeter
             if (outcome.Requests.HasValue) o.Requests += outcome.Requests.Value; else o.RequestsUnknown++;
             if (outcome.InputTokens.HasValue) o.InputTokens += outcome.InputTokens.Value;
             if (outcome.OutputTokens.HasValue) o.OutputTokens += outcome.OutputTokens.Value;
+            if (outcome.Cost.HasValue) o.Cost += outcome.Cost.Value;
             if (outcome.RateLimited > 0) { o.RateLimited += outcome.RateLimited; o.LastRateLimited = now; }
             observed.RemoveAll(x => x.Day < day.AddDays(-KeepDays));
         }
@@ -205,6 +207,7 @@ namespace AIMeter
                         Requests = (long)(Json.Num(o, "requests") ?? 0), RequestsUnknown = (int)(Json.Num(o, "requests_unknown") ?? 0),
                         InputTokens = (long)(Json.Num(o, "input_tokens") ?? 0), OutputTokens = (long)(Json.Num(o, "output_tokens") ?? 0),
                         RateLimited = (int)(Json.Num(o, "rate_limited") ?? 0), LastRateLimited = Utc(Json.Str(o, "last_rate_limited")),
+                        Cost = Json.Num(o, "cost") ?? 0,
                     });
                 foreach (var b in Json.Items(doc, "backoff"))
                 {
@@ -244,7 +247,7 @@ namespace AIMeter
                     {
                         { "pool", o.Pool }, { "day", o.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) }, { "ended", o.Ended }, { "unknown", o.Unknown },
                         { "failed", o.Failed }, { "requests", o.Requests }, { "requests_unknown", o.RequestsUnknown }, { "input_tokens", o.InputTokens },
-                        { "output_tokens", o.OutputTokens }, { "rate_limited", o.RateLimited },
+                        { "output_tokens", o.OutputTokens }, { "rate_limited", o.RateLimited }, { "cost", o.Cost },
                         { "last_rate_limited", o.LastRateLimited.HasValue ? Iso(o.LastRateLimited.Value) : null },
                     }).ToList() },
                 { "backoff", backoff.Where(kv => kv.Value > DateTime.UtcNow).Select(kv => (object)new Dictionary<string, object> { { "pool", kv.Key }, { "until", Iso(kv.Value) } }).ToList() },
@@ -272,6 +275,8 @@ namespace AIMeter
         {
             public string Result;   // completed, failed, cancelled, timed_out, or unknown for an expired lease.
             public long? Requests, InputTokens, OutputTokens;
+            /// <summary>What the agent priced the task's requests at, in US dollars; counts against a free tier's budget.</summary>
+            public double? Cost;
             public int RateLimited;
             public TimeSpan? RetryAfter;
         }
@@ -283,6 +288,7 @@ namespace AIMeter
             public DateTime Day;
             public int Ended, Unknown, Failed, RequestsUnknown, RateLimited, InFlight;
             public long Requests, InputTokens, OutputTokens;
+            public double Cost;                 // US dollars, as the agents priced the requests.
             public DateTime? LastRateLimited;   // UTC in the book; local in the copies Today returns.
 
             public Observation Copy() { return (Observation)MemberwiseClone(); }

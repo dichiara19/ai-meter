@@ -274,14 +274,16 @@ namespace AIMeter
         {
             if (p.Catalogue == null || RowHidden(p.Id, "*free")) return;
             // Only models known to cost nothing are called free. A list without prices, such as NVIDIA's or Gemini's,
-            // is shown as models whose price the service does not state.
+            // is shown as models whose price the service does not state, and a free tier's (Cloudflare's) as models
+            // free within the daily allocation, which the card's limit shows.
             var fm = p.Catalogue.Models.Where(m => m.Free == null || m.Free.Confirmed).ToList();
-            bool unpriced = fm.Count == 0;
+            bool unpriced = fm.Count == 0, freeTier = fm.Count > 0 && fm.All(Candidates.IsFreeTier);
             if (unpriced) fm = p.Catalogue.Models;
             if (fm.Count == 0) return;
             double indent = toggle != null ? 18 : 0;
             var box = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
             string count = unpriced ? L.N(fm.Count, "{0} model, price not stated", "{0} models, price not stated")
+                         : freeTier ? L.N(fm.Count, "{0} model, free within the daily allocation", "{0} models, free within the daily allocation")
                                     : L.N(fm.Count, "{0} free model", "{0} free models");
             if (toggle != null) box.Children.Add(FoldRow(count, open, toggle, new Thickness(0)));
             else box.Children.Add(Text(count, 11.5, "Text3"));
