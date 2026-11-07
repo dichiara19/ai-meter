@@ -143,6 +143,7 @@ export function start(options) {
     timeout_seconds: timeout,
     wanted: pick(options, ["service", "model", "runtime", "where", "distro", "min_context", "cost_policy"]),
     allow_best_effort: options.allow_best_effort === true || options.allow_best_effort === "true",
+    allow_free_tier: options.allow_free_tier === true || options.allow_free_tier === "true",
     skipped: [],
   };
   save(job);
@@ -258,6 +259,7 @@ async function choose(job, signal) {
       tools: true,
       ...pick(wanted, ["service", "min_context", "cost_policy"]),
       ...(job.allow_best_effort ? { include_best_effort: true } : {}),
+      ...(job.allow_free_tier ? { include_free_tier: true } : {}),
     });
     const matches = (c) =>
       (!wanted.model || c.model === wanted.model) && (!wanted.runtime || c.runtime.name === wanted.runtime) && (!wanted.where || c.runtime.where === wanted.where) &&
@@ -299,6 +301,13 @@ async function choose(job, signal) {
         job.skipped.push({ ...which, reason: "pool " + c.pool + " has no room: " + (lease.headroom?.blocking?.reason || "full") });
         continue;
       }
+      // A free-tier model is priced: without a budget to stop at, the agent's first request would end the task.
+      if ((c.warnings || []).includes("free_tier_budget") && !(lease.budget?.max_cost > 0)) {
+        await meter.call("release_capacity", { lease_id: lease.lease_id, outcome: "cancelled", requests: 0 });
+        job.skipped.push({ ...which, reason: "AI Meter granted no budget within the free allocation" });
+        continue;
+      }
+      if (lease.budget) job.budget = lease.budget;
       job.candidate = { ...which, pool: c.pool, ...(c.bestEffort ? { best_effort: true } : {}) };
       if (c.estimated) job.estimated = c.estimated;
       job.lease_id = lease.lease_id;
@@ -330,6 +339,7 @@ async function runAgent(job, chosen, task, signal) {
   if (signal.aborted) throw signal.reason;
 
   const reader = readerFor(plan.runtime);
+  reader.allowance = chosen.lease.budget?.max_cost || 0;
   const child = spawn(plan.program, plan.arguments, {
     cwd: plan.working_directory || undefined,
     env: { ...process.env, ...plan.environment },
@@ -369,7 +379,7 @@ async function runAgent(job, chosen, task, signal) {
     } catch {
       // Not an event: kept in events.jsonl only.
     }
-    if (reader.paid) stop("paid");   // The first request priced above zero ends the task.
+    if (reader.paid) stop("paid");   // The first request priced above zero, or past a free tier's budget, ends the task.
   };
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
@@ -437,6 +447,7 @@ async function runAgent(job, chosen, task, signal) {
       outcome: summary.outcome,
       requests: summary.requests,
       rate_limited: summary.rate_limited,
+      ...(summary.cost > 0 ? { cost: summary.cost } : {}),
       ...(summary.input_tokens === null ? {} : { input_tokens: summary.input_tokens, output_tokens: summary.output_tokens }),
     });
     job.released = true;

@@ -147,7 +147,9 @@ namespace AIMeter
                      "cannot be used; runtimes.unsupported lists the agents found that delegation cannot use, with the reason. " +
                      "warnings flags candidates a plugin must watch, such as openrouter_byok_fallback. With include_best_effort, best_effort " +
                      "lists models the service's own list leaves short (price, tool support or limits unstated) that an agent's own model " +
-                     "list has at no price: they may fail or stop, so ask the user before using one. Nothing is started or reserved.",
+                     "list has at no price: they may fail or stop, so ask the user before using one. With include_free_tier, also models that " +
+                     "are priced but free within a daily allocation (Cloudflare Workers AI): a plugin must stop the agent when its " +
+                     "priced requests reach the budget claim_capacity returns, so ask the user first. Nothing is started or reserved.",
                      new Dictionary<string, object>
                      {
                          { "service", service },
@@ -157,6 +159,7 @@ namespace AIMeter
                          { "cost_policy", new Dictionary<string, object> { { "type", "string" }, { "enum", new List<object> { Candidates.FreeOnly, Candidates.FreeOrUnconfirmed } },
                              { "description", "free_only (default): only models whose list states a zero price. free_or_unconfirmed: also models whose price the service does not state." } } },
                          { "include_best_effort", Property("boolean", "Also list best-effort candidates, built on the agents' own model lists where the service states nothing. Off by default.") },
+                         { "include_free_tier", Property("boolean", "Also accept free-tier models: priced, but free within a daily allocation the plugin must keep to with claim_capacity's budget. Off by default.") },
                          { "refresh", refresh("their limits") },
                          { "max_age_seconds", maxAge("their limits") },
                      }, true),
@@ -180,7 +183,8 @@ namespace AIMeter
                      }, false),
                 Tool("claim_capacity", "Take a slot in a candidate's pool before starting its agent, so that other plugins see it as busy. " +
                      "Refused when the pool has no room. Renew it during long tasks and release it when the task ends; an unreleased " +
-                     "lease expires on its own. Leases bind only clients that use them.",
+                     "lease expires on its own. Leases bind only clients that use them. For a free-tier pool the answer has a budget: " +
+                     "stop the agent as soon as its requests, priced as the agent reports them, cost more than budget.max_cost.",
                      new Dictionary<string, object>
                      {
                          { "service", Property("string", "The candidate's service.") },
@@ -196,7 +200,8 @@ namespace AIMeter
                          { "ttl_seconds", Property("integer", "New duration from now: default 1800, at most 7200.") },
                      }, false, false),
                 Tool("release_capacity", "End a lease from claim_capacity with the task's outcome. A rate limit the agent met closes the pool " +
-                     "until retry_after_seconds, or for a minute. Releasing twice changes nothing.",
+                     "until retry_after_seconds, or for a minute. The cost counts against a free tier's budget at once, before the " +
+                     "service reports it. Releasing twice changes nothing.",
                      new Dictionary<string, object>
                      {
                          { "lease_id", Property("string", "The lease to end.") },
@@ -206,6 +211,7 @@ namespace AIMeter
                          { "retry_after_seconds", Property("integer", "The longest Retry-After the agent saw, when any.") },
                          { "input_tokens", Property("integer", "Input tokens, when known.") },
                          { "output_tokens", Property("integer", "Output tokens, when known.") },
+                         { "cost", Property("number", "What the agent priced the task's requests at, in US dollars, when it reports prices.") },
                      }, false, false),
             };
         }
@@ -299,6 +305,7 @@ namespace AIMeter
                     {
                         Service = service, Tools = Json.Bool(args, "tools"), MinContext = (long)(Json.Num(args, "min_context") ?? 0),
                         MinOutput = (long)(Json.Num(args, "min_output_tokens") ?? 0), CostPolicy = policy, BestEffort = Json.Bool(args, "include_best_effort"),
+                        FreeTier = Json.Bool(args, "include_free_tier"),
                     }, DateTime.Now, leases), scan);
                     break;
                 default: result = Suggest(snap.Providers); break;
@@ -548,7 +555,8 @@ namespace AIMeter
                 { "pool", p.Catalogue.PoolOf(m) },
                 { "rates", rates },
                 { "observed", Observed(p.Catalogue.PoolOf(m) ?? p.Id) },
-                { "headroom", RoomJson(Candidates.Room(p.Id, p.Catalogue.Rates, DateTime.Now, leases, p.Catalogue.PoolOf(m) ?? p.Id)) },
+                { "headroom", RoomJson(Candidates.Room(p.Id, p.Catalogue.Rates, DateTime.Now, leases, p.Catalogue.PoolOf(m) ?? p.Id,
+                    Candidates.BudgetOf(p.Catalogue, leases, p.Catalogue.PoolOf(m) ?? p.Id, DateTime.Now))) },
             };
         }
 
@@ -567,6 +575,30 @@ namespace AIMeter
                 d["remaining_share"] = Math.Round(room.Ratio.Value, 3);
                 d["binding_limit"] = room.BindingMetric;
             }
+            if (room.Budget != null) d["budget"] = BudgetJson(room.Budget);
+            return d;
+        }
+
+        /// <summary>A free-tier candidate's warning: the plugin must keep the agent's priced requests within the budget.</summary>
+        internal const string FreeTierBudget = "free_tier_budget";
+        private const string FreeTierNote = "This model is priced and free only within a daily allocation: stop the agent as soon as its " +
+            "requests cost more than the budget claim_capacity returns (max_cost), and release the lease with their cost.";
+
+        /// <summary>
+        /// A free tier's budget for one task: the allocation in its unit (limit, used, the reserve kept back and what is
+        /// spendable) and max_cost, the most the agent's requests may cost, in US dollars, before the plugin stops it.
+        /// Unknown values are null, and an unknown budget lets no task start.
+        /// </summary>
+        private static Dictionary<string, object> BudgetJson(Budget b)
+        {
+            Func<double?, object> round = v => v.HasValue ? (object)Math.Round(v.Value, 6) : null;
+            var d = new Dictionary<string, object>
+            {
+                { "metric", b.Allowance.Metric }, { "unit", b.Allowance.Unit }, { "limit", b.Limit }, { "used", round(b.Used) },
+                { "reserve", b.Allowance.Reserve }, { "spendable", round(b.Spendable) }, { "max_cost", round(b.MaxCost) }, { "currency", "USD" },
+                { "usd_per_unit", b.Allowance.UsdPerUnit }, { "leased_cost_today", round(b.LeasedCostToday) },
+            };
+            if (b.ResetsAt.HasValue) d["resets_at"] = Time(b.ResetsAt.Value);
             return d;
         }
 
@@ -600,12 +632,13 @@ namespace AIMeter
             {
                 string outcome = Json.Str(args, "outcome") ?? "";
                 if (!new[] { "completed", "failed", "cancelled", "timed_out" }.Contains(outcome)) return error("outcome must be completed, failed, cancelled or timed_out.");
-                double? retry = Json.Num(args, "retry_after_seconds");
+                double? retry = Json.Num(args, "retry_after_seconds"), cost = Json.Num(args, "cost");
+                if (cost.HasValue && (double.IsNaN(cost.Value) || double.IsInfinity(cost.Value) || cost.Value < 0)) return error("cost must be a number of US dollars, zero or more.");
                 var released = leases.Release(Json.Str(args, "lease_id") ?? "", new LeaseBook.Outcome
                 {
                     Result = outcome, Requests = (long?)Json.Num(args, "requests"), RateLimited = (int)(Json.Num(args, "rate_limited") ?? 0),
                     RetryAfter = retry > 0 ? TimeSpan.FromSeconds(Math.Min(retry.Value, 86400)) : (TimeSpan?)null,
-                    InputTokens = (long?)Json.Num(args, "input_tokens"), OutputTokens = (long?)Json.Num(args, "output_tokens"),
+                    InputTokens = (long?)Json.Num(args, "input_tokens"), OutputTokens = (long?)Json.Num(args, "output_tokens"), Cost = cost,
                 }, now);
                 var d = new Dictionary<string, object> { { "lease_id", Json.Str(args, "lease_id") }, { "released", released != null } };
                 if (released == null) d["note"] = "No active lease with this id: it was already released or has expired. Nothing changed.";
@@ -638,12 +671,16 @@ namespace AIMeter
 
             if (name == "claim_capacity")
             {
-                var room = Candidates.Room(service, provider.Catalogue.Rates, now);
+                // The room before leases: Claim counts the active ones itself, together with taking the slot.
+                var budget = Candidates.BudgetOf(provider.Catalogue, leases, pool, now);
+                var room = Candidates.Room(service, provider.Catalogue.Rates, now, null, null, budget);
                 if (room.Blocking == null && leases.BackoffUntil(pool) > now) { room.Blocking = "rate_limited"; room.Until = leases.BackoffUntil(pool); room.MaxNewJobs = 0; }
                 var lease = room.Blocking != null ? null : leases.Claim(pool, service, model, runtime, Json.Str(args, "client"), (int)(Json.Num(args, "ttl_seconds") ?? 0), room.MaxNewJobs, now);
                 if (lease == null)
-                    return ToolResult(new Dictionary<string, object> { { "refused", true }, { "pool", pool }, { "headroom", RoomJson(Candidates.Room(service, provider.Catalogue.Rates, now, leases, pool)) } }, false);
-                return ToolResult(new Dictionary<string, object> { { "lease_id", lease.Id }, { "pool", pool }, { "expires_at", Time(lease.ExpiresAtUtc.ToLocalTime()) }, { "coverage", "ai_meter_leases_only" } }, false);
+                    return ToolResult(new Dictionary<string, object> { { "refused", true }, { "pool", pool }, { "headroom", RoomJson(Candidates.Room(service, provider.Catalogue.Rates, now, leases, pool, budget)) } }, false);
+                var claimed = new Dictionary<string, object> { { "lease_id", lease.Id }, { "pool", pool }, { "expires_at", Time(lease.ExpiresAtUtc.ToLocalTime()) }, { "coverage", "ai_meter_leases_only" } };
+                if (budget != null) claimed["budget"] = BudgetJson(budget);
+                return ToolResult(claimed, false);
             }
 
             var plan = Dispatch.Describe(access, model, Json.Str(args, "mode"), Json.Str(args, "workspace"), Json.Str(args, "from") ?? "windows",
@@ -658,6 +695,11 @@ namespace AIMeter
                 { "notes", plan.Notes.Cast<object>().ToList() },
             };
             if (access.Distro != null) described["distro"] = access.Distro;
+            if (Candidates.IsFreeTier(free))
+            {
+                plan.Warnings.Add(FreeTierBudget);
+                described["notes"] = plan.Notes.Concat(new[] { FreeTierNote }).Cast<object>().ToList();
+            }
             if (plan.Warnings.Count > 0) described["warnings"] = plan.Warnings.Cast<object>().ToList();
             return ToolResult(described, false);
         }
@@ -677,6 +719,7 @@ namespace AIMeter
                     { "credential", c.Access.Credential }, { "pool", c.Pool }, { "free", FreeJson(c.Model.Free) }, { "limits", LimitsJson(c.Provider, c.Model) },
                 };
                 var warnings = Dispatch.Warnings(c.Provider.Id);
+                if (Candidates.IsFreeTier(c.Model)) warnings.Add(FreeTierBudget);
                 if (c.Estimated != null) warnings.Insert(0, "best_effort");
                 if (warnings.Count > 0) d["warnings"] = warnings.Cast<object>().ToList();
                 if (c.Estimated != null) d["estimated"] = EstimatedJson(c);

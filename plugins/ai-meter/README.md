@@ -45,11 +45,11 @@ The coordinator calls these tools of the `ai-meter-delegate` server:
 
 | Tool | What it does |
 |---|---|
-| `delegate` | Starts a background job and returns its id. Takes `task`, `workspace` (absolute path), `mode`, and optionally `service`, `model`, `runtime`, `where`, `distro`, `min_context`, `allow_best_effort`, `cost_policy`, `timeout_seconds` (default 1200, at most 7000) and `wait_seconds` (at most 50) |
+| `delegate` | Starts a background job and returns its id. Takes `task`, `workspace` (absolute path), `mode`, and optionally `service`, `model`, `runtime`, `where`, `distro`, `min_context`, `allow_best_effort`, `allow_free_tier`, `cost_policy`, `timeout_seconds` (default 1200, at most 7000) and `wait_seconds` (at most 50) |
 | `delegate_result` | The job's report: status, the agent's answer, requests, tokens and price, the changed files of a `modify` task, AI Meter's `warnings`, and the candidates that were skipped and why |
 | `delegate_status` | The latest jobs |
 | `delegate_cancel` | Stops the agent and releases the lease |
-| `delegate_candidates` | Where a task could run now, from AI Meter's `list_candidates`, with `runtimes.unsupported`: the agents found that cannot be used, each with a sentence saying why. With `include_best_effort`, also the best-effort candidates. Starts nothing |
+| `delegate_candidates` | Where a task could run now, from AI Meter's `list_candidates`, with `runtimes.unsupported`: the agents found that cannot be used, each with a sentence saying why. With `include_best_effort`, also the best-effort candidates; with `include_free_tier`, also the free-tier ones. Starts nothing |
 
 **How a job runs.**
 1. `list_candidates` with `tools: true`, narrowed by the pins you gave.
@@ -83,6 +83,12 @@ A job runs in its own worker process, so it outlives the call that started it.
 - Live on 2026-11-02, with real keys:
   - 20 NVIDIA models and 2 Gemma models on the Gemini API became best effort;
   - 21 Gemini models stayed out as `agent_lists_price`, because Pi prices them at the paid-tier rate.
+
+**Free tiers, only with consent.** Cloudflare Workers AI prices every model in Neurons, and only the first 10,000 Neurons of each UTC day are free ([free tiers](../../docs/MCP.md#free-tiers-cloudflare-workers-ai)).
+- With `allow_free_tier: true`, the plugin also uses these models. AI Meter offers them only through an agent whose own model list prices them, so the plugin sees what the task spends.
+- The lease carries a budget: what is left today beyond a reserve of 1,000 Neurons, in US dollars (`budget.max_cost`). The plugin stops the agent once its requests cost more, and the task fails. A lease without a budget is given back and the candidate skipped.
+- The report shows `budget`, and `counters.cost` with `counters.allowance`. The cost goes back to AI Meter with the lease, so the next task's budget counts it before Cloudflare's analytics do.
+- One request can still cross the budget before the plugin stops the agent. On the Workers Free plan Cloudflare refuses requests past the allocation; on the Paid plan that request is billed, at $0.011 per 1,000 Neurons.
 
 **Free is not always free.** OpenRouter can retry a `:free` request that hit the free route's limit on a provider key you linked to OpenRouter (BYOK), billed to that provider account. AI Meter flags OpenRouter candidates with `warnings: ["openrouter_byok_fallback"]`, and the report repeats it.
 - The agents price requests from their own model lists, so a BYOK fallback shows a price of zero.

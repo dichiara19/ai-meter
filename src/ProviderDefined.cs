@@ -491,7 +491,7 @@ namespace AIMeter
             double interval = Json.Num(req, "interval") ?? 360;
             if (!p.AllowNetwork || DateTime.Now < freeNextFetch || !NetworkBackoff.Ready(D.Id)) return;
             List<FreeModel> list = null;
-            try { list = FreeModels.Parse(Json.ParseAny(Send(req, token)), Json.Str(req, "format"), DefinedFreeStatus(req)); }
+            try { list = FreeModels.Parse(Json.ParseAny(Send(req, token)), Json.Str(req, "format"), DefinedFreeStatus(req), Json.Str(req, "provider")); }
             catch (WebException e)
             {
                 NetworkBackoff.Note(D.Id, e);
@@ -527,16 +527,17 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// The catalogue with its pool and the free models' rate limits ("freeModels.pool" and "freeModels.limits").
-        /// A limit is a number stated in the definition (documented) or a path into the last usage answer
-        /// (provider_reported); a reported limit without a current answer has unknown values. "period": "day" gives the
-        /// next midnight in "resetZone" (default UTC), whose daylight-saving rules apply.
+        /// The catalogue with its pool, the free models' rate limits and a free tier's allocation ("freeModels.pool",
+        /// "freeModels.limits" and "freeModels.allowance"). A limit is a number stated in the definition (documented) or
+        /// a path into the last usage answer (provider_reported); a reported limit without a current answer has unknown
+        /// values, and "emptyIsZero" names a list whose presence, empty, means nothing used, as in usage limits.
+        /// "period": "day" gives the next midnight in "resetZone" (default UTC), whose daylight-saving rules apply.
         /// </summary>
         private Catalogue WithRates(Catalogue read, DateTime now)
         {
             if (read == null) return null;
             var spec = Json.Obj(D.Raw, "freeModels");
-            var result = new Catalogue { Models = read.Models, ReadAt = read.ReadAt, Pool = Json.Str(spec, "pool") };
+            var result = new Catalogue { Models = read.Models, ReadAt = read.ReadAt, Pool = Json.Str(spec, "pool"), Allowance = Allowance.FromJson(Json.Obj(spec, "allowance")) };
             object doc = live != null ? usageDoc : null;
             foreach (var l in Json.Items(spec, "limits"))
             {
@@ -548,6 +549,9 @@ namespace AIMeter
                 };
                 r.Limit = LimitValue(l, "limit", doc);
                 r.Used = LimitValue(l, "used", doc);
+                string emptyPath = Json.Str(l, "emptyIsZero");
+                var rows = doc == null || emptyPath == null ? null : JPath.Get(doc, emptyPath) as IList;
+                if (r.Used == null && rows != null && rows.Count == 0) r.Used = 0;
                 r.Remaining = LimitValue(l, "remaining", doc);
                 if (r.Remaining == null && r.Limit.HasValue && r.Used.HasValue) r.Remaining = Math.Max(0, r.Limit.Value - r.Used.Value);
                 if (Json.Str(l, "period") == "day")

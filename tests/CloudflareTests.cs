@@ -25,6 +25,7 @@ namespace AIMeter
             test("The account ID is read beside the key OpenCode keeps, or from the profile beside Pi's", AccountBesideKey);
             test("An account ID saved with the dashboard address it was copied from is reduced to the ID", AccountInAddress);
             test("Neurons beyond each day's free 10,000 are spent at $0.011 per 1,000, today, this week and this month", PaidNeurons);
+            test("Cloudflare's models come from models.dev as a free tier drawing on today's Neurons", FreeTierCatalogue);
         }
 
         private const BindingFlags Private = BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic;
@@ -175,6 +176,56 @@ namespace AIMeter
                 var spend = typeof(DefinedProvider).GetField("spend", Private).GetValue(p);
                 Assert(spend != null && (double?)spend.GetType().GetField("Month").GetValue(spend) == 0, "A month without paid Neurons is not $0.");
             }
+        }
+
+        /// <summary>models.dev's catalogue: another provider, and Cloudflare's chat model beside a safety model, a deprecated one and an image model.</summary>
+        private const string ModelsDev = "{ \"other\": { \"models\": { \"x/chat\": { \"id\": \"x/chat\", \"tool_call\": true } } }, " +
+            "\"cloudflare-workers-ai\": { \"id\": \"cloudflare-workers-ai\", \"models\": { " +
+            "\"@cf/openai/gpt-oss-120b\": { \"id\": \"@cf/openai/gpt-oss-120b\", \"name\": \"GPT OSS 120B\", \"tool_call\": true, \"reasoning\": true, " +
+            "\"modalities\": { \"input\": [\"text\"], \"output\": [\"text\"] }, \"limit\": { \"context\": 128000, \"output\": 16384 }, \"cost\": { \"input\": 0.35, \"output\": 0.75 } }, " +
+            "\"@cf/meta/llama-guard-3-8b\": { \"id\": \"@cf/meta/llama-guard-3-8b\", \"tool_call\": false, \"modalities\": { \"input\": [\"text\"], \"output\": [\"text\"] } }, " +
+            "\"@cf/old/chat\": { \"id\": \"@cf/old/chat\", \"tool_call\": true, \"status\": \"deprecated\" }, " +
+            "\"@cf/black-forest-labs/flux\": { \"id\": \"@cf/black-forest-labs/flux\", \"modalities\": { \"input\": [\"text\"], \"output\": [\"image\"] } } } } }";
+
+        /// <summary>
+        /// The model list comes from models.dev, Cloudflare's entry only, as a free tier: priced models free within the
+        /// 10,000 Neurons of each UTC day. The Neuron limit reads the usage answer, an empty day as zero, and the budget
+        /// keeps the reserve back.
+        /// </summary>
+        private static void FreeTierCatalogue()
+        {
+            var spec = Json.Obj(Definition("http://127.0.0.1:9/graphql").Raw, "freeModels");
+            Assert(Json.Str(spec, "url") == "https://models.dev/api.json" && Json.Str(spec, "url").IndexOf("{token}", StringComparison.Ordinal) < 0,
+                "The model list must be models.dev's public catalogue, read without the Cloudflare token.");
+            var status = (FreeStatus)typeof(DefinedProvider).GetMethod("DefinedFreeStatus", Private).Invoke(null, new object[] { spec });
+            var models = FreeModels.Parse(Json.ParseAny(ModelsDev), Json.Str(spec, "format"), status, Json.Str(spec, "provider"));
+            Assert(models != null && models.Select(m => m.Id).SequenceEqual(new[] { "@cf/openai/gpt-oss-120b" }),
+                "Only Cloudflare's current text chat models belong in the list: " + (models == null ? "none" : string.Join(", ", models.Select(m => m.Id))));
+            var gpt = models.Single();
+            Assert(gpt.Tools && gpt.Reasoning && !gpt.FeaturesUnknown && gpt.Context == 128000 && gpt.MaxOutput == 16384 && gpt.Name == "GPT OSS 120B",
+                "The catalogue's facts were not read.");
+            Assert(gpt.Free.Confirmed && gpt.Free.Kind == Candidates.FreeTier && Candidates.IsFreeTier(gpt), "Cloudflare's models are not marked as a free tier.");
+            Assert(FreeModels.Parse(Json.ParseAny(ModelsDev), "models.dev", status, "missing") == null, "A provider missing from the catalogue gave a list.");
+
+            foreach (var day in new[] { "[]", "[{\"count\":12,\"sum\":{\"totalNeurons\":2500}}]" })
+                using (var server = new Recorder(Answer(day)))
+                using (new Variables(Token, Account))
+                {
+                    var p = Provider(server.Url);
+                    Fetch(p);
+                    var read = new Catalogue { Models = models, ReadAt = DateTime.Now };
+                    var catalogue = (Catalogue)typeof(DefinedProvider).GetMethod("WithRates", Private).Invoke(p, new object[] { read, DateTime.Now });
+                    var neurons = catalogue.Rates.Single(r => r.Metric == "neurons_per_day");
+                    double used = day == "[]" ? 0 : 2500;
+                    Assert(neurons.Source == "provider_reported" && neurons.Limit == 10000 && neurons.Used == used && neurons.Remaining == 10000 - used,
+                        "Today's Neurons did not reach the free models' limit (" + day + ").");
+                    Assert(neurons.ResetsAt == DateTime.UtcNow.Date.AddDays(1).ToLocalTime(), "The allocation does not reset at midnight UTC.");
+                    Assert(catalogue.PoolOf(gpt) == "cloudflare-workers-ai:neurons" && catalogue.Allowance.Metric == "neurons_per_day" &&
+                           catalogue.Allowance.UsdPerUnit == 0.000011 && catalogue.Allowance.Reserve == 1000, "The pool or the allowance is wrong.");
+                    var budget = Candidates.BudgetOf(catalogue, null, catalogue.PoolOf(gpt), DateTime.Now);
+                    Assert(Math.Abs(budget.Spendable.Value - (9000 - used)) < 1e-9 && Math.Abs(budget.MaxCost.Value - (9000 - used) * 0.000011) < 1e-12,
+                        "The budget does not keep the reserve back.");
+                }
         }
 
         // ------------------------------------------------------------ helpers

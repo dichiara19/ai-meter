@@ -13,6 +13,7 @@
 //   silent    (OpenCode) exits with 0 without any event;
 //   unfinished (OpenCode) exits with 0 after a step that ended with reason tool-calls;
 //   paid      prices its first request above zero, then waits until it is stopped;
+//   priced    prices its request above zero and ends normally, as on a free tier within its budget;
 //   hang      waits until it is stopped;
 //   family    starts a child process that waits, writes its pid to FAKE_CHILD_PID_FILE, then waits until stopped.
 // Requests are otherwise priced at zero, as the agents do for free models.
@@ -27,7 +28,7 @@ let task = "";
 process.stdin.setEncoding("utf8");
 for await (const chunk of process.stdin) task += chunk;   // Ends only when the plugin closes stdin.
 
-const cost = behaviour === "paid" ? 0.0021 : 0;
+const cost = behaviour === "paid" || behaviour === "priced" ? 0.0021 : 0;
 if (behaviour === "hang") setInterval(() => {}, 1000);
 else if (behaviour === "family") family();
 else if (runtime === "pi") pi();

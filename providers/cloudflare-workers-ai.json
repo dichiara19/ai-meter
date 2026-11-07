@@ -37,6 +37,24 @@
       "used": "data.viewer.accounts[0].today[0].sum.totalNeurons",
       "emptyIsZero": "data.viewer.accounts[0].today" }
   ],
+  "freeModels": {
+    "url": "https://models.dev/api.json", "format": "models.dev", "provider": "cloudflare-workers-ai", "interval": 720, "timeout": 60,
+    "free": {
+      "status": "confirmed_free", "kind": "free_tier", "source": "documented", "checked": "2026-11-06",
+      "reference": "https://developers.cloudflare.com/workers-ai/platform/pricing/",
+      "note": "Every model is priced in Neurons; the first 10,000 Neurons of each UTC day are free on the Workers Free and Paid plans. Beyond them the Free plan fails requests and the Paid plan bills $0.011 per 1,000, so a task stays free only within the budget claim_capacity returns."
+    },
+    "pool": "cloudflare-workers-ai:neurons",
+    "allowance": { "metric": "neurons_per_day", "unit": "neurons", "usdPerUnit": 0.000011, "reserve": 1000 },
+    "limits": [
+      { "metric": "neurons_per_day", "limit": 10000, "used": "data.viewer.accounts[0].today[0].sum.totalNeurons",
+        "emptyIsZero": "data.viewer.accounts[0].today", "source": "provider_reported", "period": "day", "scope": "account",
+        "note": "Cloudflare's analytics can lag a few minutes; the cost of tasks released with leases counts at once." },
+      { "metric": "requests_per_minute", "limit": 300, "scope": "account", "source": "documented", "checked": "2026-11-06",
+        "reference": "https://developers.cloudflare.com/workers-ai/platform/limits/",
+        "note": "Text generation, per task type; models that need the Workers Paid plan allow 20 per model, and beta models may allow fewer." }
+    ]
+  },
   "notes": [
     { "text": "{0} of 10,000 Neurons used today; Cloudflare's analytics can lag a few minutes", "values": [{ "path": "data.viewer.accounts[0].today[0].sum.totalNeurons" }],
       "when": ["data.viewer.accounts[0].today[0].sum.totalNeurons"] }

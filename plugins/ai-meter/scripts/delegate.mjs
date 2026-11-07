@@ -2,12 +2,12 @@
 // Command line for the delegation jobs, for a terminal and for the background worker the MCP server starts.
 //
 //   node delegate.mjs start --workspace <folder> [--mode modify] [--service s] [--model m] [--runtime r] [--where w]
-//                           [--allow-best-effort true] [--timeout <seconds>] [--wait <seconds>]
+//                           [--allow-best-effort true] [--allow-free-tier true] [--timeout <seconds>] [--wait <seconds>]
 //                                                                        the task is read from stdin
 //   node delegate.mjs result <job> [--wait <seconds>]
 //   node delegate.mjs status
 //   node delegate.mjs cancel <job>
-//   node delegate.mjs candidates [--service s] [--include-best-effort true]
+//   node delegate.mjs candidates [--service s] [--include-best-effort true] [--include-free-tier true]
 //   node delegate.mjs run-job <job>                                       the worker; not for direct use
 //
 // Every command prints JSON.
@@ -24,7 +24,7 @@ function options(args) {
     else positional.push(args[i]);
   }
   if (named.min_context) named.min_context = Number(named.min_context);
-  for (const flag of ["include_best_effort", "allow_best_effort"]) if (flag in named) named[flag] = named[flag] === "true";
+  for (const flag of ["include_best_effort", "allow_best_effort", "include_free_tier", "allow_free_tier"]) if (flag in named) named[flag] = named[flag] === "true";
   return { named, positional };
 }
 

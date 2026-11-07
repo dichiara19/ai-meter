@@ -2,8 +2,8 @@
 // to FAKE_METER_LOG (JSONL). FAKE_METER_SCENARIO (JSON) sets the candidates, the agents it cannot describe
 // ("runtime@where"), the describe_dispatch errors by "runtime@where", the pools that refuse leases, the warnings,
 // the runtimes found and unsupported, the best-effort candidates (returned only with include_best_effort, counted
-// otherwise), the tools it never answers (`silent`, as a relay that stays up but hangs), and how each fake agent
-// behaves.
+// otherwise), the free-tier candidates (returned only with include_free_tier) and the budget a lease grants, the
+// tools it never answers (`silent`, as a relay that stays up but hangs), and how each fake agent behaves.
 
 import { appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -17,7 +17,7 @@ let readings = scenario.still_reading || 0;   // describe_dispatch answers "stil
 
 const tools = {
   list_candidates: (args) => ({
-    candidates: scenario.candidates || [],
+    candidates: [...(scenario.candidates || []), ...(args.include_free_tier ? scenario.free_tier || [] : [])],
     ...(scenario.best_effort && args.include_best_effort ? { best_effort: scenario.best_effort } : {}),
     ...(scenario.best_effort && !args.include_best_effort ? { best_effort_available: scenario.best_effort.length } : {}),
     pools: [],
@@ -49,7 +49,7 @@ const tools = {
   claim_capacity: (args) => {
     const pool = args.service + ":free";
     if ((scenario.refuse || []).includes(pool)) return { refused: true, pool, headroom: { blocking: { reason: "leased" } } };
-    return { lease_id: "lease-" + ++leases, pool, expires_at: "2026-11-02T12:00:00+01:00" };
+    return { lease_id: "lease-" + ++leases, pool, expires_at: "2026-11-02T12:00:00+01:00", ...(scenario.budget ? { budget: scenario.budget } : {}) };
   },
   release_capacity: (args) => ({ lease_id: args.lease_id, released: true }),
 };

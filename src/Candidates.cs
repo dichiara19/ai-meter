@@ -22,6 +22,10 @@ namespace AIMeter
     {
         public const string FreeOnly = "free_only";
         public const string FreeOrUnconfirmed = "free_or_unconfirmed";
+        /// <summary>The kind of a free status whose models are priced but free within a daily allocation (FreeStatus.Kind).</summary>
+        public const string FreeTier = "free_tier";
+
+        internal static bool IsFreeTier(FreeModel m) { return m.Free != null && m.Free.Kind == FreeTier; }
 
         /// <summary>Exclusions an agent's own model list can make up for: the price or a capability the service does not state.</summary>
         private static readonly string[] Unstated = { "price_not_confirmed", "tools_unknown", "context_unknown", "output_unknown" };
@@ -31,6 +35,8 @@ namespace AIMeter
         /// price, tool support, context or reply size unstated) can still be a best-effort candidate through an agent
         /// whose own list has the model at no price and fills in what the task needs. Those are listed apart, only when
         /// the request asks for them; otherwise they are counted in BestEffortAvailable and keep their exclusion.
+        /// A free-tier model (priced, free within a daily allocation) is a candidate only when the request accepts free
+        /// tiers, and never a best-effort one: its budget rests on facts the service and the agent both state.
         /// </summary>
         public static Selection Select(Snapshot snap, RuntimeScan runtimes, Requirements req, DateTime now, LeaseBook leases = null)
         {
@@ -43,26 +49,28 @@ namespace AIMeter
                 foreach (var m in p.Catalogue.Models)
                 {
                     string pool = p.Catalogue.PoolOf(m) ?? p.Id;
-                    var room = Room(p.Id, p.Catalogue.Rates, now, leases, pool);
+                    var room = Room(p.Id, p.Catalogue.Rates, now, leases, pool, BudgetOf(p.Catalogue, leases, pool, now));
                     string reason = Check(m, req);
                     if (reason == null && access.Count == 0) reason = runtimes.KeyDiscoveryOff ? "key_discovery_off" : runtimes.Found.Count == 0 ? "no_runtime" : "runtime_has_no_key";
                     if (reason == null && room.Blocking != null) reason = room.Blocking;
                     if (reason == null)
                     {
                         // An agent prices requests from its own list, and the plugin stops it at the first priced one,
-                        // after paying for it: a free model the agent lists at a price is never offered through it.
-                        bool offered = false;
+                        // after paying for it: a free model the agent lists at a price is never offered through it. A
+                        // free-tier model is the opposite: the plugin stops the agent when its priced requests reach
+                        // the budget, so it is offered only through an agent whose list prices it, or spend is unseen.
+                        bool freeTier = IsFreeTier(m), offered = false;
                         foreach (var a in access)
                         {
                             var known = AgentModels.Find(a, m.Id);
-                            if (known != null && known.Priced) continue;
+                            if (freeTier ? known == null || !known.Priced : known != null && known.Priced) continue;
                             result.Chosen.Add(new Candidate { Provider = p, Model = m, Access = a, Room = room, Pool = pool });
                             offered = true;
                         }
-                        if (!offered) result.Exclude(p.Id, m.Id, "agent_lists_price", null);
+                        if (!offered) result.Exclude(p.Id, m.Id, freeTier ? "agent_price_unknown" : "agent_lists_price", null);
                         continue;
                     }
-                    if (Unstated.Contains(reason) && room.Blocking == null && EstimateFrom(result, p, m, access, req, room, ref reason)) continue;
+                    if (Unstated.Contains(reason) && room.Blocking == null && !IsFreeTier(m) && EstimateFrom(result, p, m, access, req, room, ref reason)) continue;
                     result.Exclude(p.Id, m.Id, reason, reason == room.Blocking ? room.Until : null);
                 }
             }
@@ -145,6 +153,7 @@ namespace AIMeter
         /// <summary>Why a model cannot take the task, before runtime and capacity; null when it can.</summary>
         private static string Check(FreeModel m, Requirements req)
         {
+            if (IsFreeTier(m) && !req.FreeTier) return "free_tier_not_allowed";
             bool confirmed = m.Free == null || m.Free.Confirmed;
             if (!confirmed && !(req.CostPolicy == FreeOrUnconfirmed && m.Free.Status == "unknown")) return "price_not_confirmed";
             if (req.Tools && !m.Tools) return m.FeaturesUnknown ? "tools_unknown" : "no_tools";
@@ -156,15 +165,19 @@ namespace AIMeter
         /// <summary>
         /// The room a pool has now: blocked while the service asked AI Meter to wait (rate_limited) or a reported counter
         /// is used up (exhausted); at most one new task without a known concurrency limit. Ratio is the remaining share
-        /// of the tightest limit whose limit and remaining are both known, or null when none is.
+        /// of the tightest limit whose limit and remaining are both known, or null when none is. A free tier's budget
+        /// (see BudgetOf) also closes the pool: when nothing is left beyond the reserve (exhausted), and when it is unknown
+        /// (allowance_unknown), since a task could then be billed.
         /// </summary>
-        public static PoolRoom Room(string service, IList<RateLimit> rates, DateTime now, LeaseBook leases = null, string pool = null)
+        public static PoolRoom Room(string service, IList<RateLimit> rates, DateTime now, LeaseBook leases = null, string pool = null, Budget budget = null)
         {
-            var room = new PoolRoom();
+            var room = new PoolRoom { Budget = budget };
             DateTime wait = NetworkBackoff.Until(service);
             var exhausted = rates.FirstOrDefault(r => r.Remaining.HasValue && r.Remaining.Value <= 0);
             if (wait > now) { room.Blocking = "rate_limited"; room.Until = wait; }
             else if (exhausted != null) { room.Blocking = "exhausted"; room.Metric = exhausted.Metric; room.Until = exhausted.ResetsAt; }
+            else if (budget != null && budget.Spendable == null) { room.Blocking = "allowance_unknown"; room.Metric = budget.Allowance.Metric; }
+            else if (budget != null && budget.Spendable <= 0) { room.Blocking = "exhausted"; room.Metric = budget.Allowance.Metric; room.Until = budget.ResetsAt; }
             var concurrency = rates.FirstOrDefault(r => r.Metric == "concurrent_requests" && r.Limit.HasValue);
             room.MaxNewJobs = room.Blocking != null ? 0 : concurrency == null ? 1 : (int)Math.Max(0, concurrency.Limit.Value - (concurrency.Used ?? 0));
             var known = rates.Where(r => r.Limit.HasValue && r.Limit.Value > 0 && r.Remaining.HasValue).ToList();
@@ -176,6 +189,29 @@ namespace AIMeter
             }
             if (leases != null && pool != null) ApplyLeases(room, leases, pool, now);
             return room;
+        }
+
+        /// <summary>
+        /// What a free tier leaves for one task now; null for a catalogue without an allowance. The allocation is the
+        /// allowance's rate limit: its limit and the service's count of what was used. The count can lag (Cloudflare's
+        /// analytics by a few minutes), so the cost released with today's leases, in units, stands in when it is
+        /// larger; both are counted per UTC day, as Cloudflare's allocation is. The reserve is kept back, and MaxCost is
+        /// what a task may spend in US dollars, in the agent's own prices, before the plugin stops it.
+        /// </summary>
+        public static Budget BudgetOf(Catalogue catalogue, LeaseBook leases, string pool, DateTime now)
+        {
+            var allowance = catalogue == null ? null : catalogue.Allowance;
+            if (allowance == null) return null;
+            var budget = new Budget { Allowance = allowance };
+            var rate = catalogue.Rates.FirstOrDefault(r => r.Metric == allowance.Metric);
+            if (rate == null || !rate.Limit.HasValue || !rate.Used.HasValue) return budget;
+            budget.Limit = rate.Limit;
+            budget.ResetsAt = rate.ResetsAt;
+            budget.LeasedCostToday = leases == null || pool == null ? 0 : leases.Today(pool, now).Cost;
+            budget.Used = Math.Max(rate.Used.Value, budget.LeasedCostToday / allowance.UsdPerUnit);
+            budget.Spendable = Math.Max(0, rate.Limit.Value - budget.Used.Value - allowance.Reserve);
+            budget.MaxCost = budget.Spendable * allowance.UsdPerUnit;
+            return budget;
         }
 
         /// <summary>
@@ -507,6 +543,8 @@ namespace AIMeter
         public long MinContext, MinOutput;
         public string CostPolicy = Candidates.FreeOnly;
         public string Service;
+        /// <summary>Also accept free-tier models: priced, free within a daily allocation the plugin must keep to.</summary>
+        public bool FreeTier;
         /// <summary>Also list best-effort candidates, built on the agents' own model lists.</summary>
         public bool BestEffort;
     }
@@ -567,6 +605,8 @@ namespace AIMeter
         public DateTime? Until;
         public int MaxNewJobs, Leased;
         public double? Ratio;
+        /// <summary>A free tier's budget, when the pool has one.</summary>
+        public Budget Budget;
         public bool CanStart { get { return Blocking == null && MaxNewJobs > 0; } }
     }
 

@@ -57,9 +57,18 @@ Some services, such as NVIDIA and the Gemini API, do not state prices or tool su
 - **Before using one, ask the user.** Say that the information is estimated, and that the task may fail, stop or meet limits no one has stated. Then call `delegate` with `allow_best_effort: true`. Ordinary candidates are still tried first.
 - If it fails, report the agent's error and decide with the user: try another model, or do the task yourself. Do not retry the same model on your own.
 
+## Free tier: only with the user's agreement
+
+Cloudflare Workers AI models are priced, but free within 10,000 Neurons a day. They are never candidates unless asked for: `excluded` reports them as `free_tier_not_allowed`.
+
+- `delegate_candidates` with `include_free_tier: true` lists them, with `warnings: ["free_tier_budget"]`.
+- **Before using one, ask the user.** Say that the task stops when it reaches what is left of today's free Neurons, and that on Cloudflare's paid plan the one request that crosses the limit is billed. Then call `delegate` with `allow_free_tier: true`.
+- `agent_price_unknown` means no agent with a Cloudflare key prices the model, so its spending would be invisible; `allowance_unknown` that today's use could not be read. Neither can be worked around.
+
 ## Money
 
 - `counters.paid_request: true`: a request was priced above zero, so the plugin stopped the agent. That request was already made and is billed: tell the user, with `counters.cost`, and do not retry on the same model.
+- On a free tier, `counters.allowance` is the budget in US dollars, and `paid_request: true` means the requests cost more than it: the free Neurons are used up for today. Tell the user, with `counters.cost`, and do not retry on that service today.
 - `warnings` containing `openrouter_byok_fallback`: OpenRouter can retry a `:free` request on a provider key the user linked to OpenRouter (BYOK), billed to that account, while the agent still shows a price of zero. Mention it once. `counters.byok_fallback: true` means OpenRouter's error named such a key: tell the user that their linked key was used, and suggest unlinking it before delegating again.
 
 ## Good to know
