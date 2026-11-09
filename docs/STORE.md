@@ -1,5 +1,7 @@
 # Publishing to the Microsoft Store
 
+AI Meter is live in the Store as [AI Meter - Windows](https://apps.microsoft.com/detail/9PKMRQWBWHDM) (Store ID `9PKMRQWBWHDM`) since version 0.10.0.
+
 The Store signs the MSIX package with a Microsoft certificate, so the installed app is trusted by SmartScreen and Smart App Control, and it updates automatically. The CI workflow builds an unsigned `AIMeter.msix` (artifact **AIMeter-msix**) that is uploaded as is: the Store signs it.
 
 ## One-time setup
@@ -52,7 +54,7 @@ The CLI recreates the submission from the last published one, so the listing, sc
 
 The Store installs updates by itself, and Store policy does not allow an app to update itself any other way. The packaged app therefore never contacts GitHub for updates and never downloads anything (`UpdateCheck.Find` returns before any request when `Native.IsPackaged`, and a regression test holds it to that).
 
-Instead, with **Settings → About → Check for updates** on, once a day it asks the Store, through Windows' `StoreContext.GetAppAndOptionalStorePackageUpdatesAsync`, whether an update is waiting, and if so shows *An update is waiting in the Microsoft Store* with a button that opens the Store's downloads page. This uses the Windows metadata already referenced by the MSIX build (`Windows.Services.winmd`), with no new dependency. It only answers for a copy installed from the Store; a sideloaded package reports nothing. It has not been verified on a Store install yet: check it on the first private-audience submission.
+Instead, with **Settings → About → Check for updates** on, once a day it asks the Store, through Windows' `StoreContext.GetAppAndOptionalStorePackageUpdatesAsync`, whether an update is waiting, and if so shows *An update is waiting in the Microsoft Store* with a button that opens the Store's downloads page. This uses the Windows metadata already referenced by the MSIX build (`Windows.Services.winmd`), with no new dependency. It only answers for a copy installed from the Store; a sideloaded package reports nothing. It has not been verified on a Store install yet: check it when the next version reaches the Store.
 
 ## Submission answers
 
