@@ -93,7 +93,13 @@ The package declares one language, `en-us`, so Partner Center asks for one listi
 
 **Short description:** AI limits in your taskbar, and a local history of what you use, for the AI tools already on your PC.
 
-**Screenshots** (2560x2000, within Partner Center's limits): `docs/media/consumption-dark.png`, `docs/media/consumption-light.png`, `docs/media/history-dark.png`, `docs/media/history-light.png`. The other images in `docs/media` are too narrow or too short for the Store.
+**Screenshots:** six 3840x2160 slides per listing language, each a headline beside a scene of the real interface with demo data (taskbar pill, notification, panel, local models, usage history, light and dark). The Store shows desktop screenshots in a 16:9 frame, so other sizes get grey bands at the sides. Render them with
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\render-store.ps1
+```
+
+which writes `bin\store-screenshots\<language>\1-taskbar.png` to `6-light-and-dark.png` for English, Italian, Spanish, French, German and Portuguese (`-Languages it,en` for a subset). Upload each language's folder, in order, to that language's listing: the first image is the one shown in search results. The headlines are in `tools/StoreScreenshots.cs`; keep them true to what the app does. The images are not committed: render them again when the interface changes.
 
 **Store logo:** `bin\StoreIcon-300.png`, written by `build.ps1 -NoInstall -Package` (the app icon's rings, 300x300, transparent background).
 

@@ -220,6 +220,7 @@ plugins/ai-meter/      delegation plugin for Claude Code and Codex (Node, separa
 agents/*.json          built-in coding agent definitions: folders, keys and how delegation starts them
 src/AgentDefinitions.cs loads agents/*.json and %APPDATA%\AIMeter\agents
 tools/render-media.ps1 regenerates the README images (docs/media) from the real UI with demo data
+tools/render-store.ps1 renders the Microsoft Store screenshots in six languages (tools/StoreScreenshots.cs)
 src/Settings.cs        preferences and start with Windows
 src/PackageStartup.cs  start with Windows in the Microsoft Store package (StartupTask)
 src/UpdateCheck.cs     daily check for a newer GitHub release (zip and script builds) and SemVer comparison
