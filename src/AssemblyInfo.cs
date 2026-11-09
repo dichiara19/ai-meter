@@ -10,5 +10,5 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCopyright("Copyright (c) 2026 Giuseppe Gabriele Di Chiara. Apache License 2.0.")]
 [assembly: AssemblyVersion("0.10.0.0")]
 [assembly: AssemblyFileVersion("0.10.0.0")]
-[assembly: AssemblyInformationalVersion("0.10.0-rc.1")]
+[assembly: AssemblyInformationalVersion("0.10.0")]
 [assembly: ComVisible(false)]

@@ -1,6 +1,10 @@
-## What changed in 0.10.0-rc.1
+## What changed in 0.10.0
 
-This is a release candidate for 0.10.0. It is published as a pre-release: the update notice shows it only if you opt in to betas and release candidates in **Settings → About**. Please report anything that looks wrong.
+Everything since 0.8.6, including the 0.10.0-rc.1 release candidate and the fixes that followed it.
+
+### Touch and full-screen apps
+- **Touch.** A tap on the taskbar pill opens the panel at the first try, every list scrolls with a finger, press and hold shows a tooltip or the right-click menu, and buttons and rows are larger.
+- **The taskbar pill stays out of full-screen apps.** It hides while a video, game or presentation fills the screen and comes back right after, just above the taskbar.
 
 ### Clearer numbers
 - **Every value says what is left, in its own unit.** Quotas read "18% left", credit limits "$0.73 left of $15.00" (just "$0.73" in the taskbar pill), and local models' video memory "4.6/16 GB" free out of the total. The same wording appears in the pill, the panel, the widget, the overlay, tooltips and the notification-area menu. Bars match the number shown.
@@ -8,10 +12,10 @@ This is a release candidate for 0.10.0. It is published as a pre-release: the up
 - **Logos without the apps.** When Copilot or ChatGPT/Codex is not installed, AI Meter shows the official logo that GitHub and OpenAI publish to identify their services. Claude and any other service without a logo show their initials.
 
 ### New services and agents
-- **Cloudflare Workers AI:** the Neurons used today against the free 10,000 a day, which reset at midnight UTC. *Create a key* opens Cloudflare's token page with the read-only analytics permission already filled in. The token and account ID can also come from OpenCode, Pi or Hermes. *Tested against recorded answers; reports from real accounts are welcome.*
-- **Hermes Agent:** its recent sessions appear among the coding agents, its `.env` keys are found like those of OpenCode and Pi, and **Settings → AI apps** copies its `hermes mcp add` command.
+- **Cloudflare Workers AI:** the Neurons used today against the free 10,000 a day, which reset at midnight UTC, and what the Neurons beyond them cost today, this week and this month, so spending and budgets work as for OpenRouter. *Create a key* opens Cloudflare's token page with the read-only analytics permission already filled in. The token and account ID can also come from OpenCode, Pi or Hermes. An account ID copied together with the dashboard's address now works too.
+- **Hermes Agent:** its recent sessions appear among the coding agents, and what it spent counts among today's models. Its `.env` keys are found like those of OpenCode and Pi, and **Settings → AI apps** copies its `hermes mcp add` command.
 - **NVIDIA API Catalog and Gemini API:** these services cannot report usage or limits. They are listed in Settings as model catalogues for the AI apps you connect, never on the taskbar, panel or widget.
-- **Antigravity CLI** replaces the discontinued Gemini CLI in **Settings → AI apps**.
+- **Antigravity CLI** replaces the discontinued Gemini CLI in **Settings → AI apps**, and its recent sessions appear among the coding agents with their title, status and model.
 
 ### Claude
 - Signing in to Claude no longer opens a console window, and the desktop app's Claude Code is found.
@@ -28,6 +32,7 @@ This is a release candidate for 0.10.0. It is published as a pre-release: the up
 - **Choosing where a task runs:**
   - `list_candidates` lists the free models a task can run on now, through which agent and with how much room.
   - `describe_dispatch` says how a plugin starts that agent.
+- **Cloudflare Workers AI as a free tier:** with your consent, its models can take delegated tasks within the day's free Neurons. AI Meter grants each task a budget that keeps a reserve, and the plugin stops the agent when the task reaches it.
 
 ### Updates
 - AI Meter now tells stable releases from pre-releases. The update notice offers only stable versions, unless you opt in to betas and release candidates in **Settings → About**.
