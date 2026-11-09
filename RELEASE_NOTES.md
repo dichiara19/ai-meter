@@ -1,3 +1,7 @@
+## What changed in 0.10.1
+
+- **The notification-area menu opens on every PC.** On some PCs with a touchscreen or pen, right-clicking the AI Meter icon showed an error window instead of the menu (#74). The cause was a pen or touch driver that reports one of its properties twice, which Windows' newer touch support in .NET cannot handle. AI Meter now checks the devices when it starts. On such a PC it uses the older touch support: the mouse and keyboard work as usual, and touch behaves as it did before 0.10.0. Any other unexpected error in the icon's menu is written to `errors.log` instead of showing an error window.
+
 ## What changed in 0.10.0
 
 Everything since 0.8.6, including the 0.10.0-rc.1 release candidate and the fixes that followed it.
