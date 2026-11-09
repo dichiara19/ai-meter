@@ -163,23 +163,12 @@ if ($Package) {
          xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
          xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10"
-         IgnorableNamespaces="uap uap3 desktop rescap virtualization">
+         IgnorableNamespaces="uap uap3 desktop rescap">
   <Identity Name="$(& $esc $IdentityName)" Publisher="$(& $esc $Publisher)" Version="$version" ProcessorArchitecture="neutral"/>
   <Properties>
     <DisplayName>$(& $esc $DisplayName)</DisplayName>
     <PublisherDisplayName>$(& $esc $PublisherName)</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <!-- Writes to these AppData folders reach the real ones: the Claude Desktop and VS Code MCP configurations must be
-         visible to those apps even when AI Meter creates them, and AI Meter's own data stays where the other builds keep
-         it, so Explorer can open it and an upgrade from them finds the same settings (Windows 11 flexible virtualisation). -->
-    <virtualization:FileSystemWriteVirtualization>
-      <virtualization:ExcludedDirectories>
-        <virtualization:ExcludedDirectory>`$(KnownFolder:RoamingAppData)\AIMeter</virtualization:ExcludedDirectory>
-        <virtualization:ExcludedDirectory>`$(KnownFolder:RoamingAppData)\Claude</virtualization:ExcludedDirectory>
-        <virtualization:ExcludedDirectory>`$(KnownFolder:RoamingAppData)\Code</virtualization:ExcludedDirectory>
-      </virtualization:ExcludedDirectories>
-    </virtualization:FileSystemWriteVirtualization>
   </Properties>
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0"/>
@@ -209,7 +198,6 @@ if ($Package) {
   <Capabilities>
     <Capability Name="internetClient"/>
     <rescap:Capability Name="runFullTrust"/>
-    <rescap:Capability Name="unvirtualizedResources"/>
   </Capabilities>
 </Package>
 "@ | Set-Content (Join-Path $layout 'AppxManifest.xml') -Encoding UTF8
