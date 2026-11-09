@@ -28,7 +28,8 @@ namespace AIMeter
             string repository = Environment.GetEnvironmentVariable("AIMETER_REPOSITORY") ?? Environment.CurrentDirectory;
             const string Switch = "Switch.System.Windows.Input.Stylus.EnablePointerSupport";
             string entry = File.ReadAllText(Path.Combine(repository, "src", "Program.cs"));
-            Assert(Regex.Matches(entry, @"TouchStack\.Choose\(\);\s*(Program\.)?Run\(args\)").Count == 2, "A launcher starts without choosing the touch stack.");
+            var launches = Regex.Matches(entry, @"TouchStack\.Choose\(\);\s*(Program\.)?Run\(args\)", RegexOptions.None, TimeSpan.FromSeconds(1));
+            Assert(launches.Count == 2, "A launcher starts without choosing the touch stack.");
             string build = File.ReadAllText(Path.Combine(repository, "build.ps1"));
             Assert(!build.Contains(Switch), "AIMeter.exe.config fixes the touch stack before the device check.");
         }

@@ -70,8 +70,9 @@ namespace AIMeter
             return null;
         }
 
+        // The interop structs are only read field by field; IEquatable keeps value comparisons cheap should any be added.
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-        private struct POINTER_DEVICE_INFO
+        private struct POINTER_DEVICE_INFO : IEquatable<POINTER_DEVICE_INFO>
         {
             public uint displayOrientation;
             public IntPtr device;
@@ -80,14 +81,28 @@ namespace AIMeter
             public uint startingCursorId;
             public ushort maxActiveContacts;
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 520)] public string productString;
+
+            // The device handle identifies a pointer device for the life of the session.
+            public bool Equals(POINTER_DEVICE_INFO other) { return device == other.device; }
+            public override bool Equals(object obj) { return obj is POINTER_DEVICE_INFO && Equals((POINTER_DEVICE_INFO)obj); }
+            public override int GetHashCode() { return device.GetHashCode(); }
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        private struct POINTER_DEVICE_PROPERTY
+        private struct POINTER_DEVICE_PROPERTY : IEquatable<POINTER_DEVICE_PROPERTY>
         {
             public int logicalMin, logicalMax, physicalMin, physicalMax;
             public uint unit, unitExponent;
             public ushort usagePageId, usageId;
+
+            public bool Equals(POINTER_DEVICE_PROPERTY other)
+            {
+                return logicalMin == other.logicalMin && logicalMax == other.logicalMax && physicalMin == other.physicalMin
+                    && physicalMax == other.physicalMax && unit == other.unit && unitExponent == other.unitExponent
+                    && usagePageId == other.usagePageId && usageId == other.usageId;
+            }
+            public override bool Equals(object obj) { return obj is POINTER_DEVICE_PROPERTY && Equals((POINTER_DEVICE_PROPERTY)obj); }
+            public override int GetHashCode() { return (usagePageId << 16) | usageId; }
         }
 
         [DllImport("user32.dll", SetLastError = true)] private static extern bool GetPointerDevices(ref uint count, [Out] POINTER_DEVICE_INFO[] devices);
