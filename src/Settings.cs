@@ -154,6 +154,23 @@ namespace AIMeter
         internal static string TestFolder;
 #endif
 
+        /// <summary>
+        /// The data folder as File Explorer can show it. In the Store build, files that AI Meter creates in AppData land
+        /// in the package's private copy of AppData (write virtualisation): AI Meter sees them in Folder, Explorer only
+        /// there. Files that existed before, from another build of AI Meter, stay in Folder and are changed in place.
+        /// </summary>
+        public static string ExplorerFolder
+        {
+            get
+            {
+                string family = Native.IsPackaged ? Native.PackageFamilyName : null;
+                if (family == null) return Folder;
+                string redirected = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Packages", family, @"LocalCache\Roaming\AIMeter");
+                return Directory.Exists(redirected) ? redirected : Folder;
+            }
+        }
+
         private static string FilePath { get { return Path.Combine(Folder, "settings.json"); } }
 
         public static Settings Load()

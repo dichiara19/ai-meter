@@ -545,6 +545,23 @@ namespace AIMeter
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetCurrentPackagePath(ref int length, StringBuilder path);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetCurrentPackageFamilyName(ref int length, StringBuilder name);
+
+        /// <summary>The package family name of this process, such as Publisher.App_hash; null outside a package.</summary>
+        public static string PackageFamilyName
+        {
+            get
+            {
+                try
+                {
+                    int n = 0;
+                    if (GetCurrentPackageFamilyName(ref n, null) != 122 /* ERROR_INSUFFICIENT_BUFFER */) return null;
+                    var name = new StringBuilder(n);
+                    return GetCurrentPackageFamilyName(ref n, name) == 0 ? name.ToString() : null;
+                }
+                catch (EntryPointNotFoundException) { return null; }
+            }
+        }
 
         private const int NoPackage = 0, OwnPackage = 1, ForeignPackage = 2;
         private static int packageIdentity = -1;
