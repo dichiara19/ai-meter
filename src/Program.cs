@@ -29,9 +29,8 @@ namespace AIMeter
             Native.SetAppId("AIMeter.App");
             AppContext.SetSwitch("Switch.System.Windows.DoNotScaleForDpiChanges", false);
             // Touch and pen through the Windows pointer messages (WM_POINTER) instead of the older WISP stack, which
-            // did not reliably bring taps and finger drags to WPF. The executable sets the same switch in
-            // AIMeter.exe.config (build.ps1).
-            AppContext.SetSwitch("Switch.System.Windows.Input.Stylus.EnablePointerSupport", true);
+            // did not reliably bring taps and finger drags to WPF, unless a device would make that stack throw.
+            TouchStack.Choose();
             Program.Run(args);
         }
     }
@@ -104,17 +103,20 @@ namespace AIMeter
         }
 
         [STAThread]
-        private static void Main(string[] args) { Native.SetAppId("AIMeter.App"); Run(args); }
+        private static void Main(string[] args) { Native.SetAppId("AIMeter.App"); TouchStack.Choose(); Run(args); }
 
         /// <summary>Handled-error log (%APPDATA%\AIMeter\errors.log, rotated at 256 KB), including exception stacks.</summary>
-        internal static void LogError(string where, Exception ex)
+        internal static void LogError(string where, Exception ex) { LogNote(where, ex.ToString()); }
+
+        /// <summary>Write one entry to errors.log; failures to write are ignored.</summary>
+        internal static void LogNote(string where, string text)
         {
             try
             {
                 string f = Path.Combine(Settings.Folder, "errors.log");
                 Directory.CreateDirectory(Settings.Folder);
                 if (File.Exists(f) && new FileInfo(f).Length > 256 * 1024) File.Delete(f);
-                File.AppendAllText(f, DateTime.Now.ToString("s", System.Globalization.CultureInfo.InvariantCulture) + "  [" + where + "] " + ex + Environment.NewLine + Environment.NewLine);
+                File.AppendAllText(f, DateTime.Now.ToString("s", System.Globalization.CultureInfo.InvariantCulture) + "  [" + where + "] " + text + Environment.NewLine + Environment.NewLine);
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
@@ -177,6 +179,10 @@ namespace AIMeter
                 // Log unexpected UI errors, such as Windows refusing a window during taskbar recreation,
                 // and keep the app running.
                 app.DispatcherUnhandledException += (o, e) => { LogError("ui", e.Exception); e.Handled = true; };
+                // Errors in the tray icon's events come through the WinForms window procedure, which the dispatcher
+                // handler never sees; without this handler WinForms shows its own crash dialog.
+                Forms.Application.ThreadException += (o, e) => LogError("tray", e.Exception);
+                if (TouchStack.WispReason != null) LogNote("touch", TouchStack.WispReason);
                 bool atLogin = args.Contains("--startup");
 #if MSIX
                 atLogin = atLogin || (Native.IsPackaged && PackageStartup.LaunchedAtLogin);
