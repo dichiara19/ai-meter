@@ -367,3 +367,4 @@ Every result of the four network tools includes `freshness`, one entry per servi
 
 - Without `refresh` or `max_age_seconds`, the data is as fresh as AI Meter's last reading (see [Fresh data](#fresh-data)).
 - In the Microsoft Store package the relay is written to `~/.aimeter`, because a packaged app's AppData is private to the package.
+- For the same reason the Store package cannot create the configuration file of Claude Desktop or VS Code: open it once in the app (Claude Desktop: Settings → Developer → Edit Config; VS Code: *MCP: Open User Configuration*), then connect. A file that exists is edited as in the other builds.

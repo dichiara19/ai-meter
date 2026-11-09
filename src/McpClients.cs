@@ -33,6 +33,10 @@ namespace AIMeter
             public Format Format;
             public bool StdioType;           // Whether the entry needs "type": "stdio" (Claude Code).
             public string Note;              // Extra requirement shown with the client, in English.
+            // How to make the client create its own file, in English. Set for files in the user's AppData: there the
+            // Store build can change a file that exists, but a file it creates lands in the package's private folder,
+            // where the client never sees it (AppData write virtualisation).
+            public string CreateFirst;
 
             public bool Wsl { get { return Where == "WSL"; } }
             public bool Installed { get { return File.Exists(Marker) || Directory.Exists(Marker); } }
@@ -52,14 +56,20 @@ namespace AIMeter
             var list = new List<Client>
             {
                 new Client { Id = "claude-desktop", Name = "Claude Desktop", Where = "Windows", Format = Format.McpServers,
-                             ConfigPath = Path.Combine(appData, @"Claude\claude_desktop_config.json"), Marker = Path.Combine(appData, "Claude") },
+                             ConfigPath = Path.Combine(appData, @"Claude\claude_desktop_config.json"), Marker = Path.Combine(appData, "Claude"),
+                             CreateFirst = ClaudeDesktopCreateFirst },
                 new Client { Id = "vscode", Name = "Visual Studio Code", Where = "Windows", Format = Format.VsCode,
-                             ConfigPath = Path.Combine(appData, @"Code\User\mcp.json"), Marker = Path.Combine(appData, @"Code\User") },
+                             ConfigPath = Path.Combine(appData, @"Code\User\mcp.json"), Marker = Path.Combine(appData, @"Code\User"),
+                             CreateFirst = VsCodeCreateFirst },
             };
             list.AddRange(HomeClients(windowsHome, "Windows"));
             if (wslHome != null) list.AddRange(HomeClients(wslHome, "WSL").Where(c => c.Id != "cursor"));
             return list;
         }
+
+        internal const string ClaudeDesktopCreateFirst = "In Claude Desktop, open Settings → Developer → Edit Config.";
+        internal const string VsCodeCreateFirst = "In Visual Studio Code, run MCP: Open User Configuration from the Command Palette and save the file.";
+        internal const string CreateFirstMessage = "{0} has no configuration file yet, and AI Meter from the Microsoft Store can change only files that already exist. {1} Then connect it again.";
 
         /// <summary>Clients configured in the user's home folder, the same on Windows and in Linux.</summary>
         private static IEnumerable<Client> HomeClients(string home, string where)
@@ -117,6 +127,8 @@ namespace AIMeter
 
         public static void Connect(Client c, string relay)
         {
+            if (Native.IsPackaged && c.CreateFirst != null && !File.Exists(c.ConfigPath))
+                throw new ConfigException(L.F(CreateFirstMessage, c.Name, L.T(c.CreateFirst)));
             string command = PowerShell(c.Wsl);
             var args = Arguments(relay);
             string text = File.Exists(c.ConfigPath) ? File.ReadAllText(c.ConfigPath, Encoding.UTF8) : null;

@@ -32,6 +32,7 @@ namespace AIMeter
             test("Codex TOML that the editor cannot follow is refused, not rewritten", TomlRefusals);
             test("A save that fails keeps the previous file and removes the temporary one", FailedSave);
             test("Antigravity CLI is found by its own folder and its empty MCP file is connected", AntigravityCli);
+            test("The Store build connects Claude Desktop and VS Code only through files that already exist", PackagedAppDataClients);
             test("Command-line installation quotes paths and places -- for each agent", Commands);
             test("A copy button confirms the copy on itself, then returns to its label", CopiedFeedback);
         }
@@ -648,6 +649,57 @@ namespace AIMeter
                 Assert(servers.Keys.Single() == "other" && Json.Obj(servers, "other")["disabled"] is bool, "Disconnecting changed agy's other servers.");
             }
             finally { if (Directory.Exists(home)) Directory.Delete(home, true); }
+        }
+
+        /// <summary>
+        /// In the MSIX package a file created in AppData lands in the package's private folder, where Claude Desktop
+        /// and VS Code never see it, so the Store build refuses to create theirs and explains how to let them do it.
+        /// Changing a file that exists reaches the real file, so that still works; files in the home folder are not
+        /// virtualised at all.
+        /// </summary>
+        private static void PackagedAppDataClients()
+        {
+            string home = Path.Combine(Path.GetTempPath(), "aimeter-store-" + Guid.NewGuid().ToString("N"));
+            var previous = Native.PackagedOverride;
+            try
+            {
+                string appData = Path.Combine(home, "AppData");
+                Directory.CreateDirectory(Path.Combine(appData, "Claude"));
+                Directory.CreateDirectory(Path.Combine(appData, @"Code\User"));
+                Directory.CreateDirectory(Path.Combine(home, ".cursor"));
+                var clients = McpClients.Known(home, appData, null);
+                var claude = clients.Single(c => c.Id == "claude-desktop");
+                var code = clients.Single(c => c.Id == "vscode");
+                var cursor = clients.Single(c => c.Id == "cursor");
+                string relay = @"C:\Users\x\.aimeter\mcp.ps1";
+                Assert(clients.Where(c => c.CreateFirst != null).Select(c => c.Id).OrderBy(id => id).SequenceEqual(new[] { "claude-desktop", "vscode" }),
+                    "Only the clients configured in AppData need their file created first.");
+
+                Native.PackagedOverride = true;
+                foreach (var c in new[] { claude, code })
+                {
+                    string message = null;
+                    try { McpClients.Connect(c, relay); }
+                    catch (McpClients.ConfigException ex) { message = ex.Message; }
+                    Assert(message != null && message.Contains(c.Name) && message.Contains(L.T(c.CreateFirst)), c.Name + ": the missing file was not explained.");
+                    Assert(!File.Exists(c.ConfigPath), c.Name + ": the Store build created a file the app would not see.");
+                }
+
+                File.WriteAllText(claude.ConfigPath, "{\"mcpServers\":{}}");
+                McpClients.Connect(claude, relay);
+                Assert(McpClients.IsConnected(claude), "The Store build did not connect an existing Claude Desktop file.");
+                McpClients.Connect(cursor, relay);
+                Assert(McpClients.IsConnected(cursor), "The Store build did not create a file in the home folder.");
+
+                Native.PackagedOverride = false;
+                McpClients.Connect(code, relay);
+                Assert(McpClients.IsConnected(code), "The other builds no longer create VS Code's file.");
+            }
+            finally
+            {
+                Native.PackagedOverride = previous;
+                if (Directory.Exists(home)) Directory.Delete(home, true);
+            }
         }
 
         private static void Commands()

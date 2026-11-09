@@ -164,7 +164,7 @@ namespace AIMeter
             statsText = Ui.Text("", 12, "Text2");
             statsText.TextWrapping = TextWrapping.Wrap;
             Group(
-                Row(Ui.Glyph("", 20, "Text"), "AI Meter", null, Button(L.T("Open data folder"), () => Program.OpenFolder(Settings.Folder), false), statsText),
+                Row(Ui.Glyph("", 20, "Text"), "AI Meter", null, Button(L.T("Open data folder"), () => Program.OpenFolder(Settings.ExplorerFolder), false), statsText),
                 Row(Ui.Glyph("", 20, "Text"), L.T("Privacy"),
                     L.T("Sessions and limits are read from local files. Only usage requests leave this PC: Claude (Anthropic), Codex (through the codex program), Copilot (GitHub) and each service you turn on, to its own site. Local models are read only on this PC. Each one can be turned off.")
                     + " " + L.T(Native.IsPackaged ? "The update check below asks the Microsoft Store whether an update is waiting." : "The update check below also asks GitHub for the latest version."),
