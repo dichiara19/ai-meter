@@ -39,7 +39,7 @@ jobs:
           Say "inside: roaming=$roam"
           try { [IO.Directory]::CreateDirectory("$roam\ProbeNew") | Out-Null; [IO.File]::WriteAllText("$roam\ProbeNew\n.json", 'new'); Say 'new file: ok' } catch { Say "new file: $_" }
           try { [IO.File]::WriteAllText("$roam\ProbeCopy\c.json.tmp", 'copied'); [IO.File]::Copy("$roam\ProbeCopy\c.json.tmp", "$roam\ProbeCopy\c.json", $true); [IO.File]::Delete("$roam\ProbeCopy\c.json.tmp"); Say 'copy over existing: ok' } catch { Say "copy over existing: $_" }
-          try { [IO.File]::WriteAllText("$roam\ProbeReplace\r.json.tmp", 'replaced'); [IO.File]::Replace("$roam\ProbeReplace\r.json.tmp", "$roam\ProbeReplace\r.json", $null); Say 'replace existing: ok' } catch { Say "replace existing: $_" }
+          try { [IO.File]::WriteAllText("$roam\ProbeReplace\r.json.tmp", 'replaced'); [IO.File]::Replace("$roam\ProbeReplace\r.json.tmp", "$roam\ProbeReplace\r.json", [NullString]::Value); Say 'replace existing: ok' } catch { Say "replace existing: $_" }
           try { [IO.File]::WriteAllText("$roam\ProbeWrite\w.json", 'written'); Say 'write existing: ok' } catch { Say "write existing: $_" }
           try { Say ("read back copy=" + [IO.File]::ReadAllText("$roam\ProbeCopy\c.json") + " replace=" + [IO.File]::ReadAllText("$roam\ProbeReplace\r.json") + " write=" + [IO.File]::ReadAllText("$roam\ProbeWrite\w.json") + " new=" + [IO.File]::ReadAllText("$roam\ProbeNew\n.json")) } catch { Say "read back: $_" }
           Say ('exists new=' + [IO.File]::Exists("$roam\ProbeNew\n.json") + ' missing=' + [IO.File]::Exists("$roam\ProbeMissing\m.json"))
