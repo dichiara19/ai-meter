@@ -7,10 +7,11 @@
 **AI limits in your taskbar. A local history of what you use.**
 
 [![Latest release](https://img.shields.io/github/v/release/dichiara19/ai-meter?label=download&color=2563eb)](https://github.com/dichiara19/ai-meter/releases/latest)
-[![Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-get%20it-0078d4)](https://apps.microsoft.com/detail/9PKMRQWBWHDM)
 [![Windows 11](https://img.shields.io/badge/Windows-11-0078d4)](#install)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-16a34a)](LICENSE)
 [![Languages](https://img.shields.io/badge/languages-6-7c3aed)](#languages)
+
+<a href="https://apps.microsoft.com/detail/9PKMRQWBWHDM"><img src="https://get.microsoft.com/images/en-us%20dark.svg" alt="Get it from Microsoft" width="200"></a>
 
 </div>
 
@@ -59,8 +60,6 @@ Open **Usage history** from the notification-area menu or **Settings → Usage h
 Screenshots use sample data. Your archive starts from collection time; it cannot recover unobserved provider-side activity. Computed API costs are not subscription charges, and missing counters are not zero. See [data sources, collection limits and feedback behaviour](docs/HISTORY.md).
 
 ## Install
-
-<a href="https://apps.microsoft.com/detail/9PKMRQWBWHDM"><img src="https://get.microsoft.com/images/en-us%20dark.svg" alt="Get it from Microsoft" width="200"></a>
 
 **From the Microsoft Store.** [AI Meter - Windows](https://apps.microsoft.com/detail/9PKMRQWBWHDM) is signed by Microsoft, so Smart App Control and SmartScreen trust it, and the Store keeps it updated with stable versions. Install it and the pill appears in your taskbar.
 
