@@ -19,21 +19,16 @@ namespace AIMeter
     public static class MediaRenderer
     {
         private static Settings S;
-        private static BitmapSource wallpaper, wallpaperBlur;
-        private const int DeskW = 1920, DeskH = 1080, BarH = 48;
+        internal static BitmapSource wallpaper, wallpaperBlur;
+        internal const int DeskW = 1920, DeskH = 1080, BarH = 48;
         // Use the current minute because relative reset times depend on the actual clock.
         private static readonly DateTime Now = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, DateTime.Now.Hour, DateTime.Now.Minute, 0);
 
         public static string Run(string outDir, string framesDir, string lang)
         {
-            var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-            S = new Settings { Language = lang };
-            L.Init(lang);
+            Prepare(lang);
             Directory.CreateDirectory(outDir);
             Directory.CreateDirectory(framesDir);
-            SetTheme(true);
-            wallpaper = Wallpaper(false);
-            wallpaperBlur = Wallpaper(true);
             var snap = DemoData.Build(Now);
 
             foreach (var dark in new[] { true, false })
@@ -51,7 +46,18 @@ namespace AIMeter
             return "ok, " + frames + " + " + appFrames + " frames";
         }
 
-        private static void SetTheme(bool dark)
+        /// <summary>Start WPF once, then select the language and the dark theme; the backdrops are generated on first use.</summary>
+        internal static void Prepare(string lang)
+        {
+            if (Application.Current == null) new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            S = new Settings { Language = lang };
+            L.Init(lang);
+            SetTheme(true);
+            if (wallpaper == null) wallpaper = Wallpaper(false);
+            if (wallpaperBlur == null) wallpaperBlur = Wallpaper(true);
+        }
+
+        internal static void SetTheme(bool dark)
         {
             S.Theme = dark ? "dark" : "light";
             Theme.Apply(S);
@@ -87,7 +93,7 @@ namespace AIMeter
             return crop;
         }
 
-        private static Image Crop(BitmapSource src, Rect r)
+        internal static Image Crop(BitmapSource src, Rect r)
         {
             var cb = new CroppedBitmap(src, new Int32Rect((int)r.X, (int)r.Y, (int)r.Width, (int)r.Height));
             return new Image { Source = cb, Width = r.Width, Height = r.Height, Stretch = Stretch.Fill };
@@ -106,7 +112,7 @@ namespace AIMeter
         /// Like the real flyout, a panel taller than maxHeight keeps its header and footer and scrolls its cards:
         /// moving <paramref name="scroll"/> up by at most <paramref name="maxScroll"/> pixels reveals the rest.
         /// </summary>
-        private static FrameworkElement Panel(Snapshot s, bool dark, Rect onDesk, double maxHeight, out TranslateTransform scroll, out double maxScroll)
+        internal static FrameworkElement Panel(Snapshot s, bool dark, Rect onDesk, double maxHeight, out TranslateTransform scroll, out double maxScroll)
         {
             var root = new DockPanel { Margin = new Thickness(12, 10, 12, 12) };
             var header = new DockPanel { Height = 36 };
@@ -184,7 +190,7 @@ namespace AIMeter
         }
 
         /// <summary>Compose the taskbar corner with the pill, system icons and clock.</summary>
-        private static FrameworkElement Taskbar(Snapshot s, double width, bool hover)
+        internal static FrameworkElement Taskbar(Snapshot s, double width, bool hover)
         {
             var bar = new DockPanel { Width = width, Height = BarH, LastChildFill = false };
             bar.Background = new SolidColorBrush(Color.FromArgb(0xF0, 0x1C, 0x1C, 0x1C));
@@ -211,11 +217,11 @@ namespace AIMeter
             return g2;
         }
 
-        private static TextBlock Plain(string t, double size) { return new TextBlock { Text = t, FontSize = size, Foreground = Brushes.White, FontFamily = Theme.Font }; }
+        internal static TextBlock Plain(string t, double size) { return new TextBlock { Text = t, FontSize = size, Foreground = Brushes.White, FontFamily = Theme.Font }; }
         private static TextBlock Icon(string g, double size) { return new TextBlock { Text = g, FontSize = size, Foreground = Brushes.White, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), VerticalAlignment = VerticalAlignment.Center }; }
 
         /// <summary>Reconstruct a Windows notification card with the app name and icon.</summary>
-        private static FrameworkElement Toast(Snapshot s, Rect onDesk)
+        internal static FrameworkElement Toast(Snapshot s, Rect onDesk)
         {
             var claude = s.Providers[0].Usage.Windows[0];
             var other = Ui.Primary(s.Providers[1].Usage);
@@ -235,7 +241,7 @@ namespace AIMeter
             return Glass(st, true, onDesk, 364);
         }
 
-        private static BitmapSource AppIcon()
+        internal static BitmapSource AppIcon()
         {
             var dec = new IconBitmapDecoder(new Uri(IOPath.Combine(Program.Home, @"assets\app.ico")), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
             return dec.Frames.OrderByDescending(f => f.PixelWidth).First();
@@ -390,7 +396,7 @@ namespace AIMeter
         /// Show the collapsed taskbar pill with its pointer and tooltip for the README hero
         /// and the background of the social preview.
         /// </summary>
-        private static FrameworkElement HeroTaskbar(Snapshot s, double w, double h, bool tooltip)
+        internal static FrameworkElement HeroTaskbar(Snapshot s, double w, double h, bool tooltip)
         {
             var c = new Canvas { Width = w, Height = h, ClipToBounds = true };
             c.Children.Add(Crop(wallpaper, new Rect(DeskW - w, DeskH - h, w, h)));
@@ -648,7 +654,7 @@ namespace AIMeter
         }
 
         // Rendering and encoding.
-        private static BitmapSource Render(FrameworkElement el, double w, double h, double scale)
+        internal static BitmapSource Render(FrameworkElement el, double w, double h, double scale)
         {
             el.Measure(new Size(w, h));
             el.Arrange(new Rect(0, 0, w, h));
