@@ -19,6 +19,38 @@ namespace AIMeter
             test("Explicit startup preserves a script path containing spaces", () => Fixture(ScriptLaunch));
             test("Start-up is registered only after the welcome window, as chosen", () => Fixture(StartupAfterConsent));
             test("The packaged app is launched through its execution alias", () => Fixture(PackagedLaunch));
+            test("The Store package asks about start-up once when its settings came from another copy", () => Fixture(PackageAsksAfterMove));
+            test("Saving swaps the finished file in through a backup and leaves none behind", AtomicSwap);
+        }
+
+        /// <summary>
+        /// The swap the Store build depends on: File.Replace without a backup threw inside the package, so no setting or
+        /// lease was ever saved there. The package itself cannot run in tests; this holds the helper to its contract.
+        /// </summary>
+        private static void AtomicSwap()
+        {
+            string folder = Path.Combine(Settings.Folder, "atomic-test");
+            Directory.CreateDirectory(folder);
+            string path = Path.Combine(folder, "file.json"), temporary = path + ".tmp";
+            try
+            {
+                File.WriteAllText(temporary, "first");
+                AtomicFile.Replace(temporary, path);
+                Assert(File.ReadAllText(path) == "first" && !File.Exists(temporary), "A new file was not moved into place.");
+
+                File.WriteAllText(temporary, "second");
+                AtomicFile.Replace(temporary, path);
+                Assert(File.ReadAllText(path) == "second" && !File.Exists(temporary), "An existing file was not replaced.");
+                Assert(!File.Exists(path + ".bak"), "The swap left its backup behind.");
+
+                // Every other swap in the sources must use the helper, or the Store build loses that file's saves again.
+                string repository = Environment.GetEnvironmentVariable("AIMETER_REPOSITORY");
+                if (repository != null)
+                    foreach (string source in Directory.GetFiles(Path.Combine(repository, "src"), "*.cs"))
+                        Assert(Path.GetFileName(source) == "AtomicFile.cs" || !System.Text.RegularExpressions.Regex.IsMatch(File.ReadAllText(source), @"(?<!Atomic)File\.Replace\("),
+                            Path.GetFileName(source) + " calls File.Replace directly instead of AtomicFile.Replace.");
+            }
+            finally { Directory.Delete(folder, true); }
         }
 
         private static void Fixture(Action test)
@@ -172,6 +204,46 @@ namespace AIMeter
             finally
             {
                 settings.FirstRunDone = firstRunDone;
+                settings.Save();
+            }
+        }
+
+        /// <summary>
+        /// Settings carried over from a GitHub copy have FirstRunDone set, while the package's startup task starts
+        /// disabled: without a second ask the Store copy never started with Windows (seen on 2026-11-11).
+        /// </summary>
+        private static void PackageAsksAfterMove()
+        {
+            var settings = Settings.Current;
+            bool firstRunDone = settings.FirstRunDone, packageFirstRunDone = settings.PackageFirstRunDone;
+            try
+            {
+                Func<bool> undecided = () => true, decided = () => false, unreachable = () => { throw new Exception("The startup task was queried needlessly."); };
+
+                settings.FirstRunDone = false;
+                settings.PackageFirstRunDone = false;
+                Assert(Controller.NeedsFirstRunConsent(settings, false, unreachable), "The first launch did not ask.");
+                Assert(Controller.NeedsFirstRunConsent(settings, true, unreachable), "The first packaged launch did not ask.");
+
+                settings.FirstRunDone = true;
+                Assert(!Controller.NeedsFirstRunConsent(settings, false, unreachable), "The unpackaged copy asked twice.");
+                Assert(Controller.NeedsFirstRunConsent(settings, true, undecided), "The package did not ask after a move from another copy.");
+                Assert(!Controller.NeedsFirstRunConsent(settings, true, decided), "The package asked although its startup task was already chosen.");
+
+                Native.PackagedOverride = true;
+                Controller.CompleteFirstRun(settings, () => false);
+                Assert(settings.PackageFirstRunDone, "The package's first launch was not recorded.");
+                Assert(!Controller.NeedsFirstRunConsent(settings, true, unreachable), "The package asked again after its own first launch.");
+
+                Native.PackagedOverride = false;
+                settings.PackageFirstRunDone = false;
+                Controller.CompleteFirstRun(settings, () => false);
+                Assert(!settings.PackageFirstRunDone, "The unpackaged copy recorded the package's first launch.");
+            }
+            finally
+            {
+                settings.FirstRunDone = firstRunDone;
+                settings.PackageFirstRunDone = packageFirstRunDone;
                 settings.Save();
             }
         }

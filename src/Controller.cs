@@ -81,7 +81,14 @@ namespace AIMeter
             historyCollector = new HistoryCollector(historyStore);
             Consumption = new ConsumptionMonitor(historyStore);
             Theme.Apply(Settings);
-            bool sampleData = firstRun && AskFirstRunConsent();
+            bool packaged = Native.IsPackaged;
+            bool askConsent = NeedsFirstRunConsent(Settings, packaged, () => Settings.PackageStartupUndecided);
+            if (packaged && !askConsent && !Settings.PackageFirstRunDone)
+            {
+                Settings.PackageFirstRunDone = true;
+                Settings.Save();
+            }
+            bool sampleData = askConsent && AskFirstRunConsent();
 
             CreateFlyout();
             hideDetails.Tick += (o, e) => { hideDetails.Stop(); if (flyout.HoverMode && !flyout.IsMouseOver && (pill == null || !pill.IsMouseOver)) flyout.Hide(); };

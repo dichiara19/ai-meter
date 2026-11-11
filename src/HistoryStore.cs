@@ -273,7 +273,7 @@ namespace AIMeter
                         }
                     }
                     db.Execute("COMMIT");
-                    if (File.Exists(path)) File.Replace(temporary, path, null); else File.Move(temporary, path);
+                    AtomicFile.Replace(temporary, path);
                 }
                 catch
                 {

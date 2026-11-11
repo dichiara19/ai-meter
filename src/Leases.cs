@@ -257,8 +257,7 @@ namespace AIMeter
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 string temp = path + ".tmp";
                 File.WriteAllText(temp, JsonText.Indented(doc), new UTF8Encoding(false));
-                if (File.Exists(path)) File.Replace(temp, path, null);
-                else File.Move(temp, path);
+                AtomicFile.Replace(temp, path);
             }
             catch (IOException ex) { Program.LogError("leases", ex); }
             catch (UnauthorizedAccessException ex) { Program.LogError("leases", ex); }

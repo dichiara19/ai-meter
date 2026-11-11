@@ -92,6 +92,9 @@ namespace AIMeter
         public string Language { get; set; }        // "system" or a language code from L.Languages.
         public string Refresh { get; set; }         // "auto", "low"
         public bool FirstRunDone { get; set; }
+        // Whether the Store package has shown its own first-launch window. Settings are shared with the other builds, so
+        // FirstRunDone alone would hide the package's "Start with Windows" choice from someone moving over (Controller).
+        public bool PackageFirstRunDone { get; set; }
         public bool HistoryEnabled { get; set; }
         public bool McpTitles { get; set; }         // Whether AI apps connected through MCP may read session titles.
         public bool SessionFeedback { get; set; }
@@ -205,8 +208,7 @@ namespace AIMeter
                 Directory.CreateDirectory(Folder);
                 string tmp = FilePath + ".tmp";
                 File.WriteAllText(tmp, Json.Serialize(this), new UTF8Encoding(false));
-                if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
-                else File.Move(tmp, FilePath);
+                AtomicFile.Replace(tmp, FilePath);
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
@@ -324,6 +326,18 @@ namespace AIMeter
                         if (k != null) k.DeleteValue("AI Meter.lnk", false);
                 }
                 else if (File.Exists(StartupLink)) File.Delete(StartupLink);
+            }
+        }
+
+        /// <summary>True in the Store package while its startup task is still in its initial, disabled state.</summary>
+        internal static bool PackageStartupUndecided
+        {
+            get
+            {
+#if MSIX
+                if (Native.IsPackaged) return PackageStartup.Undecided;
+#endif
+                return false;
             }
         }
 

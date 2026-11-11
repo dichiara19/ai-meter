@@ -56,6 +56,19 @@ namespace AIMeter
         }
 
         /// <summary>
+        /// Whether to show the first-launch window. Always on the very first launch. The Store package reads the settings
+        /// of a copy installed from GitHub (both use %APPDATA%\AIMeter), whose shortcut in the Startup folder its
+        /// uninstaller removes, while the package's own startup task starts disabled. So the package shows the window once
+        /// more when it has never shown it and its startup task is still in that initial state; otherwise "Start with
+        /// Windows" would silently stay off. <paramref name="startupUndecided"/> is only asked in that case.
+        /// </summary>
+        internal static bool NeedsFirstRunConsent(Settings settings, bool packaged, Func<bool> startupUndecided)
+        {
+            if (!settings.FirstRunDone) return true;
+            return packaged && !settings.PackageFirstRunDone && startupUndecided();
+        }
+
+        /// <summary>
         /// Run the consent step (<paramref name="ask"/> returns the "Start with Windows" choice) and only then record it,
         /// so start-up is never registered before the user has seen the choice (Store policy 10.2.8).
         /// </summary>
@@ -63,6 +76,7 @@ namespace AIMeter
         {
             bool startWithWindows = ask();
             settings.FirstRunDone = true;
+            if (Native.IsPackaged) settings.PackageFirstRunDone = true;
             settings.Save();
             try { Settings.ApplyFirstRunStartup(startWithWindows); } catch (Exception ex) { Program.LogError("startup", ex); }
         }
