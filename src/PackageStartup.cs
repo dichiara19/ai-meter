@@ -34,6 +34,19 @@ namespace AIMeter
             }
         }
 
+        /// <summary>
+        /// True while the startup task is in the manifest's initial state, Disabled. Turning it off later gives the same
+        /// state, so this cannot tell "never chosen" from "turned off"; Settings.PackageFirstRunDone records the first.
+        /// </summary>
+        public static bool Undecided
+        {
+            get
+            {
+                var t = Task();
+                return t != null && t.State == StartupTaskState.Disabled;
+            }
+        }
+
         /// <summary>True if Windows started the app at sign-in through the startup task.</summary>
         public static bool LaunchedAtLogin
         {

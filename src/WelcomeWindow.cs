@@ -44,10 +44,13 @@ namespace AIMeter
             root.Children.Add(info);
 
             // The taskbar pill is the main surface and start-up keeps it there, so both are offered switched on; API keys are opt-in.
-            var taskbar = SettingsWindow.Toggle(true, v => { });
+            // Someone moving to the Store package from another copy has made these choices already: they are kept as
+            // they are, so that closing the window changes only "Start with Windows".
+            bool chosenBefore = settings.FirstRunDone;
+            var taskbar = SettingsWindow.Toggle(!chosenBefore || settings.TaskbarDock, v => { });
             var startup = SettingsWindow.Toggle(true, v => { });
             var claude = SettingsWindow.Toggle(settings.ClaudeLiveUsage, v => { });
-            var keys = SettingsWindow.Toggle(false, v => { });
+            var keys = SettingsWindow.Toggle(chosenBefore && settings.FindKeys, v => { });
             var rows = new System.Collections.Generic.List<FrameworkElement>
             {
                 SettingsWindow.Row(Ui.Glyph("", 20, "Text"), L.T("Show in the taskbar"),

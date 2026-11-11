@@ -19,6 +19,7 @@ namespace AIMeter
             test("Explicit startup preserves a script path containing spaces", () => Fixture(ScriptLaunch));
             test("Start-up is registered only after the welcome window, as chosen", () => Fixture(StartupAfterConsent));
             test("The packaged app is launched through its execution alias", () => Fixture(PackagedLaunch));
+            test("The Store package asks about start-up once when its settings came from another copy", () => Fixture(PackageAsksAfterMove));
         }
 
         private static void Fixture(Action test)
@@ -172,6 +173,46 @@ namespace AIMeter
             finally
             {
                 settings.FirstRunDone = firstRunDone;
+                settings.Save();
+            }
+        }
+
+        /// <summary>
+        /// Settings carried over from a GitHub copy have FirstRunDone set, while the package's startup task starts
+        /// disabled: without a second ask the Store copy never started with Windows (seen on 2026-11-11).
+        /// </summary>
+        private static void PackageAsksAfterMove()
+        {
+            var settings = Settings.Current;
+            bool firstRunDone = settings.FirstRunDone, packageFirstRunDone = settings.PackageFirstRunDone;
+            try
+            {
+                Func<bool> undecided = () => true, decided = () => false, unreachable = () => { throw new Exception("The startup task was queried needlessly."); };
+
+                settings.FirstRunDone = false;
+                settings.PackageFirstRunDone = false;
+                Assert(Controller.NeedsFirstRunConsent(settings, false, unreachable), "The first launch did not ask.");
+                Assert(Controller.NeedsFirstRunConsent(settings, true, unreachable), "The first packaged launch did not ask.");
+
+                settings.FirstRunDone = true;
+                Assert(!Controller.NeedsFirstRunConsent(settings, false, unreachable), "The unpackaged copy asked twice.");
+                Assert(Controller.NeedsFirstRunConsent(settings, true, undecided), "The package did not ask after a move from another copy.");
+                Assert(!Controller.NeedsFirstRunConsent(settings, true, decided), "The package asked although its startup task was already chosen.");
+
+                Native.PackagedOverride = true;
+                Controller.CompleteFirstRun(settings, () => false);
+                Assert(settings.PackageFirstRunDone, "The package's first launch was not recorded.");
+                Assert(!Controller.NeedsFirstRunConsent(settings, true, unreachable), "The package asked again after its own first launch.");
+
+                Native.PackagedOverride = false;
+                settings.PackageFirstRunDone = false;
+                Controller.CompleteFirstRun(settings, () => false);
+                Assert(!settings.PackageFirstRunDone, "The unpackaged copy recorded the package's first launch.");
+            }
+            finally
+            {
+                settings.FirstRunDone = firstRunDone;
+                settings.PackageFirstRunDone = packageFirstRunDone;
                 settings.Save();
             }
         }
