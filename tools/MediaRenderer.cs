@@ -223,8 +223,8 @@ namespace AIMeter
         /// <summary>Reconstruct a Windows notification card with the app name and icon.</summary>
         internal static FrameworkElement Toast(Snapshot s, Rect onDesk)
         {
-            var claude = s.Providers[0].Usage.Windows[0];
-            var other = Ui.Primary(s.Providers[1].Usage);
+            // The app's own low-limit notice for Claude's first window, so the card shows the same translated text.
+            var notice = Alerts.Low(s, s.Providers[0], s.Providers[0].Usage.Windows[0]);
             var st = new StackPanel { Margin = new Thickness(16, 12, 16, 16) };
             var head = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
             var x = Icon("", 11); x.Opacity = 0.7; DockPanel.SetDock(x, Dock.Right); head.Children.Add(x);
@@ -233,9 +233,9 @@ namespace AIMeter
             DockPanel.SetDock(logo, Dock.Left); head.Children.Add(logo);
             var name = Plain("AI Meter", 12); name.Opacity = 0.85; head.Children.Add(name);
             st.Children.Add(head);
-            var title = Plain(L.F("{0} · {1}: {2}% left", "Claude", Ui.LabelOf(claude), Math.Round(claude.Remaining)), 14); title.FontWeight = FontWeights.SemiBold;
+            var title = Plain(notice.Item1, 14); title.FontWeight = FontWeights.SemiBold;
             st.Children.Add(title);
-            var body = Plain(L.F("Resets {0}.", Alerts.When(claude.ResetsAt.Value)) + " " + L.F("At this pace it runs out {0}.", Alerts.When(claude.RunsOutAt.Value)) + " " + L.F("{0} still has {1}% left.", "ChatGPT", Math.Round(other.Remaining)), 13);
+            var body = Plain(notice.Item2, 13);
             body.Opacity = 0.75; body.TextWrapping = TextWrapping.Wrap; body.Margin = new Thickness(0, 4, 0, 0);
             st.Children.Add(body);
             return Glass(st, true, onDesk, 364);

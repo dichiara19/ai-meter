@@ -353,7 +353,8 @@ namespace AIMeter
             return Math.Max(0, w.Remaining - pace * left.TotalHours);
         }
 
-        private static Tuple<string, string> Low(Snapshot s, ProviderState p, UsageWindow w)
+        /// <summary>The title and text of the low-limit notice; internal so the media renderer shows the same words.</summary>
+        internal static Tuple<string, string> Low(Snapshot s, ProviderState p, UsageWindow w)
         {
             // A notification always says what is left, as money for a credit limit, whatever the surfaces show.
             string title = L.F("{0} · {1}: {2}", p.Name, Ui.LabelOf(w), Ui.Value(w, null, Ui.ValueStyle.Long, true));
