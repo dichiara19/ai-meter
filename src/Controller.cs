@@ -81,9 +81,9 @@ namespace AIMeter
             historyCollector = new HistoryCollector(historyStore);
             Consumption = new ConsumptionMonitor(historyStore);
             Theme.Apply(Settings);
-            bool packaged = Native.IsPackaged;
-            bool askConsent = NeedsFirstRunConsent(Settings, packaged, () => Settings.PackageStartupUndecided);
-            if (packaged && !askConsent && !Settings.PackageFirstRunDone)
+            bool recordPackageDone;
+            bool askConsent = NeedsFirstRunConsent(Settings, Native.IsPackaged, () => Settings.PackageStartupUndecided, out recordPackageDone);
+            if (recordPackageDone)
             {
                 Settings.PackageFirstRunDone = true;
                 Settings.Save();

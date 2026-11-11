@@ -35,15 +35,17 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// True while the startup task is in the manifest's initial state, Disabled. Turning it off later gives the same
-        /// state, so this cannot tell "never chosen" from "turned off"; Settings.PackageFirstRunDone records the first.
+        /// True while the startup task is in the manifest's initial state, Disabled; false in any other state; null when
+        /// the task could not be read (an error, or no answer within Wait's timeout). Turning it off later also gives
+        /// Disabled, so this cannot tell "never chosen" from "turned off"; Settings.PackageFirstRunDone records the first.
         /// </summary>
-        public static bool Undecided
+        public static bool? Undecided
         {
             get
             {
                 var t = Task();
-                return t != null && t.State == StartupTaskState.Disabled;
+                if (t == null) return null;
+                return t.State == StartupTaskState.Disabled;
             }
         }
 

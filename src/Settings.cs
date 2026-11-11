@@ -330,15 +330,18 @@ namespace AIMeter
             }
         }
 
-        /// <summary>True in the Store package while its startup task is still in its initial, disabled state.</summary>
-        internal static bool PackageStartupUndecided
+        /// <summary>
+        /// In the Store package, whether its startup task is still in its initial, disabled state; null when it could not
+        /// be read, and outside the package's MSIX build, which has no startup task.
+        /// </summary>
+        internal static bool? PackageStartupUndecided
         {
             get
             {
 #if MSIX
                 if (Native.IsPackaged) return PackageStartup.Undecided;
 #endif
-                return false;
+                return null;
             }
         }
 

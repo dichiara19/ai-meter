@@ -187,22 +187,28 @@ namespace AIMeter
             bool firstRunDone = settings.FirstRunDone, packageFirstRunDone = settings.PackageFirstRunDone;
             try
             {
-                Func<bool> undecided = () => true, decided = () => false, unreachable = () => { throw new Exception("The startup task was queried needlessly."); };
+                Func<bool?> undecided = () => true, decided = () => false, unreadable = () => null,
+                    unreachable = () => { throw new InvalidOperationException("The startup task was queried needlessly."); };
+                bool record;
 
                 settings.FirstRunDone = false;
                 settings.PackageFirstRunDone = false;
-                Assert(Controller.NeedsFirstRunConsent(settings, false, unreachable), "The first launch did not ask.");
-                Assert(Controller.NeedsFirstRunConsent(settings, true, unreachable), "The first packaged launch did not ask.");
+                Assert(Controller.NeedsFirstRunConsent(settings, false, unreachable, out record) && !record, "The first launch did not ask.");
+                Assert(Controller.NeedsFirstRunConsent(settings, true, unreachable, out record) && !record, "The first packaged launch did not ask.");
 
                 settings.FirstRunDone = true;
-                Assert(!Controller.NeedsFirstRunConsent(settings, false, unreachable), "The unpackaged copy asked twice.");
-                Assert(Controller.NeedsFirstRunConsent(settings, true, undecided), "The package did not ask after a move from another copy.");
-                Assert(!Controller.NeedsFirstRunConsent(settings, true, decided), "The package asked although its startup task was already chosen.");
+                Assert(!Controller.NeedsFirstRunConsent(settings, false, unreachable, out record) && !record, "The unpackaged copy asked twice.");
+                Assert(Controller.NeedsFirstRunConsent(settings, true, undecided, out record) && !record, "The package did not ask after a move from another copy.");
+                Assert(!Controller.NeedsFirstRunConsent(settings, true, decided, out record), "The package asked although its startup task was already chosen.");
+                Assert(record, "A startup task already chosen did not settle the package's first launch.");
+                // Codacy's review of #79: a task that cannot be read must not drop the question for good.
+                Assert(!Controller.NeedsFirstRunConsent(settings, true, unreadable, out record), "The package asked on a startup task it could not read.");
+                Assert(!record, "An unreadable startup task settled the package's first launch, so it would never ask again.");
 
                 Native.PackagedOverride = true;
                 Controller.CompleteFirstRun(settings, () => false);
                 Assert(settings.PackageFirstRunDone, "The package's first launch was not recorded.");
-                Assert(!Controller.NeedsFirstRunConsent(settings, true, unreachable), "The package asked again after its own first launch.");
+                Assert(!Controller.NeedsFirstRunConsent(settings, true, unreachable, out record) && !record, "The package asked again after its own first launch.");
 
                 Native.PackagedOverride = false;
                 settings.PackageFirstRunDone = false;

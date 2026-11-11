@@ -60,12 +60,21 @@ namespace AIMeter
         /// of a copy installed from GitHub (both use %APPDATA%\AIMeter), whose shortcut in the Startup folder its
         /// uninstaller removes, while the package's own startup task starts disabled. So the package shows the window once
         /// more when it has never shown it and its startup task is still in that initial state; otherwise "Start with
-        /// Windows" would silently stay off. <paramref name="startupUndecided"/> is only asked in that case.
+        /// Windows" would silently stay off. <paramref name="startupUndecided"/> is only asked in that case: true while the
+        /// task is in its initial state, false once it was turned on or off, null when Windows could not say.
+        /// <paramref name="recordPackageDone"/> tells the caller to record PackageFirstRunDone without asking: only when
+        /// the task's state is known, so that a task that could not be read is looked at again at the next launch
+        /// instead of the question being dropped for good.
         /// </summary>
-        internal static bool NeedsFirstRunConsent(Settings settings, bool packaged, Func<bool> startupUndecided)
+        internal static bool NeedsFirstRunConsent(Settings settings, bool packaged, Func<bool?> startupUndecided, out bool recordPackageDone)
         {
+            recordPackageDone = false;
             if (!settings.FirstRunDone) return true;
-            return packaged && !settings.PackageFirstRunDone && startupUndecided();
+            if (!packaged || settings.PackageFirstRunDone) return false;
+            bool? undecided = startupUndecided();
+            if (undecided == true) return true;
+            recordPackageDone = undecided == false;
+            return false;
         }
 
         /// <summary>
