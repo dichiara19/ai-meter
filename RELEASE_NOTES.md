@@ -1,3 +1,8 @@
+## What changed in 0.10.3
+
+- **Start with Windows after moving to the Store version, without a gap.** In 0.10.2, if Windows could not tell AI Meter the state of its startup task at the moment it started, the Store version treated the question as answered and never asked again. It now asks at the next launch instead.
+- The Microsoft Store receives 0.10.2's changes with this version.
+
 ## What changed in 0.10.2
 
 - **Start with Windows after moving to the Store version.** If you used the GitHub version before installing AI Meter from the Microsoft Store, the Store version kept your settings but never asked whether to start with Windows, so AI Meter no longer started at sign-in. It now shows the first-launch window once more, with your other choices as they were: closing it changes only *Start with Windows*.
