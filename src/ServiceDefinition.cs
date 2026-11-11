@@ -67,16 +67,25 @@ namespace AIMeter
         /// <summary>
         /// The part of a value for an extra key (a "keys" entry) that matches its "pattern", ignoring case, such as the
         /// account ID inside a dashboard address pasted whole; the trimmed value when the entry has no pattern, and null
-        /// when the value is empty or does not match.
+        /// when the value is empty or does not match. The pattern comes from a definition file and runs on clipboard
+        /// text, so an invalid pattern, or one that takes longer than PatternTimeout, counts as no match instead of
+        /// throwing or holding the key window.
         /// </summary>
         public static string SlotText(Dictionary<string, object> spec, string value)
         {
             if (string.IsNullOrWhiteSpace(value)) return null;
             string pattern = Json.Str(spec, "pattern");
             if (pattern == null) return value.Trim();
-            var m = Regex.Match(value, pattern, RegexOptions.IgnoreCase);
-            return m.Success ? m.Value : null;
+            try
+            {
+                var m = new Regex(pattern, RegexOptions.IgnoreCase, PatternTimeout).Match(value);
+                return m.Success ? m.Value : null;
+            }
+            catch (ArgumentException) { return null; }          // An invalid pattern.
+            catch (RegexMatchTimeoutException) { return null; } // A TimeoutException, not an ArgumentException.
         }
+
+        internal static readonly TimeSpan PatternTimeout = TimeSpan.FromMilliseconds(250);
 
         private static bool ParseColour(string s, out uint c)
         {

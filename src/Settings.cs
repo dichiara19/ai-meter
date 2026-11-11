@@ -176,33 +176,79 @@ namespace AIMeter
 
         private static string FilePath { get { return Path.Combine(Folder, "settings.json"); } }
 
+        /// <summary>
+        /// True when settings.json exists but could not be read at start, even after retrying. The session then runs on
+        /// default settings and never writes the file, so a moment's lock by OneDrive or an antivirus cannot replace the
+        /// user's real settings with defaults.
+        /// </summary>
+        private static bool keepFileUntouched;
+
+        /// <summary>
+        /// Read the settings. No file: defaults, a first run. A file that cannot be read: defaults marked as past the
+        /// first run, and the file is left alone for this session (keepFileUntouched). A file that is not valid
+        /// settings: it is kept as settings.json.bad and logged, then defaults, so the welcome window asks again.
+        /// </summary>
         public static Settings Load()
+        {
+            keepFileUntouched = false;
+            if (!File.Exists(FilePath)) return new Settings();
+            string text = ReadWithRetries(FilePath);
+            if (text == null)
+            {
+                keepFileUntouched = true;
+                Program.LogNote("settings", "settings.json could not be read; this session uses default settings and leaves the file as it is.");
+                return new Settings { FirstRunDone = true };
+            }
+
+            Settings s = null;
+            try { s = Json.Deserialize<Settings>(text); }
+            catch (Exception ex) { Program.LogError("settings", ex); }   // The serialiser's exception types vary with the fault.
+            if (s == null)
+            {
+                SetAside(FilePath);
+                return new Settings();
+            }
+
+            if (string.IsNullOrEmpty(s.WslDistro) || IsDockerDistro(s.WslDistro)) s.WslDistro = DefaultWslDistro();
+            if (string.IsNullOrEmpty(s.WslUser)) s.WslUser = Environment.UserName;
+            if (s.Services == null) s.Services = new System.Collections.Generic.Dictionary<string, bool>();
+            if (s.ExpandedServices == null) s.ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
+            if (s.NotifyResets == null) s.NotifyResets = new System.Collections.Generic.Dictionary<string, bool>();
+            if (s.PillLimits == null) s.PillLimits = new System.Collections.Generic.Dictionary<string, string>();
+            if (s.Budgets == null) s.Budgets = new System.Collections.Generic.Dictionary<string, string>();
+            if (s.HiddenRows == null) s.HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
+            return s;
+        }
+
+        /// <summary>The file's text, retried for about a second while another process holds it; null if it stays unreadable.</summary>
+        private static string ReadWithRetries(string path)
+        {
+            for (int attempt = 1; attempt <= 5; attempt++)
+            {
+                try { return File.ReadAllText(path, Encoding.UTF8); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                if (attempt < 5) System.Threading.Thread.Sleep(200);
+            }
+            return null;
+        }
+
+        /// <summary>Keep a settings file that could not be understood as path.bad, replacing an older one, and log it.</summary>
+        private static void SetAside(string path)
         {
             try
             {
-                if (File.Exists(FilePath))
-                {
-                    var s = Json.Deserialize<Settings>(File.ReadAllText(FilePath, Encoding.UTF8));
-                    if (s != null)
-                    {
-                        if (string.IsNullOrEmpty(s.WslDistro) || IsDockerDistro(s.WslDistro)) s.WslDistro = DefaultWslDistro();
-                        if (string.IsNullOrEmpty(s.WslUser)) s.WslUser = Environment.UserName;
-                        if (s.Services == null) s.Services = new System.Collections.Generic.Dictionary<string, bool>();
-                        if (s.ExpandedServices == null) s.ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
-                        if (s.NotifyResets == null) s.NotifyResets = new System.Collections.Generic.Dictionary<string, bool>();
-                        if (s.PillLimits == null) s.PillLimits = new System.Collections.Generic.Dictionary<string, string>();
-                        if (s.Budgets == null) s.Budgets = new System.Collections.Generic.Dictionary<string, string>();
-                        if (s.HiddenRows == null) s.HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
-                        return s;
-                    }
-                }
+                File.Copy(path, path + ".bad", true);
+                Program.LogNote("settings", "settings.json was not valid; it was kept as settings.json.bad and default settings are used.");
             }
-            catch (Exception) { }
-            return new Settings();
+            catch (IOException ex) { Program.LogError("settings", ex); }
+            catch (UnauthorizedAccessException ex) { Program.LogError("settings", ex); }
         }
 
+        /// <summary>Write the settings through a temporary file. Failures are logged; the session keeps its settings in memory.</summary>
         public void Save()
         {
+            if (keepFileUntouched) return;
             try
             {
                 Directory.CreateDirectory(Folder);
@@ -211,8 +257,8 @@ namespace AIMeter
                 if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
                 else File.Move(tmp, FilePath);
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (IOException ex) { Program.LogError("settings-save", ex); }
+            catch (UnauthorizedAccessException ex) { Program.LogError("settings-save", ex); }
         }
 
         /// <summary>Windows' default WSL distribution, unless it is Docker Desktop's; "" without one.</summary>

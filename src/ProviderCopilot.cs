@@ -216,6 +216,22 @@ namespace AIMeter
 
         public sealed class DeviceCode { public string Device, User, Uri; public int Interval, ExpiresIn; }
 
+        private const string DevicePage = "https://github.com/login/device";
+
+        /// <summary>
+        /// The page the sign-in window opens with Process.Start. It comes from GitHub's answer, so only an https page on
+        /// github.com is used: an answer altered on the way (a TLS-intercepting proxy, say) could otherwise name a file,
+        /// a network share or another app's protocol. Anything else falls back to GitHub's documented device page.
+        /// </summary>
+        internal static string VerificationPage(string answered)
+        {
+            System.Uri uri;
+            if (answered != null && System.Uri.TryCreate(answered, UriKind.Absolute, out uri) && uri.Scheme == System.Uri.UriSchemeHttps &&
+                string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) && uri.IsDefaultPort && string.IsNullOrEmpty(uri.UserInfo))
+                return uri.AbsoluteUri;
+            return DevicePage;
+        }
+
         public static DeviceCode Start()
         {
             var d = Post("https://github.com/login/device/code", "client_id=" + ClientId + "&scope=read:user");
@@ -223,7 +239,7 @@ namespace AIMeter
             return new DeviceCode
             {
                 Device = Json.Str(d, "device_code"), User = Json.Str(d, "user_code"),
-                Uri = Json.Str(d, "verification_uri") ?? "https://github.com/login/device",
+                Uri = VerificationPage(Json.Str(d, "verification_uri")),
                 Interval = (int)(Json.Num(d, "interval") ?? 5), ExpiresIn = (int)(Json.Num(d, "expires_in") ?? 900),
             };
         }
