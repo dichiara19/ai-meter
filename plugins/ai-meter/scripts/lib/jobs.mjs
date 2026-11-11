@@ -432,7 +432,6 @@ async function runAgent(job, chosen, task, signal) {
   if (!dropping) readLine(pending);   // A last line without its newline.
   if (stderrBytes > STDERR_LIMIT_BYTES) errors.write(`\n[AI Meter: ${stderrBytes - STDERR_LIMIT_BYTES} more bytes not kept]\n`);
   await Promise.all([new Promise((resolve) => events.end(resolve)), new Promise((resolve) => errors.end(resolve))]);
-  if (job.snapshot) removeSnapshot(job.snapshot);
 
   const summary = summarise(reader, exitCode, stopped);
   if (summary.answer.length > ANSWER_LIMIT) {
@@ -458,6 +457,22 @@ async function runAgent(job, chosen, task, signal) {
   if (summary.outcome !== "completed") job.error = summary.error;
   job.ended_at = new Date().toISOString();
   save(job);
+
+  // The snapshot goes once the end is saved, so the coordinator never waits on it. On Windows a WSL agent's folder
+  // stays open for some time after the agent exits (seen for over ten seconds on 2026-11-11), so the worker keeps
+  // trying for a minute; what is still left then is removed when the next job starts (prune).
+  if (job.snapshot && !(await removeSnapshotPatiently(job.snapshot))) {
+    job.snapshot.left_behind = true;
+    save(job);
+  }
+}
+
+async function removeSnapshotPatiently(snapshot) {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    if (removeSnapshot(snapshot)) return true;
+    await sleep(2000);
+  }
+  return false;
 }
 
 function release(leaseId, outcome) {
@@ -509,8 +524,8 @@ function signalGroup(pid, signalName) {
 }
 
 /**
- * Remove the folders of jobs that ended more than a week ago, or whose worker died that long ago, with any snapshot
- * left behind.
+ * Remove the snapshots that ended jobs left behind, and the folders of jobs that ended more than a week ago, or whose
+ * worker died that long ago.
  */
 function prune() {
   if (!existsSync(root())) return;
@@ -518,10 +533,10 @@ function prune() {
   for (const name of readdirSync(root())) {
     const file = join(folderOf(name), "job.json");
     try {
-      if (statSync(file).mtimeMs < limit && ENDED.has(view(JSON.parse(readFileSync(file, "utf8"))).status)) {
-        rmSync(folderOf(name), { recursive: true, force: true });
-        rmSync(join(snapshots(), name), { recursive: true, force: true });
-      }
+      if (!ENDED.has(view(JSON.parse(readFileSync(file, "utf8"))).status)) continue;
+      // A snapshot is a copy of the user's files: it goes as soon as its job has ended, whatever its age.
+      rmSync(join(snapshots(), name), { recursive: true, force: true });
+      if (statSync(file).mtimeMs < limit) rmSync(folderOf(name), { recursive: true, force: true });
     } catch {
       // Not a job folder, or one being written.
     }

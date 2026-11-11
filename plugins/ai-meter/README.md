@@ -10,7 +10,7 @@ Both get the same MCP server and the same `delegate` skill. The marketplaces are
 
 ## What you need
 
-- **AI Meter on Windows**, with the delegation tools (`list_candidates`, `describe_dispatch` and the capacity leases). They are not in a release yet: until M6, build AI Meter from `main` (`./build.ps1`). The plugin also works with the first version of these tools, but the agent definitions ([PR #30](https://github.com/dichiara19/ai-meter/pull/30)) add the WSL distribution, `runtimes.unsupported`, `warnings` and the request prices it uses. The plugin reaches AI Meter through the relay AI Meter writes (`%APPDATA%\AIMeter\mcp.ps1`), which starts AI Meter when it is not running.
+- **AI Meter 0.10.0 or later on Windows**, from the Microsoft Store or from GitHub: it has the delegation tools (`list_candidates`, `describe_dispatch` and the capacity leases). The plugin reaches AI Meter through the relay AI Meter writes, which starts AI Meter when it is not running: `%APPDATA%\AIMeter\mcp.ps1` for the GitHub copy, `~\.aimeter\mcp.ps1` for the Store copy. When both exist, for example after moving from one copy to the other, the plugin uses the one written last, since each copy rewrites its own at every start.
 - **Node.js 18 or later** where the coordinator runs: on Windows, or in WSL.
 - **At least one coding agent set up with its own key** for a service with free models, among those AI Meter can start (its [agent definitions](../../docs/MCP.md#agent-definitions); today Pi in WSL, and OpenCode on Windows or in WSL). The plugin never installs an agent and never handles a key. Set it up yourself, for example with `opencode auth login`.
 - Git, for tasks that change files.

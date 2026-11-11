@@ -6,9 +6,12 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { VERSION } from "./version.mjs";
 
+// The GitHub copy writes its relay to %APPDATA%\AIMeter, the Store copy to ~\.aimeter; each rewrites its own at every
+// start. A copy that was uninstalled leaves its relay behind, naming a program that is gone, so the newest one wins.
 const RELAY_SCRIPT =
-  "$p = Join-Path $env:APPDATA 'AIMeter\\mcp.ps1'; " +
-  "if (-not (Test-Path $p)) { $p = Join-Path $env:USERPROFILE '.aimeter\\mcp.ps1' }; " +
+  "$p = @((Join-Path $env:APPDATA 'AIMeter\\mcp.ps1'), (Join-Path $env:USERPROFILE '.aimeter\\mcp.ps1')) | " +
+  "Where-Object { Test-Path $_ } | Sort-Object { (Get-Item $_).LastWriteTimeUtc } -Descending | Select-Object -First 1; " +
+  "if (-not $p) { [Console]::Error.WriteLine('AI Meter is not installed: no relay found.'); exit 1 }; " +
   "& $p";
 
 /**

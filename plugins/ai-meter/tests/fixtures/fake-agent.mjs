@@ -15,7 +15,9 @@
 //   paid      prices its first request above zero, then waits until it is stopped;
 //   priced    prices its request above zero and ends normally, as on a free tier within its budget;
 //   hang      waits until it is stopped;
-//   family    starts a child process that waits, writes its pid to FAKE_CHILD_PID_FILE, then waits until stopped.
+//   family    starts a child process that waits, writes its pid to FAKE_CHILD_PID_FILE, then waits until stopped;
+//   holdopen  (Pi) answers as ok, leaving behind a process that keeps a file in its folder open for four seconds, as
+//             WSL keeps a Windows folder open for a while after an agent there exits.
 // Requests are otherwise priced at zero, as the agents do for free models.
 
 import { execFileSync, spawn } from "node:child_process";
@@ -42,6 +44,10 @@ function family() {
 }
 
 function pi() {
+  if (behaviour === "holdopen") {
+    const holder = "const fs = require('node:fs'); const fd = fs.openSync('held.txt', 'w'); setTimeout(() => fs.closeSync(fd), 4000);";
+    spawn(process.execPath, ["-e", holder], { detached: true, stdio: "ignore" }).unref();
+  }
   if (behaviour === "longline") process.stdout.write("x".repeat(5 * 1024 * 1024) + "\n");
   emit({ type: "session", id: "s1", cwd: process.cwd() });
   emit({ type: "agent_start" });

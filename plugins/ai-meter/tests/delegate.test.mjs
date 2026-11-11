@@ -32,6 +32,15 @@ function setUp(scenario) {
 
 const released = (calls) => calls().find((c) => c.tool === "release_capacity")?.arguments;
 
+/** Whether a path disappears within ms milliseconds. */
+async function gone(path, ms) {
+  for (const end = Date.now() + ms; Date.now() < end; ) {
+    if (!existsSync(path)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return !existsSync(path);
+}
+
 async function waitFor(id, status) {
   for (let i = 0; i < 100; i++) {
     if (jobs.view(jobs.load(id)).status === status) return;
@@ -325,7 +334,17 @@ test("a read-only task sees a snapshot of the files Git tracks or would track, w
   assert.deepEqual(job.snapshot.secrets_left_out.sort(), ["config/.env.production", "deploy.pem"], "secrets Git would track, or tracks, are left out too");
   assert.ok(job.warnings.includes("secret_files_left_out"));
   assert.equal(calls().find((c) => c.tool === "describe_dispatch").arguments.workspace, job.snapshot.path);
-  assert.equal(existsSync(job.snapshot.path), false, "the snapshot is removed when the task ends");
+  assert.ok(await gone(job.snapshot.path, 5000), "the snapshot is removed when the task ends");
+});
+
+test("a snapshot still held open when the agent exits does not stop the task from ending, and goes later", async () => {
+  const { workspace } = setUp({ candidates: [pi], behaviour: { pi: "holdopen" } });
+  writeFileSync(join(workspace, "a.txt"), "a\n");
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(job.status, "completed", job.error || "");
+  assert.equal(job.summary.answer, "echo: x");
+  assert.ok(await gone(job.snapshot.path, 15000), "the snapshot is removed once it is no longer held");
 });
 
 test("the names that suggest secrets", () => {

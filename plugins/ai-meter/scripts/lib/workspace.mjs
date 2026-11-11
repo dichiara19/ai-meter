@@ -65,8 +65,18 @@ export function createSnapshot(workspace, path) {
   return { path, secrets_left_out: secretsLeftOut };
 }
 
+/**
+ * Remove a snapshot. Returns false, instead of throwing, when it cannot be removed yet: on Windows a WSL agent's
+ * folder stays open for a moment after the agent exits (EPERM), and a failure here must not end the worker before it
+ * saves the task's end. jobs.mjs tries again for a while, and removes what is left when the next job starts (prune).
+ */
 export function removeSnapshot(snapshot) {
-  rmSync(snapshot.path, { recursive: true, force: true });
+  try {
+    rmSync(snapshot.path, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
