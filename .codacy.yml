@@ -1,5 +1,4 @@
 ---
-# Codacy reads this file from the default branch.
 # The C# regression tests (tests/) are not shipped in any build. Their findings were all false positives:
 # the shared Assert throws System.Exception, and refused addresses such as http:// are test inputs.
 exclude_paths:
