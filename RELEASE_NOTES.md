@@ -1,3 +1,9 @@
+## What changed in 0.10.2
+
+- **Start with Windows after moving to the Store version.** If you used the GitHub version before installing AI Meter from the Microsoft Store, the Store version kept your settings but never asked whether to start with Windows, so AI Meter no longer started at sign-in. It now shows the first-launch window once more, with your other choices as they were: closing it changes only *Start with Windows*.
+- **A visible start.** Until the first reading arrives, the taskbar pill shows a gently pulsing placeholder instead of nothing, so it is clear that AI Meter has started and where it lives.
+- **Delegation plugin.** On Windows, a task delegated to Pi in WSL could be reported as failed after it had finished, because WSL kept its working folder open for a while. After a move from the GitHub version, the plugin could also fail to start AI Meter. Both are fixed.
+
 ## What changed in 0.10.1
 
 - **The notification-area menu opens on every PC.** On some PCs with a touchscreen or pen, right-clicking the AI Meter icon showed an error window instead of the menu (#74). The cause was a pen or touch driver that reports one of its properties twice, which Windows' newer touch support in .NET cannot handle. AI Meter now checks the devices when it starts. On such a PC it uses the older touch support: the mouse and keyboard work as usual, and touch behaves as it did before 0.10.0. Any other unexpected error in the icon's menu is written to `errors.log` instead of showing an error window.
