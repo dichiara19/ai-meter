@@ -148,6 +148,9 @@ namespace AIMeter
             chip.MouseRightButtonUp += (o, e) => { C.ShowMenu(null); e.Handled = true; };
             // Lightweight check: taskbar recreated (File Explorer restarted), moved or resized.
             reconcile.Tick += (o, e) => Reconcile();
+            // Until the first reading, a loading state shows that AI Meter has started and where it lives.
+            chip.Content = Ui.PillSkeleton();
+            chip.ToolTip = L.T("AI Meter is starting: reading your limits…");
         }
 
         public void Show() { visible = true; Reconcile(); reconcile.Start(); }
