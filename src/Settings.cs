@@ -208,7 +208,8 @@ namespace AIMeter
                 Directory.CreateDirectory(Folder);
                 string tmp = FilePath + ".tmp";
                 File.WriteAllText(tmp, Json.Serialize(this), new UTF8Encoding(false));
-                AtomicFile.Replace(tmp, FilePath);
+                if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
+                else File.Move(tmp, FilePath);
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
