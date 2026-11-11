@@ -221,7 +221,9 @@ namespace AIMeter
                 return char.ToUpper(c.Groups[1].Value[0]) + c.Groups[1].Value.Substring(1) + " " + c.Groups[2].Value + (c.Groups[3].Success ? "." + c.Groups[3].Value : "");
             if (m.StartsWith("gpt-", StringComparison.OrdinalIgnoreCase))
             {
-                var parts = m.Substring(4).Split('-');
+                // Ids come from logs and remote lists: an empty part ("gpt-5-", "gpt--x") is skipped, not indexed.
+                var parts = m.Substring(4).Split(new[] { '-' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0) return m;
                 return "GPT-" + parts[0] + string.Concat(parts.Skip(1).Select(p => " " + char.ToUpper(p[0]) + p.Substring(1)));
             }
             return m;
