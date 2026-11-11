@@ -59,6 +59,47 @@ namespace AIMeter
         }
 
         /// <summary>
+        /// The taskbar pill's loading state, from start-up until the first reading: two placeholders shaped like
+        /// PillRow's items (logo, value and bar), pulsing gently unless Windows animations are turned off. Without it
+        /// the pill stays empty, and so invisible, for the first seconds, or 15 s after sign-in.
+        /// </summary>
+        public static FrameworkElement PillSkeleton()
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            for (int i = 0; i < 2; i++)
+            {
+                if (i > 0)
+                {
+                    var sep = new Border { Width = 1, Margin = new Thickness(10, 2, 10, 2) };
+                    sep.SetResourceReference(Border.BackgroundProperty, "Divider");
+                    row.Children.Add(sep);
+                }
+                var item = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                var logo = new Border { Width = 16, Height = 16, CornerRadius = new CornerRadius(8), VerticalAlignment = VerticalAlignment.Center };
+                logo.SetResourceReference(Border.BackgroundProperty, "Track");
+                item.Children.Add(logo);
+                var stack = new StackPanel { Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+                // The heights of a 12 px value and its 2 px bar, so the pill keeps its size when the reading arrives.
+                var value = new Border { Width = 22, Height = 9, CornerRadius = new CornerRadius(2), Margin = new Thickness(2, 3, 2, 4), HorizontalAlignment = HorizontalAlignment.Center };
+                value.SetResourceReference(Border.BackgroundProperty, "Track");
+                stack.Children.Add(value);
+                var bar = new Border { Width = 26, Height = 2, CornerRadius = new CornerRadius(1), Margin = new Thickness(0, 1, 0, 0) };
+                bar.SetResourceReference(Border.BackgroundProperty, "Track");
+                stack.Children.Add(bar);
+                item.Children.Add(stack);
+                row.Children.Add(item);
+            }
+            if (SystemParameters.ClientAreaAnimation)
+                row.BeginAnimation(UIElement.OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(1, 0.45, TimeSpan.FromMilliseconds(900))
+                {
+                    AutoReverse = true,
+                    RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever,
+                    EasingFunction = new System.Windows.Media.Animation.SineEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseInOut },
+                });
+            return row;
+        }
+
+        /// <summary>
         /// Build compact logo, value and bar rows for the overlay and taskbar pill.
         /// The optional dark flag controls logo variants; null follows the app theme.
         /// </summary>
