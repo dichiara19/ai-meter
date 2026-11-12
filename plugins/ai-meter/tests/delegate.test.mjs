@@ -9,6 +9,8 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as jobs from "../scripts/lib/jobs.mjs";
+import * as report from "../scripts/lib/report.mjs";
+import { Activity } from "../scripts/lib/activity.mjs";
 import { looksSecret } from "../scripts/lib/workspace.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -290,8 +292,10 @@ test("a modify task works in a new worktree and leaves the user's checkout alone
   assert.deepEqual(job.worktree.committed_secrets_visible, [".env"], "a committed secret is in the worktree, and the report says so");
   assert.ok(job.warnings.includes("committed_secret_files_visible"));
   // A modified file's status line starts with a space, which must not cost the path its first letter.
-  assert.deepEqual(job.worktree.files, [{ status: "M", path: "a.txt" }, { status: "??", path: "made-by-agent.txt" }]);
+  assert.deepEqual(job.worktree.files, [{ status: "M", path: "a.txt" }, { status: "A", path: "made-by-agent.txt" }]);
   assert.match(job.worktree.diff_stat, /a\.txt/);
+  assert.match(job.worktree.diff_stat, /made-by-agent\.txt/, "a new file is in the diff, not only in files");
+  assert.match(job.worktree.diff_stat, /2 files changed/);
   assert.equal(readFileSync(join(job.worktree.path, "made-by-agent.txt"), "utf8"), "modify\n");
   assert.equal(existsSync(join(repository, "made-by-agent.txt")), false);
   assert.equal(git("status", "--porcelain"), " M a.txt\n");
@@ -510,7 +514,7 @@ test("a modify report compares with the worktree's base, so changes the agent co
   assert.equal(job.status, "completed");
   assert.equal(job.worktree.commits.length, 1);
   assert.match(job.worktree.commits[0], /agent change/);
-  assert.deepEqual(job.worktree.files, [{ status: "M", path: "a.txt" }, { status: "??", path: "made-by-agent.txt" }]);
+  assert.deepEqual(job.worktree.files, [{ status: "M", path: "a.txt" }, { status: "A", path: "made-by-agent.txt" }]);
   assert.match(job.worktree.diff_stat, /a\.txt/);
   assert.match(job.worktree.review, new RegExp(job.worktree.base));
 });
@@ -581,4 +585,180 @@ test("the plugin's version lives in its manifests only, and they agree", async (
   assert.equal(VERSION, manifest("plugin.json").version);
   for (const file of ["scripts/mcp-server.mjs", "scripts/lib/meter.mjs"]) assert.doesNotMatch(readFileSync(join(here, "..", file), "utf8"), /"\d+\.\d+\.\d+"/, file + " has a version of its own");
   for (const file of ["mcp.json", ".mcp.json"]) assert.ok(manifest(file).mcpServers["ai-meter-delegate"].args[0].endsWith("scripts/mcp-server.mjs"), file);
+});
+
+test("a modify review shows the files the agent created, without committing them", async () => {
+  const { folder } = setUp({ candidates: [openCode], behaviour: { opencode: "write" } });
+  const repository = join(folder, "repo");
+  execFileSync("git", ["init", "-q", repository]);
+  writeFileSync(join(repository, "a.txt"), "a\n");
+  execFileSync("git", ["-C", repository, "add", "."]);
+  execFileSync("git", ["-C", repository, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"]);
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: repository, mode: "modify" }).id, 20);
+  const inWorktree = (...args) => execFileSync("git", ["-C", job.worktree.path, ...args], { encoding: "utf8" });
+
+  assert.equal(job.status, "completed");
+  const review = inWorktree("diff", job.worktree.base);
+  assert.match(review, /made-by-agent\.txt/, "the review command shows the new file");
+  assert.match(review, /\+modify/, "with its contents");
+  assert.equal(inWorktree("rev-parse", "HEAD").trim(), job.worktree.base, "nothing was committed");
+  assert.equal(inWorktree("diff", "--cached", "--name-only"), "", "no content was staged");
+});
+
+test("Pi's tool calls become a bounded activity: calls, files written and commands, with paths in its folder", async () => {
+  const { workspace } = setUp({ candidates: [pi], behaviour: { pi: "tools" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+  const shown = report.full(job, jobs.root());
+
+  assert.equal(job.status, "completed");
+  assert.equal(shown.counters.activity, undefined, "activity is a section of its own, not a counter");
+  const activity = shown.activity;
+  assert.equal(activity.tool_calls, 3);
+  assert.equal(activity.failed_calls, 1);
+  assert.deepEqual(activity.calls.map((c) => [c.tool, c.args, c.failed === true]), [
+    ["bash", "cd . && ls *.json", true],
+    ["write", "slug.test.js", false],
+    ["bash", "cd . && node --test 2>&1", false],
+  ]);
+  assert.deepEqual(activity.files_written, ["slug.test.js"]);
+  assert.deepEqual(activity.commands.map((c) => [c.command, c.ok, c.exit_code]), [["cd . && ls *.json", false, 2], ["cd . && node --test 2>&1", true, undefined]]);
+  assert.match(activity.commands[1].output_tail, /ℹ pass 8\nℹ fail 0$/, "the end of a command's output, where its result is");
+  assert.ok(activity.commands[1].output_tail.length <= 301, "only a short excerpt of the output");
+  const text = JSON.stringify(activity);
+  assert.doesNotMatch(text, /contents-the-report-must-not-carry/, "never the contents of a file written");
+  assert.doesNotMatch(text, new RegExp(job.id), "paths are relative to the task's folder");
+});
+
+test("OpenCode's tool_use events become the same activity, with failed edits and non-zero exits", async () => {
+  const { workspace } = setUp({ candidates: [openCode], behaviour: { opencode: "tools" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+  const activity = job.summary.activity;
+
+  assert.equal(job.status, "completed");
+  assert.deepEqual(activity.calls.map((c) => [c.tool, c.args, c.failed === true]), [
+    ["bash", "ls *.json", true],
+    ["write", "slug.test.js", false],
+    ["edit", "slug.js", true],
+    ["bash", "node --test", false],
+    ["read", "", false],
+  ]);
+  assert.equal(activity.calls[2].error, "oldString not found in content");
+  assert.deepEqual(activity.files_written, ["slug.test.js"], "a failed edit changed nothing");
+  assert.deepEqual(activity.commands.map((c) => [c.ok, c.exit_code]), [[false, 2], [true, 0]]);
+  assert.doesNotMatch(JSON.stringify(activity), /contents-the-report-must-not-carry/);
+});
+
+test("activity keeps the last calls and commands, and counts the earlier ones", async () => {
+  const { workspace } = setUp({ candidates: [pi], behaviour: { pi: "manytools" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+  const activity = job.summary.activity;
+
+  assert.equal(activity.tool_calls, 45);
+  assert.equal(activity.calls.length, 30);
+  assert.equal(activity.earlier_calls_left_out, 15);
+  assert.equal(activity.calls.at(-1).args, "echo 44", "the latest calls are the ones kept");
+  assert.equal(activity.commands.length, 10);
+  assert.equal(activity.earlier_commands_left_out, 35);
+});
+
+test("a run without tool calls has no activity", async () => {
+  const { workspace } = setUp({ candidates: [pi] });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+  assert.equal(job.summary.activity, null);
+  assert.equal(report.full(job, jobs.root()).activity, undefined);
+});
+
+test("errors the agent recovered from are reported apart, so a completed task shows no error", async () => {
+  const { workspace, calls } = setUp({ candidates: [pi], behaviour: { pi: "retried" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+  const shown = report.full(job, jobs.root());
+
+  assert.equal(shown.status, "completed");
+  assert.equal(shown.error, null);
+  assert.equal(shown.counters.error, null);
+  assert.deepEqual(shown.counters.recovered_errors, { count: 1, last: "429: a:free is temporarily rate-limited upstream. Please retry shortly." });
+  assert.equal(shown.counters.rate_limited, 1, "the rate limit still counts, and goes back to AI Meter");
+  assert.equal(released(calls).rate_limited, 1);
+});
+
+test("a failed task keeps its full error, and has no recovered_errors", async () => {
+  const { workspace } = setUp({ candidates: [pi], behaviour: { pi: "error429" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.match(job.summary.error, /429 Too Many Requests/);
+  assert.equal(job.summary.recovered_errors, undefined);
+});
+
+test("the report gives the job's duration once it has ended", async () => {
+  const { workspace } = setUp({ candidates: [pi] });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+  const shown = report.full(job, jobs.root());
+
+  assert.equal(shown.duration_seconds, Math.round((Date.parse(job.ended_at) - Date.parse(job.created_at)) / 100) / 10);
+  assert.ok(shown.duration_seconds > 0);
+  assert.equal(report.brief({ ...job, ended_at: undefined }).duration_seconds, undefined, "a job still running has none");
+});
+
+test("delegate_candidates gives a warning shared by a whole pool once, and drops model lists the coordinator cannot use", () => {
+  const byok = ["openrouter_byok_fallback"];
+  const found = {
+    candidates: [{ ...pi, warnings: byok }, { ...openCode, warnings: [...byok, "other"] }, { ...other }],
+    pools: [{ pool: "openrouter:free", models: 1 }, { pool: "nvidia:free", models: 1 }],
+    excluded: [
+      { service: "nvidia", reason: "price_not_confirmed", count: 68, models: ["m1", "m2"] },
+      { service: "cloudflare-workers-ai", reason: "free_tier_not_allowed", count: 2, models: ["@cf/a", "@cf/b"] },
+      { service: "openrouter", reason: "rate_limited", count: 1, models: ["x"], until: "2026-11-12T10:00:00Z" },
+    ],
+    runtimes: { found: [], unsupported: [] },
+  };
+  const shown = report.candidates(found);
+
+  assert.deepEqual(shown.pools[0].warnings, byok);
+  assert.equal(shown.pools[1].warnings, undefined);
+  assert.equal(shown.candidates[0].warnings, undefined, "the pool's warning is not repeated");
+  assert.deepEqual(shown.candidates[1].warnings, ["other"], "a warning of one candidate stays on it");
+  assert.deepEqual(shown.excluded[0], { service: "nvidia", reason: "price_not_confirmed", count: 68 });
+  assert.deepEqual(shown.excluded[1].models, ["@cf/a", "@cf/b"], "models the user can agree to use stay listed");
+  assert.deepEqual(shown.excluded[2], { service: "openrouter", reason: "rate_limited", count: 1, until: "2026-11-12T10:00:00Z" });
+});
+
+test("activity shortens the task's folder to a relative path, or to . when the path ends there", () => {
+  const activity = new Activity("jabc123");
+  const folder = "/mnt/c/Users/u/.aimeter/worktrees/jabc123";
+  assert.equal(activity.shorten(folder + "/slug.js"), "slug.js");
+  assert.equal(activity.shorten("cd " + folder + " && node --test"), "cd . && node --test");
+  assert.equal(activity.shorten("cd " + folder + "/ && node --test"), "cd . && node --test", "a trailing separator does not leave an empty path");
+  assert.equal(activity.shorten('cd "' + folder + '/"'), 'cd "."');
+  assert.equal(activity.shorten(folder + "/"), ".");
+  assert.equal(activity.shorten("C:\\Users\\u\\.aimeter\\snapshots\\jabc123\\src\\a.js"), "src\\a.js");
+  assert.equal(activity.shorten("git checkout ai-meter/jabc123"), "git checkout ai-meter/jabc123", "only the worktrees and snapshots folders are shortened");
+});
+
+test("a tool call that never ends is reported as unfinished", () => {
+  const activity = new Activity("j1");
+  activity.begin("a", "bash", { command: "node --test" });
+  activity.begin("b", "write", { path: "x.js", content: "x" });
+  activity.end("b", { failed: false, output: "ok" });
+  const shown = activity.report();
+
+  assert.deepEqual(shown.calls, [{ tool: "bash", args: "node --test", unfinished: true }, { tool: "write", args: "x.js" }]);
+  assert.deepEqual(shown.commands, [], "a command without its end has no result to report");
+  assert.deepEqual(shown.files_written, ["x.js"]);
+});
+
+test("activity keeps 50 file paths, and counts the others", () => {
+  const activity = new Activity("j1");
+  for (let i = 0; i < 55; i++) {
+    activity.begin(i, "write", { path: "f" + i + ".js", content: "x" });
+    activity.end(i, { failed: false });
+  }
+  activity.begin("again", "edit", { path: "f0.js" });
+  activity.end("again", { failed: false });
+  const shown = activity.report();
+
+  assert.equal(shown.files_written.length, 50);
+  assert.equal(shown.files_written.at(-1), "f49.js");
+  assert.equal(shown.more_files_left_out, 5, "a file written twice counts once");
 });
