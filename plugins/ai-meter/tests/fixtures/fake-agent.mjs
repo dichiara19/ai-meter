@@ -23,26 +23,76 @@
 //   manytools (Pi) makes 45 tool calls before answering;
 //   retried   (Pi) meets a 429, retries as Pi does, then answers normally.
 // Requests are otherwise priced at zero, as the agents do for free models.
+//
+// Claude Code and Codex on a plan replay the events recorded live (claude-plan.jsonl, codex-plan.jsonl), with {folder}
+// standing for their folder; FAKE_ENV_FILE, when set, receives the agent's environment as JSON. Behaviours:
+//   ok        the recorded run;
+//   apikey    (Claude Code) starts on an API key, then waits until it is stopped;
+//   overage   (Claude Code) reports extra usage in use, then waits until it is stopped;
+//   limit     the plan's limit is reached: Claude Code ends with an error result, Codex with turn.failed and exit 1.
+// fake-agent.mjs signin <claude|codex> <plan|apikey> answers a sign-in check as the agent's status command does.
 
 import { execFileSync, spawn } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const [runtime, behaviour] = process.argv.slice(2);
+const [runtime, behaviour, signIn] = process.argv.slice(2);
 const emit = (event) => process.stdout.write(JSON.stringify(event) + "\n");
 // File contents an agent writes, which the report must never carry, and a command's long output.
 const SECRET_CONTENT = "contents-the-report-must-not-carry";
 const longOutput = () => "✔ case\n".repeat(200) + "ℹ tests 8\nℹ pass 8\nℹ fail 0\n";
+
+if (runtime === "signin") {
+  // Claude Code's auth status answers in JSON on stdout (with the account, which the plugin must drop); Codex's login
+  // status writes a line to stderr.
+  if (behaviour === "claude") process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: signIn === "plan" ? "claude.ai" : "api_key", email: "someone@example.invalid" }));
+  else process.stderr.write(signIn === "plan" ? "Logged in using ChatGPT\n" : "Logged in using an API key - sk-proj-***test\n");
+  process.exit(0);
+}
+if (process.env.FAKE_ENV_FILE) writeFileSync(process.env.FAKE_ENV_FILE, JSON.stringify(process.env));
 
 let task = "";
 process.stdin.setEncoding("utf8");
 for await (const chunk of process.stdin) task += chunk;   // Ends only when the plugin closes stdin.
 
 const cost = behaviour === "paid" || behaviour === "priced" ? 0.0021 : 0;
-if (behaviour === "hang") setInterval(() => {}, 1000);
+if (runtime === "claude" || runtime === "codex") plan();
+else if (behaviour === "hang") setInterval(() => {}, 1000);
 else if (behaviour === "family") family();
 else if (runtime === "pi") pi();
 else openCode();
+
+/** A plan agent: the recorded run, or one of the endings it must be stopped or failed for. */
+function plan() {
+  const recorded = readFileSync(join(dirname(fileURLToPath(import.meta.url)), runtime + "-plan.jsonl"), "utf8")
+    .trim().split("\n").map((line) => JSON.parse(line.split("{folder}").join(process.cwd().replaceAll("\\", "/"))));
+  if (runtime === "claude") {
+    const [init, ...rest] = recorded;
+    if (behaviour === "apikey") {
+      emit({ ...init, apiKeySource: "ANTHROPIC_API_KEY" });
+      return setInterval(() => {}, 1000);
+    }
+    emit(init);
+    if (behaviour === "overage") {
+      emit({ type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour", overageStatus: "allowed", isUsingOverage: true } });
+      return setInterval(() => {}, 1000);
+    }
+    if (behaviour === "limit") {
+      emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour", isUsingOverage: false } });
+      return emit({ type: "result", subtype: "success", is_error: true, num_turns: 1, result: "Claude AI usage limit reached", usage: { input_tokens: 3, output_tokens: 0 } });
+    }
+    for (const event of rest) emit(event);
+    return;
+  }
+  if (behaviour === "limit") {
+    emit(recorded[0]);
+    emit({ type: "turn.started" });
+    emit({ type: "turn.failed", error: { message: "You've hit your usage limit. Try again later." } });
+    process.exit(1);
+  }
+  for (const event of recorded) emit(event);
+}
 
 function family() {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });

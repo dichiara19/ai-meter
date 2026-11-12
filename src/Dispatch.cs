@@ -42,6 +42,9 @@ namespace AIMeter
             if (access.Where == "wsl" && string.IsNullOrEmpty(distro)) return plan.Refuse("no WSL distribution is known");
             plan.VersionVerified = place.Verifies(version);
             string folder = string.IsNullOrEmpty(workspace) ? "{workspace}" : workspace;
+            string unsafeValue = Unsafe("model", model) ?? Unsafe("provider", access.Provider) ?? Unsafe("workspace", workspace) ?? Unsafe("distribution", distro) ??
+                Unsafe("program", access.Program) ?? Unsafe("home", access.Home);
+            if (unsafeValue != null) return plan.Refuse(unsafeValue);
 
             // From Windows into WSL, wsl.exe --cd already sets the folder, given as a Windows path the agent would not
             // understand inside WSL; the agent then works in its current folder.
@@ -57,6 +60,11 @@ namespace AIMeter
                 plan.Environment[kv.Key] = kv.Value is string ? Fill((string)kv.Value, values) : Json.Serialize(FillAll(kv.Value, values));
             plan.Output = new Dictionary<string, string>(kind.Dispatch.Output);
             plan.Notes.AddRange(kind.Dispatch.Notes);
+            // A plan agent starts from an empty environment, so no API key or base URL can make it bill the API (ADR 0003).
+            plan.CleanEnvironment = access.Plan || kind.Dispatch.CleanEnvironment;
+            if (access.Plan && kind.Plan == null) return plan.Refuse(kind.Name + " has no plan in its definition");
+            // The program's arguments for one run of the agent with these arguments, in a folder (inside WSL only).
+            Func<string, List<string>, List<string>> wrap;
 
             if (access.Where == "windows")
             {
@@ -64,7 +72,7 @@ namespace AIMeter
                 if (access.Program == null || !access.Program.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                     return plan.Refuse(kind.Name + "'s native Windows program was not found; its .cmd and .ps1 wrappers need a shell");
                 plan.Program = access.Program;
-                plan.Arguments = agent;
+                wrap = (cd, args) => args;
                 plan.WorkingDirectory = folder;
                 plan.Stop = "taskkill /PID <pid> /T /F";
             }
@@ -74,7 +82,7 @@ namespace AIMeter
             {
                 // The full path needs no login shell to put npm's global folder on the PATH.
                 plan.Program = access.Program ?? access.Runtime;
-                plan.Arguments = agent;
+                wrap = (cd, args) => args;
                 plan.WorkingDirectory = folder;
                 plan.Environment["PATH"] = SearchPath(access.Program, access.NodeFolder);
                 plan.Stop = "SIGINT to the process";
@@ -89,15 +97,29 @@ namespace AIMeter
                 if (access.KeyFromProfile)
                     return plan.Refuse("the key for " + access.Service + " is only exported in a WSL shell profile, which wsl.exe -e does not read; " +
                         "start the coordinator from a shell in WSL, or give " + kind.Name + " its own key");
-                var wsl = new List<string> { "-d", distro, "--cd", folder, "-e", "env", "PATH=" + SearchPath(access.Program, access.NodeFolder) };
-                wsl.AddRange(plan.Environment.Select(kv => kv.Key + "=" + kv.Value));
-                wsl.Add(access.Program);
-                wsl.AddRange(agent);
+                if (plan.CleanEnvironment && access.Home == null) return plan.Refuse("the agent's home inside WSL is not known");
+                var prefix = new List<string> { "-e", "env" };
+                // env -i starts from nothing: only the home, a PATH and a locale reach a plan agent.
+                if (plan.CleanEnvironment) prefix.AddRange(new[] { "-i", "HOME=" + access.Home, "LANG=C.UTF-8" });
+                prefix.Add("PATH=" + SearchPath(access.Program, access.NodeFolder));
+                prefix.AddRange(plan.Environment.Select(kv => kv.Key + "=" + kv.Value));
+                prefix.Add(access.Program);
+                wrap = (cd, args) => new List<string> { "-d", distro, "--cd", cd }.Concat(prefix).Concat(args).ToList();
                 plan.Program = "wsl.exe";
-                plan.Arguments = wsl;
                 plan.Environment = new Dictionary<string, string>();   // Already passed inside WSL through env.
                 plan.WorkingDirectory = null;
                 plan.Stop = "taskkill /PID <pid> /T /F on wsl.exe, which ends the agent inside WSL too";
+            }
+            plan.Arguments = wrap(folder, agent);
+            if (access.Plan)
+            {
+                // The plugin runs this first, with the same environment, and starts the agent only on a plan sign-in.
+                plan.SignIn = new SignInCheck
+                {
+                    Program = plan.Program, Arguments = wrap("~", kind.Plan.SignInArguments), JsonField = kind.Plan.SignInField,
+                    Expect = kind.Plan.SignInValue, Text = kind.Plan.SignInText,
+                };
+                plan.Billing = Candidates.IncludedInPlan;
             }
             plan.Warnings.AddRange(Warnings(access.Service));
             if (plan.Warnings.Contains(ByokFallback))
@@ -116,6 +138,21 @@ namespace AIMeter
         internal static List<string> Warnings(string service)
         {
             return service == "openrouter" ? new List<string> { ByokFallback } : new List<string>();
+        }
+
+        /// <summary>
+        /// Why a value that goes into the agent's command line cannot, or null when it can. The program is started without
+        /// a shell and every value is its own argument, so quoting cannot break out; but a value starting with "-" would be
+        /// read as one of the agent's options (a model id "--dangerously-…", say), and a control character such as a
+        /// newline or NUL has no place in a model id, a path or a distribution name. Such values come only from outside
+        /// (a service's model list, a caller's workspace), so they are refused rather than escaped.
+        /// </summary>
+        internal static string Unsafe(string what, string value)
+        {
+            if (string.IsNullOrEmpty(value)) return null;
+            if (value[0] == '-') return "the " + what + " starts with \"-\", which the agent would read as an option";
+            if (value.Any(c => c < ' ' || c == '\u007f')) return "the " + what + " contains a control character";
+            return null;
         }
 
         /// <summary>A template with {provider}, {model} and {workspace} filled in one pass, so a value is never read as a placeholder.</summary>
@@ -152,6 +189,11 @@ namespace AIMeter
         {
             public string Runtime, Where, Version, Mode, Program, WorkingDirectory, Stop, Reason;
             public bool Supported, VersionVerified;
+            /// <summary>Start from an empty environment plus Environment, never the plugin's own (plan agents).</summary>
+            public bool CleanEnvironment;
+            /// <summary>For a plan agent: the sign-in check to pass before starting it, and "included_in_plan".</summary>
+            public SignInCheck SignIn;
+            public string Billing;
             public List<string> Arguments = new List<string>();
             public Dictionary<string, string> Environment = new Dictionary<string, string>();
             public Dictionary<string, string> Output = new Dictionary<string, string>();
@@ -160,6 +202,17 @@ namespace AIMeter
             public readonly List<string> Warnings = new List<string>();
 
             public Plan Refuse(string reason) { Supported = false; Reason = reason; return this; }
+        }
+
+        /// <summary>
+        /// How a plugin checks that a plan agent is signed in to the plan, not to an API key: run Program with Arguments
+        /// in the agent's environment, then expect JsonField to equal Expect in its JSON output, or Text in its output.
+        /// Only that is read; the rest of the output (an account's email, say) is dropped.
+        /// </summary>
+        internal sealed class SignInCheck
+        {
+            public string Program, JsonField, Expect, Text;
+            public List<string> Arguments = new List<string>();
         }
     }
 }

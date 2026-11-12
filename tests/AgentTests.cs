@@ -53,8 +53,28 @@ namespace AIMeter
             var openCode = Agents.Get("opencode");
             Assert(openCode.PlaceFor("windows").Executables.Length == 3 && openCode.Dispatch.Environment["OPENCODE_CONFIG_CONTENT"] is Dictionary<string, object>,
                 "OpenCode's native programs or structured environment did not load.");
-            Assert(Agents.Get("crush").Dispatch == null && Agents.Get("codex").Dispatch == null && Agents.Get("crush").Keys.Count == 2,
+            Assert(Agents.Get("crush").Dispatch == null && Agents.Get("gemini").Dispatch == null && Agents.Get("crush").Keys.Count == 2,
                 "Agents without a verified dispatch must have none, and keep their key sources.");
+
+            // Plan agents: a clean environment, a sign-in check, and only the places verified (Claude Code not on Windows).
+            var claude = Agents.Get("claude");
+            var codex = Agents.Get("codex");
+            Assert(claude.Plan.Service == "claude" && claude.Plan.Models[0].Id == "sonnet" && claude.Plan.Models[0].Context == 1000000 && claude.Plan.Models[1].Context == 0 && claude.Plan.SignInField == "authMethod" && claude.Plan.SignInValue == "claude.ai",
+                "Claude Code's plan did not load.");
+            Assert(codex.Plan.Service == "openai" && codex.Plan.Models.Count == 0 && codex.Plan.SignInText == "Logged in using ChatGPT" && codex.Models.Format == "codex",
+                "Codex's plan or model list did not load.");
+            Assert(claude.Dispatch.CleanEnvironment && codex.Dispatch.CleanEnvironment && !Agents.Get("pi").Dispatch.CleanEnvironment, "Plan agents must start from a clean environment.");
+            // Both verified in WSL only: on Windows, Codex's read-only sandbox refused to read the workspace (2026-11-12).
+            Assert(claude.PlaceFor("wsl") != null && claude.PlaceFor("windows") == null && codex.PlaceFor("windows") == null && codex.PlaceFor("wsl") != null,
+                "The plan agents' verified places are wrong.");
+            foreach (var mode in new[] { "read_only", "modify" })
+                Assert(!claude.Dispatch.Arguments[mode].Contains("--bare") && claude.Dispatch.Arguments[mode].Contains("--safe-mode") &&
+                    claude.Dispatch.Arguments[mode].Contains("--restricted") && codex.Dispatch.Arguments[mode].Contains("--ignore-user-config") &&
+                    codex.Dispatch.Arguments[mode].Contains("forced_login_method=\"chatgpt\"") && codex.Dispatch.Arguments[mode].Contains("skills.include_instructions=false"),
+                    "A plan agent could load the user's configuration, skills or an API key in " + mode + ".");
+            Assert(codex.ProgramFolders["windows"].Single() == @"AppData\Local\OpenAI\Codex\bin\*", "The Codex app's program folder did not load.");
+            Assert(AgentPlan.FromJson((Dictionary<string, object>)Json.Parse("{ \"service\": \"claude\", \"sign_in\": { \"arguments\": [\"auth\"] } }")) == null,
+                "A plan without a way to check its sign-in must be ignored.");
             Assert(Agents.Get("pi").Dispatch.Output.ContainsKey("cost") && Agents.Get("opencode").Dispatch.Output["cost"].Contains("step_finish.part.cost"),
                 "The per-request cost is not described.");
         }
@@ -102,7 +122,7 @@ namespace AIMeter
 
         private static void UnsupportedAgents()
         {
-            string root = Tree(@"home\me\.codex", null, @"home\me\.npm-global\bin\codex", "",
+            string root = Tree(@"home\me\.gemini\tmp", null, @"home\me\.npm-global\bin\gemini", "",
                                @"home\me\.config\crush", null, @"usr\local\bin\crush", "",
                                @"home\me\.pi\agent", null,
                                @"home\me\.local\bin\opencode", "");
@@ -110,15 +130,17 @@ namespace AIMeter
             var scan = Candidates.Scan(null, new[] { new WslPlace { Distro = "Test-1", Home = home } }, Candidates.Kinds, false);
             Func<string, UnsupportedRuntime> of = id => scan.Unsupported.SingleOrDefault(u => u.Runtime == id);
             Assert(scan.Found.Count == 0, "An agent delegation cannot use was reported as found.");
-            Assert(of("codex") != null && of("codex").Reason == "no_dispatch" && of("codex").Where == "wsl" && of("codex").Distro == "Test-1", "Codex was not reported as unsupported.");
+            Assert(of("gemini") != null && of("gemini").Reason == "no_dispatch" && of("gemini").Where == "wsl" && of("gemini").Distro == "Test-1", "Gemini CLI was not reported as unsupported.");
             Assert(of("crush").Reason == "no_dispatch" && of("pi").Reason == "program_not_found" && of("opencode").Reason == "not_set_up",
                 "Unsupported reasons are wrong: " + string.Join(", ", scan.Unsupported.Select(u => u.Runtime + "=" + u.Reason)));
-            Assert(of("claude") == null && of("gemini") == null, "An agent that is not there was reported.");
+            Assert(of("claude") == null && of("codex") == null, "An agent that is not there was reported.");
 
-            // Pi set up on Windows: verified only in WSL.
-            string windows = Tree(@".pi\agent", null, @".local\bin\pi.exe", "");
-            var onWindows = Candidates.Scan(windows, new WslPlace[0], Candidates.Kinds, false).Unsupported.Single(u => u.Runtime == "pi");
+            // Pi set up on Windows: verified only in WSL. So is Claude Code's plan dispatch, so far.
+            string windows = Tree(@".pi\agent", null, @".local\bin\pi.exe", "", @".claude", null, @".local\bin\claude.exe", "");
+            var windowsScan = Candidates.Scan(windows, new WslPlace[0], Candidates.Kinds, false);
+            var onWindows = windowsScan.Unsupported.Single(u => u.Runtime == "pi");
             Assert(onWindows.Reason == "place_not_verified" && onWindows.Where == "windows" && onWindows.Distro == null, "Pi on Windows was not reported as unverified there.");
+            Assert(windowsScan.Unsupported.Single(u => u.Runtime == "claude").Reason == "place_not_verified", "Claude Code on Windows was not reported as unverified there.");
 
             // Through MCP, with a sentence a plugin can show, and no candidate for an unsupported agent.
             var snap = new Snapshot();
@@ -128,9 +150,9 @@ namespace AIMeter
             var server = new McpServer(() => snap, () => false, null, null, () => scan);
             var content = Call(server, "list_candidates", "{}");
             var unsupported = ((IList)Json.Obj(content, "runtimes")["unsupported"]).OfType<Dictionary<string, object>>().ToList();
-            var codex = unsupported.Single(u => Json.Str(u, "name") == "codex");
-            Assert(Json.Str(codex, "where") == "wsl" && Json.Str(codex, "distro") == "Test-1" && Json.Str(codex, "display_name") == "Codex" && Json.Str(codex, "reason") == "no_dispatch"
-                   && Json.Str(codex, "detail").Contains("delegation does not support it yet"), "runtimes.unsupported lacks Codex's place, name, reason or detail.");
+            var gemini = unsupported.Single(u => Json.Str(u, "name") == "gemini");
+            Assert(Json.Str(gemini, "where") == "wsl" && Json.Str(gemini, "distro") == "Test-1" && Json.Str(gemini, "display_name") == "Gemini CLI" && Json.Str(gemini, "reason") == "no_dispatch"
+                   && Json.Str(gemini, "detail").Contains("delegation does not support it yet"), "runtimes.unsupported lacks Gemini CLI's place, name, reason or detail.");
             Assert(((IList)content["candidates"]).Count == 0 && ((IList)content["excluded"]).OfType<Dictionary<string, object>>().Single().ContainsValue("no_runtime"),
                 "An unsupported agent produced a candidate.");
         }

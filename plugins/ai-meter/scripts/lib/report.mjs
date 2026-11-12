@@ -19,8 +19,10 @@ export function brief(job) {
 
 export function full(job, jobsFolder) {
   const report = { ...brief(job), workspace: job.workspace, client: job.client, from: job.from, timeout_seconds: job.timeout_seconds };
+  if (job.coordinator) report.coordinator = job.coordinator;
+  if (job.plan) report.plan = drewFrom(job);
   if (job.summary) {
-    const { answer, answer_truncated, activity, ...counters } = job.summary;
+    const { answer, answer_truncated, activity, plan_after, ...counters } = job.summary;
     report.answer = answer;
     if (answer_truncated) report.answer_truncated = true;
     if (activity) report.activity = activity;
@@ -42,6 +44,23 @@ export function full(job, jobsFolder) {
   if (job.dropped_lines) report.dropped_lines = job.dropped_lines;
   if (job.status !== "queued" && job.status !== "starting") report.logs = { events: join(jobsFolder, job.id, "events.jsonl"), stderr: join(jobsFolder, job.id, "stderr.txt") };
   return report;
+}
+
+/**
+ * Where a plan task drew from (ADR 0003): the plan, the window that bound it and every window with the room left before
+ * the task (when its lease was taken), the user's reserve and the reset, and, once it ended, the room after it, from
+ * the agent's own events (Claude Code) or a fresh reading by AI Meter. The room after counts everything the account did
+ * meanwhile, on any app or PC, so the difference is not this task's alone.
+ */
+function drewFrom(job) {
+  const plan = job.plan;
+  return {
+    service: plan.service,
+    window: plan.binding_window,
+    before: plan.windows,
+    ...(job.plan_after ? { after: job.plan_after } : {}),
+    note: "Drawn from the " + plan.service + " plan's windows, not billed. The room after includes anything else this account used meanwhile.",
+  };
 }
 
 /**
@@ -70,6 +89,8 @@ export function candidates(found) {
       context_tokens: c.limits?.per_request?.context_tokens?.value ?? c.estimated?.context_tokens ?? null,
       max_output_tokens: c.limits?.per_request?.max_output_tokens?.value ?? c.estimated?.max_output_tokens ?? null,
       ...(c.rank?.why ? { why: c.rank.why } : {}),
+      ...(c.billing ? { billing: c.billing } : {}),
+      ...(c.plan ? { plan: { windows: c.plan.windows, binding_window: c.plan.binding_window, expiring: c.plan.expiring } } : {}),
       ...(warnings.length ? { warnings } : {}),
       ...(c.estimated ? { estimated: c.estimated } : {}),
     };
@@ -90,7 +111,11 @@ export function candidates(found) {
  * agent's price (agent_lists_price). For the other reasons, such as price_not_confirmed or no_tools, nothing it can do
  * makes those models usable, so only their count is kept.
  */
-const REASONS_WITH_MODELS = new Set(["free_tier_not_allowed", "runtime_has_no_key", "context_too_small", "output_too_small", "agent_lists_price"]);
+const REASONS_WITH_MODELS = new Set([
+  "free_tier_not_allowed", "runtime_has_no_key", "context_too_small", "output_too_small", "agent_lists_price",
+  // A plan the user could allow, or whose room comes back at a reset.
+  "plan_not_requested", "plan_off_in_settings", "plan_reserve",
+]);
 
 function shortenExcluded(excluded) {
   if (!Array.isArray(excluded)) return excluded;

@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"thread-1"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"/bin/bash -lc 'head -n 1 hello.txt'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/bash -lc 'head -n 1 hello.txt'","aggregated_output":"Plan delegation probe\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Plan delegation probe"}}
+{"type":"turn.completed","usage":{"input_tokens":36802,"cached_input_tokens":24064,"cache_write_input_tokens":0,"output_tokens":46,"reasoning_output_tokens":0}}

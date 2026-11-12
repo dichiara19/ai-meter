@@ -36,6 +36,13 @@ namespace AIMeter
         public AgentDispatch Dispatch;
         /// <summary>Where the agent keeps its own model list, for best-effort candidates; null when it declares none.</summary>
         public AgentModelSource Models;
+        /// <summary>The subscription plan the agent can draw on when signed in to it (ADR 0003); null for agents that use keys.</summary>
+        public AgentPlan Plan;
+        /// <summary>
+        /// Further home-relative folders where the agent's program may be, per place, searched after the usual ones; "*"
+        /// stands for each subfolder, the most recently written first (the Codex app keeps codex.exe in a folder per build).
+        /// </summary>
+        public readonly Dictionary<string, string[]> ProgramFolders = new Dictionary<string, string[]>();
         /// <summary>"built-in" or the user file the definition came from.</summary>
         public string Origin;
 
@@ -80,6 +87,15 @@ namespace AIMeter
             if (dispatch != null) kind.Dispatch = AgentDispatch.FromJson(dispatch);
             var models = Json.Obj(d, "models");
             if (models != null) kind.Models = AgentModelSource.FromJson(models);
+            var plan = Json.Obj(d, "plan");
+            if (plan != null) kind.Plan = AgentPlan.FromJson(plan);
+            var folders = Json.Obj(d, "program_folders");
+            foreach (var where in new[] { "windows", "wsl" })
+            {
+                var list = ServiceDefinition.Strings(folders, where).ToArray();
+                if (list.Any(f => f.Split('/', '\\').Contains(".."))) return null;
+                if (list.Length > 0) kind.ProgramFolders[where] = list.Select(Local).ToArray();
+            }
             return kind;
         }
 
@@ -92,6 +108,55 @@ namespace AIMeter
             var list = d != null && d.TryGetValue(key, out v) ? v as IEnumerable : null;
             return list == null || list is string ? Enumerable.Empty<Dictionary<string, object>>() : list.OfType<Dictionary<string, object>>();
         }
+    }
+
+    /// <summary>
+    /// The subscription plan an agent draws on when it is signed in to it rather than to an API key (ADR 0003): the
+    /// service whose windows AI Meter reads (claude, openai); the models a task may ask for, most suitable first (none
+    /// listed: the agent's own model list); and how a plugin checks the sign-in method before starting the agent: the
+    /// arguments of the agent's own status command, and the JSON field and value, or the text, that show a plan sign-in.
+    /// </summary>
+    internal sealed class AgentPlan
+    {
+        public string Service;
+        public List<AgentPlanModel> Models = new List<AgentPlanModel>();
+        public List<string> SignInArguments = new List<string>();
+        public string SignInField, SignInValue, SignInText;
+
+        public static AgentPlan FromJson(Dictionary<string, object> d)
+        {
+            var signIn = Json.Obj(d, "sign_in");
+            var plan = new AgentPlan
+            {
+                Service = Json.Str(d, "service"),
+                SignInArguments = ServiceDefinition.Strings(signIn, "arguments").ToList(),
+                SignInField = Json.Str(signIn, "json_field"), SignInValue = Json.Str(signIn, "expect"), SignInText = Json.Str(signIn, "text"),
+            };
+            // A model is its id, or an object with its id and the limits a source states for it.
+            object list;
+            var entries = d.TryGetValue("models", out list) ? list as IEnumerable : null;
+            if (entries != null && !(entries is string))
+                foreach (var entry in entries)
+                {
+                    var spec = entry as Dictionary<string, object>;
+                    string id = spec != null ? Json.Str(spec, "id") : entry as string;
+                    if (string.IsNullOrEmpty(id)) continue;
+                    plan.Models.Add(new AgentPlanModel
+                    {
+                        Id = id, Context = (long)(Json.Num(spec, "context_tokens") ?? 0), MaxOutput = (long)(Json.Num(spec, "max_output_tokens") ?? 0),
+                    });
+                }
+            // Without a way to check the sign-in, a plan agent could start on an API key: such a plan is ignored.
+            bool checkable = plan.SignInArguments.Count > 0 && (plan.SignInText != null || (plan.SignInField != null && plan.SignInValue != null));
+            return string.IsNullOrEmpty(plan.Service) || !checkable ? null : plan;
+        }
+    }
+
+    /// <summary>A model a plan offers through its agent, with the context window and reply size a source states; 0 when unknown.</summary>
+    internal sealed class AgentPlanModel
+    {
+        public string Id;
+        public long Context, MaxOutput;
     }
 
     /// <summary>
@@ -117,6 +182,11 @@ namespace AIMeter
         public Dictionary<string, object> Environment = new Dictionary<string, object>();
         public readonly Dictionary<string, string> Output = new Dictionary<string, string>();
         public readonly List<string> Notes = new List<string>();
+        /// <summary>
+        /// Start the agent from an empty environment, plus what a program needs to run, never from the plugin's own: for
+        /// plan agents, so that no API key, base URL or session variable of the coordinator reaches them (ADR 0003).
+        /// </summary>
+        public bool CleanEnvironment;
 
         public static AgentDispatch FromJson(Dictionary<string, object> d)
         {
@@ -124,6 +194,7 @@ namespace AIMeter
             {
                 Arguments = ArgumentsFrom(Json.Obj(d, "arguments")) ?? new Dictionary<string, List<string>>(),
                 Environment = Json.Obj(d, "environment") ?? new Dictionary<string, object>(),
+                CleanEnvironment = Json.Str(d, "environment_policy") == "clean",
             };
             var places = Json.Obj(d, "places");
             foreach (var where in new[] { "windows", "wsl" })

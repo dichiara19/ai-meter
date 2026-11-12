@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -88,6 +89,56 @@ namespace AIMeter
             if (rows.Count == 0)
                 rows.Add(Row(null, L.T("No free models with tool support yet"), L.T("They appear here once a service with free models is on and its model list has been read."), null));
             Group(rows.ToArray());
+            BuildDelegationPlans();
+        }
+
+        /// <summary>
+        /// Whether delegated tasks may draw on each subscription plan a supported agent can run on (ADR 0003), off by
+        /// default, and the share of each window the user keeps; the reserves show only while the plan is on.
+        /// </summary>
+        private void BuildDelegationPlans()
+        {
+            var kinds = Agents.All.Where(k => k.Plan != null && k.Dispatch != null).ToList();
+            if (kinds.Count == 0) return;
+            Hint(L.T("Delegated tasks can also run in Claude Code or Codex on your own plan, never on paid usage. A plan is used only if you turn it on here and an AI app asks for it; it is skipped while extra usage or credits are on, and below what you keep of each window."));
+            var rows = new List<FrameworkElement>();
+            var snap = C.Last;
+            foreach (var kind in kinds)
+            {
+                string service = kind.Plan.Service;
+                var provider = snap == null ? null : snap.Providers.FirstOrDefault(p => p.Id == service);
+                string plan = provider != null ? provider.Name : service == "openai" ? "ChatGPT" : service == "claude" ? "Claude" : service;
+                bool on;
+                S.DelegationPlans.TryGetValue(service, out on);
+                rows.Add(Row(null, L.F("{0} plan", plan), L.F("Tasks run in {0} with its own sign-in.", kind.Name), Toggle(on, v =>
+                {
+                    var next = new Dictionary<string, bool>(S.DelegationPlans);
+                    next[service] = v;
+                    S.DelegationPlans = next;
+                    S.Save();
+                    Rebuild();
+                })));
+                if (!on) continue;
+                rows.Add(Row(null, L.T("Reserve in the 5-hour window"), L.T("Delegated tasks leave this share of the window for you."), ReserveCombo(service, UsageWindow.ShortFiveHours)));
+                rows.Add(Row(null, L.T("Reserve in the weekly window"), L.T("Delegated tasks leave this share of the window for you."), ReserveCombo(service, UsageWindow.ShortWeek)));
+            }
+            Group(rows.ToArray());
+        }
+
+        /// <summary>The share of a plan window kept for the user. The settings get a new dictionary, as MCP threads read the current one.</summary>
+        private ComboBox ReserveCombo(string service, string window)
+        {
+            int current = Candidates.ReserveOf(S.DelegationReserves, service, window);
+            var values = new[] { 10, 20, 25, 30, 40, 50, 60, 75, 90 };
+            if (!values.Contains(current)) values = values.Concat(new[] { current }).OrderBy(v => v).ToArray();
+            return Combo(values.Select(v => Tuple.Create(v.ToString(CultureInfo.InvariantCulture), v.ToString(L.Culture) + "%")).ToArray(),
+                current.ToString(CultureInfo.InvariantCulture), v =>
+                {
+                    var next = new Dictionary<string, int>(S.DelegationReserves);
+                    next[Candidates.ReserveKey(service, window)] = int.Parse(v, CultureInfo.InvariantCulture);
+                    S.DelegationReserves = next;
+                    S.Save();
+                });
         }
 
         /// <summary>Default, preferred or avoided. The settings get a new dictionary, as MCP threads read the current one.</summary>

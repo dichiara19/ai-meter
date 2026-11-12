@@ -16,6 +16,11 @@
 // A free tier (Cloudflare Workers AI) is the exception: its requests are priced, and free only within a daily
 // allocation. AI Meter's claim_capacity grants such a task a budget in US dollars (allowance); `paid` then means the
 // requests cost more than that budget, beyond which they would be billed or refused.
+//
+// Plan agents (Claude Code and Codex on a subscription plan, ADR 0003) price nothing: their requests draw on the plan's
+// windows. For them `paid` means the agent's own events show billed usage (Claude Code started on an API key, or its
+// extra usage in use), with the reason in `billed`; the plugin then stops the agent. Claude Code also reports the
+// plan's windows as it goes, which the report gives as the room after the task (plan_after).
 
 import { Activity } from "./activity.mjs";
 
@@ -54,6 +59,168 @@ class Reader {
     if (typeof cost !== "number" || !(cost > 0)) return;
     this.cost += cost;
     if (this.cost > this.allowance) this.paid = true;
+  }
+
+  /** A plan agent's events show billed usage: the plugin stops it, and the task fails with why. */
+  bill(reason) {
+    this.paid = true;
+    this.billed = this.billed || reason;
+  }
+}
+
+/** A plan agent's error that means a usage or rate limit was reached. */
+const LIMIT = /\b429\b|usage limit|rate limit|limit reached|too many requests/i;
+
+/**
+ * Claude Code 2.x with --output-format stream-json --verbose: a system init event, assistant and user messages (tool
+ * calls and their results), rate_limit_event, and a final result event. Verified live on 2026-11-12 (2.1.322 on the
+ * Claude plan, tests/fixtures/claude-plan.jsonl).
+ */
+class ClaudeReader extends Reader {
+  constructor(folderName) {
+    super(folderName);
+    this.messages = new Set();
+    this.result = null;
+    this.planAfter = null;
+  }
+
+  feed(event) {
+    if (event.type === "system" && event.subtype === "init") {
+      // The plan's sign-in shows as "none": any key source means the requests would bill an API.
+      if (event.apiKeySource && event.apiKeySource !== "none") this.bill("Claude Code started with an API key (" + event.apiKeySource + "), not the plan's sign-in.");
+      return;
+    }
+    if (event.type === "rate_limit_event") return this.rateLimit(event.rate_limit_info || {});
+    if (event.type === "assistant") {
+      const message = event.message || {};
+      if (message.id) this.messages.add(message.id);   // One API request can come as several assistant events.
+      this.requests = this.messages.size;
+      for (const part of message.content || []) {
+        if (part.type === "tool_use") this.activity.begin(part.id, String(part.name || "unknown").toLowerCase(), part.input);
+        if (part.type === "text" && part.text) this.answer = part.text;
+      }
+      return;
+    }
+    if (event.type === "user") {
+      for (const part of event.message?.content || []) {
+        if (part.type === "tool_result") this.activity.end(part.tool_use_id, { failed: part.is_error === true, output: textOf(part.content) });
+      }
+      return;
+    }
+    if (event.type === "result") {
+      this.result = event;
+      const usage = event.usage;
+      if (usage) {
+        this.usageSeen = true;
+        this.inputTokens = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
+        this.outputTokens = usage.output_tokens || 0;
+      }
+      if (typeof event.result === "string" && event.result) this.answer = event.result;
+      if (event.is_error || event.subtype !== "success") this.fail(String(event.result || event.api_error_status || event.subtype || "error"));
+    }
+  }
+
+  /** The plan's windows as Claude Code sees them; overage in use is billed. */
+  rateLimit(info) {
+    if (info.isUsingOverage === true) this.bill("Claude's extra usage, which is billed, was in use.");
+    if (info.status === "rejected") this.rateLimited++;
+    const windows = info.unifiedWindows;
+    if (!windows || typeof windows !== "object") return;
+    const names = { five_hour: "5h", seven_day: "7d" };
+    this.planAfter = Object.entries(windows)
+      .filter(([, w]) => w && typeof w.utilization === "number")
+      .map(([name, w]) => ({
+        window: names[name] || name,
+        remaining_percent: Math.round(Math.max(0, 1 - w.utilization) * 1000) / 10,
+        ...(typeof w.resetsAt === "number" ? { resets_at: new Date(w.resetsAt * 1000).toISOString() } : {}),
+        source: "agent",
+      }));
+  }
+
+  fail(message) {
+    super.fail(message);
+    if (!/\b429\b/.test(message) && LIMIT.test(message)) this.rateLimited++;
+  }
+
+  outcome() {
+    return this.result && this.result.subtype === "success" && !this.result.is_error && !this.incomplete() ? "completed" : "failed";
+  }
+
+  incomplete() {
+    if (!this.result) return "Claude Code exited without its result event.";
+    if (this.result.is_error || this.result.subtype !== "success") return null;   // The error says why.
+    if (!this.answer) return "Claude Code ended without a final answer.";
+    return null;
+  }
+}
+
+/**
+ * Codex 0.16x with exec --json: thread.started, turn.started, item.started and item.completed (commands, file changes,
+ * MCP calls, the agent's messages), then turn.completed with the usage, or turn.failed and error events. Codex does
+ * not report its requests to the model, so they are unknown (null). Verified live on 2026-11-12 (0.163.0 in WSL on the
+ * ChatGPT plan, tests/fixtures/codex-plan.jsonl).
+ */
+class CodexReader extends Reader {
+  constructor(folderName) {
+    super(folderName);
+    this.requests = null;
+    this.turns = 0;
+    this.turnFailed = false;
+  }
+
+  feed(event) {
+    if (event.type === "item.started" || event.type === "item.completed") return this.item(event.item, event.type === "item.completed");
+    if (event.type === "turn.completed") {
+      this.turns++;
+      const usage = event.usage;
+      if (usage) {
+        this.usageSeen = true;
+        this.inputTokens += usage.input_tokens || 0;   // Cached input is part of input_tokens.
+        this.outputTokens += usage.output_tokens || 0;
+      }
+    }
+    if (event.type === "turn.failed") {
+      this.turnFailed = true;
+      this.fail(event.error?.message || "Codex's turn failed.");
+    }
+    if (event.type === "error") this.fail(event.message || "error");
+  }
+
+  item(item, ended) {
+    if (!item) return;
+    if (item.type === "agent_message" && ended && item.text) this.answer = item.text;
+    if (item.type === "command_execution") {
+      this.activity.begin(item.id, "shell", { command: item.command });
+      const exit = item.exit_code;
+      if (ended) this.activity.end(item.id, { failed: item.status !== "completed" || (Number.isInteger(exit) && exit !== 0), output: item.aggregated_output, exitCode: exit });
+    }
+    if (item.type === "file_change" && ended) {
+      (item.changes || []).forEach((change, i) => {
+        const id = item.id + ":" + i;
+        this.activity.begin(id, "edit", { path: change.path });
+        this.activity.end(id, { failed: item.status === "failed" });
+      });
+    }
+    if (item.type === "mcp_tool_call") {
+      this.activity.begin(item.id, "mcp:" + item.server + "." + item.tool, item.arguments);
+      if (ended) this.activity.end(item.id, { failed: item.status === "failed", output: item.error?.message });
+    }
+  }
+
+  fail(message) {
+    super.fail(message);
+    if (!/\b429\b/.test(message) && LIMIT.test(message)) this.rateLimited++;
+  }
+
+  outcome() {
+    return this.exitCode === 0 && !this.turnFailed && !this.incomplete() ? "completed" : "failed";
+  }
+
+  incomplete() {
+    if (this.exitCode !== 0 || this.turnFailed) return null;   // The exit code or the error says why.
+    if (!this.turns) return "Codex exited without a turn.completed event: its output was not understood.";
+    if (!this.answer) return "Codex ended without a final message.";
+    return null;
   }
 }
 
@@ -158,7 +325,7 @@ class OpenCodeReader extends Reader {
   }
 }
 
-const READERS = { pi: PiReader, opencode: OpenCodeReader };
+const READERS = { pi: PiReader, opencode: OpenCodeReader, claude: ClaudeReader, codex: CodexReader };
 
 /**
  * Whether the plugin can read a runtime's events. AI Meter's agent table is data and can grow (or be overridden in
@@ -197,8 +364,11 @@ export function summarise(reader, exitCode, stopped) {
     ...(reader.allowance > 0 ? { allowance: reader.allowance } : {}),
     paid_request: reader.paid,
     byok_fallback: reader.byok,
+    ...(reader.billed ? { billed: reader.billed } : {}),
+    ...(reader.planAfter ? { plan_after: reader.planAfter } : {}),
     error:
       completed ? null
+      : stopped === "paid" && reader.billed ? "Stopped: " + reader.billed
       : stopped === "paid" && reader.allowance > 0 ? "Stopped: the requests cost " + reader.cost + " USD, past the free allocation's budget of " + reader.allowance + " USD."
       : stopped === "paid" ? "Stopped: a request was priced as paid (" + reader.cost + "), so the free route was not used."
       : STOPPED_ERRORS[stopped] || reader.error || (stopped ? null : reader.incomplete()),

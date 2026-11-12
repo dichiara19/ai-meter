@@ -1,6 +1,6 @@
 # Architecture
 
-AI Meter is a Windows app (C# 5, .NET Framework 4.8, WPF) that reads usage and limits of AI services and local agents, keeps a local history, and serves both through an MCP server. A separate coordinator plugin (`plugins/ai-meter`, Node.js) delegates tasks to coding agents on free models, using AI Meter to choose and pace them.
+AI Meter is a Windows app (C# 5, .NET Framework 4.8, WPF) that reads usage and limits of AI services and local agents, keeps a local history, and serves both through an MCP server. A separate coordinator plugin (`plugins/ai-meter`, Node.js) delegates tasks to coding agents on free models, or on the user's subscription plans when allowed ([ADR 0003](adr/0003-delegation-on-subscription-plans.md)), using AI Meter to choose and pace them.
 
 ## Delegation: trust boundaries
 
@@ -8,8 +8,9 @@ AI Meter is a Windows app (C# 5, .NET Framework 4.8, WPF) that reads usage and l
 coordinator (Claude Code / Codex)
   └─ plugin MCP server (node, stdio)          plugins/ai-meter/scripts/mcp-server.mjs
        └─ job worker (detached node process)  scripts/lib/jobs.mjs
-            ├─ relay (PowerShell, mcp.ps1) ── named pipe ── AI Meter (McpServer.cs, Candidates.cs, Dispatch.cs, Leases.cs)
-            └─ coding agent (Pi / OpenCode)    started without a shell, task on stdin
+            ├─ relay (PowerShell, mcp.ps1) ── named pipe ── AI Meter (McpServer.cs, Candidates.cs, CandidatesPlans.cs, Dispatch.cs, Leases.cs)
+            └─ coding agent (Pi / OpenCode;    started without a shell, task on stdin
+               Claude Code / Codex on a plan)  plan agents: clean environment, sign-in checked first (scripts/lib/plan.mjs)
                  └─ model provider (network)  receives the task and every file the agent reads
 ```
 
@@ -20,6 +21,7 @@ coordinator (Claude Code / Codex)
 | AI Meter → plugin: the plan | Program, argument list, environment, working folder. | Built from `agents/*.json` for verified agents, versions and places only; never the task, never a key. `read_only` is enforced by what the agent is given (Pi's tool list, OpenCode's per-agent permissions), not by an agent's name. |
 | Plugin → agent's folder | The files the agent can see. | `read_only`: a snapshot of the files Git tracks or would track, without names that suggest secrets. `modify`: a new worktree from the last commit. Neither is a sandbox: a path named outside them can still be read. |
 | Agent → provider | The task and every file the agent reads. | Out of AI Meter's control: providers of free models may log or train on them. Models an agent prices are not offered; the first priced request stops the agent, after it was paid. |
+| Plan agent → billing | Requests on the user's Claude or ChatGPT plan. | Never pay-as-you-go (ADR 0003): AI Meter excludes a plan with extra usage or credits on, below the user's reserve or without a fresh reading of a plan sign-in; the plugin starts the agent from a clean environment (no API key, base URL or coordinator session reaches it), checks its sign-in first, and stops it when its events show billed usage. |
 | Agent process tree | Processes the agent starts. | The worker owns them: a Linux process group, signalled as a whole; `taskkill /T` on Windows when stopping (processes left after a normal exit on Windows are not tracked). A job whose worker died is settled by the next coordinator call. |
 
 **Windows and WSL.** AI Meter runs on Windows and finds agents on Windows and in every running WSL distribution. A plugin on Windows starts an agent in WSL through `wsl.exe -e env … <program>`: no Linux shell, so no shell profile is read, and an agent whose key is only exported in a profile is refused from Windows. A plugin in WSL starts agents in its own distribution only, by their Linux path; agents in other distributions, and Windows agents, are skipped with the reason.

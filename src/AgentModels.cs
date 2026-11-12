@@ -17,6 +17,10 @@ namespace AIMeter
         public long Context, MaxOutput;
         /// <summary>Dollars per million tokens, from the agent's list; null when it gives none.</summary>
         public double? InputPrice, OutputPrice;
+        /// <summary>The list's own rank, lower first, where it gives one (Codex's priority); 0 when it does not.</summary>
+        public int Order;
+        /// <summary>The name the list shows; null when it gives none.</summary>
+        public string Name;
 
         public bool Priced { get { return (InputPrice ?? 0) > 0 || (OutputPrice ?? 0) > 0; } }
     }
@@ -53,11 +57,14 @@ namespace AIMeter
     /// built on it are reported apart, as best effort. Two formats:
     /// - "pi": Pi's bundled catalogue, one file per provider, entries with id, provider, type ("chat" models are the
     ///   ones Pi runs as a coding agent, with tool calling), contextWindow, maxTokens, reasoning and cost;
-    /// - "models.dev": the models.dev catalogue OpenCode caches, providers with models carrying tool_call, limit and cost.
+    /// - "models.dev": the models.dev catalogue OpenCode caches, providers with models carrying tool_call, limit and cost;
+    /// - "codex": the list Codex caches of the models its ChatGPT sign-in offers (models with slug, display_name,
+    ///   visibility, priority and context_window), all under the provider "openai". Only models it lists for people to
+    ///   pick (visibility "list") are kept; nothing else in the file is used.
     /// </summary>
     internal static class AgentModels
     {
-        public static readonly string[] Formats = { "pi", "models.dev" };
+        public static readonly string[] Formats = { "pi", "models.dev", "codex" };
 
         private static readonly Dictionary<string, Tuple<DateTime, Dictionary<string, Dictionary<string, AgentModel>>>> Cache =
             new Dictionary<string, Tuple<DateTime, Dictionary<string, Dictionary<string, AgentModel>>>>(StringComparer.OrdinalIgnoreCase);
@@ -87,6 +94,16 @@ namespace AIMeter
             Dictionary<string, AgentModel> models;
             AgentModel m;
             return byProvider != null && byProvider.TryGetValue(access.Provider ?? "", out models) && models.TryGetValue(model, out m) ? m : null;
+        }
+
+        /// <summary>Every model the agent's list has for the access's provider, in the list's own order; empty when none.</summary>
+        public static List<AgentModel> All(RuntimeAccess access)
+        {
+            if (access == null || access.ModelsFile == null) return new List<AgentModel>();
+            var byProvider = Load(access.ModelsFile, access.ModelsFormat);
+            Dictionary<string, AgentModel> models;
+            if (byProvider == null || !byProvider.TryGetValue(access.Provider ?? "", out models)) return new List<AgentModel>();
+            return models.Values.OrderBy(m => m.Order).ThenBy(m => m.Id, StringComparer.Ordinal).ToList();
         }
 
         /// <summary>A file's models by provider alias, cached until the file changes.</summary>
@@ -129,6 +146,21 @@ namespace AIMeter
                         var e = m.Value as Dictionary<string, object>;
                         if (e != null) add(p.Key, FromModelsDev(Json.Str(e, "id") ?? m.Key, e));
                     }
+                }
+            }
+            else if (format == "codex")
+            {
+                var list = doc.ContainsKey("models") ? doc["models"] as object[] : null;
+                if (list == null) return null;
+                foreach (var e in list.OfType<Dictionary<string, object>>())
+                {
+                    string slug = Json.Str(e, "slug");
+                    if (slug == null || Json.Str(e, "visibility") != "list") continue;
+                    add("openai", new AgentModel
+                    {
+                        Id = slug, Name = Json.Str(e, "display_name"), Tools = true, Order = (int)(Json.Num(e, "priority") ?? int.MaxValue),
+                        Context = (long)(Json.Num(e, "context_window") ?? 0),
+                    });
                 }
             }
             else return null;
