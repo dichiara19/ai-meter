@@ -141,8 +141,10 @@ namespace AIMeter
                 Tool("list_local_models", "Models loaded by local servers such as Ollama, LM Studio and llama.cpp, on Windows and WSL, " +
                      "with memory, context and activity.", new Dictionary<string, object> { { "refresh", localRefresh } }, false),
                 Tool("list_candidates", "Where a task can run now for free: free models that meet the task's needs, that a coding agent " +
-                     "on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can already call with its own key, and whose limits have room. Ordered by the room left in each " +
-                     "model's pool, most first, then models whose room is unknown; the same request gives the same order. pools gives " +
+                     "on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can already call with its own key, and whose limits have room. Ordered by suitability, " +
+                     "most suitable first: the user's preferred models, pools with room, the model's track record on this PC, a reply size of at least 16k tokens, " +
+                     "the model's total weights (unknown first), context, measured speed; for the same model, the agent with the smaller prompt per request and, with from, " +
+                     "the agent in the plugin's place. rank says why each candidate stands where it is; the same request gives the same order. pools gives " +
                      "how many new tasks each pool can take now: models in one pool share it. excluded says why every other model " +
                      "cannot be used; runtimes.unsupported lists the agents found that delegation cannot use, with the reason. " +
                      "warnings flags candidates a plugin must watch, such as openrouter_byok_fallback. With include_best_effort, best_effort " +
@@ -160,6 +162,8 @@ namespace AIMeter
                              { "description", "free_only (default): only models whose list states a zero price. free_or_unconfirmed: also models whose price the service does not state." } } },
                          { "include_best_effort", Property("boolean", "Also list best-effort candidates, built on the agents' own model lists where the service states nothing. Off by default.") },
                          { "include_free_tier", Property("boolean", "Also accept free-tier models: priced, but free within a daily allocation the plugin must keep to with claim_capacity's budget. Off by default.") },
+                         { "from", new Dictionary<string, object> { { "type", "string" }, { "enum", new List<object> { "windows", "wsl" } },
+                             { "description", "Where the caller runs. For the same model, an agent in that place comes first, which avoids starting it through wsl.exe." } } },
                          { "refresh", refresh("their limits") },
                          { "max_age_seconds", maxAge("their limits") },
                      }, true),
@@ -305,7 +309,8 @@ namespace AIMeter
                     {
                         Service = service, Tools = Json.Bool(args, "tools"), MinContext = (long)(Json.Num(args, "min_context") ?? 0),
                         MinOutput = (long)(Json.Num(args, "min_output_tokens") ?? 0), CostPolicy = policy, BestEffort = Json.Bool(args, "include_best_effort"),
-                        FreeTier = Json.Bool(args, "include_free_tier"),
+                        FreeTier = Json.Bool(args, "include_free_tier"), From = KnownPlace(Json.Str(args, "from")),
+                        Preferences = Settings.Current == null ? null : Settings.Current.DelegationModels,
                     }, DateTime.Now, leases), scan);
                     break;
                 default: result = Suggest(snap.Providers); break;
@@ -723,6 +728,7 @@ namespace AIMeter
                 if (c.Estimated != null) warnings.Insert(0, "best_effort");
                 if (warnings.Count > 0) d["warnings"] = warnings.Cast<object>().ToList();
                 if (c.Estimated != null) d["estimated"] = EstimatedJson(c);
+                d["rank"] = RankJson(c);
                 return d;
             };
             var candidates = s.Chosen.Select(c => (object)entry(c)).ToList();
@@ -781,6 +787,51 @@ namespace AIMeter
                 { "note", "Taken from " + c.Access.Runtime + "'s own model list, not from the service: the task may fail, stop or hit limits no one has stated. Ask the user before using it." },
             };
             return d;
+        }
+
+        /// <summary>"windows" or "wsl", or null for anything else.</summary>
+        private static string KnownPlace(string where) { return where == "windows" || where == "wsl" ? where : null; }
+
+        /// <summary>
+        /// Why a candidate stands where it is (Candidates.Ordered): the values of each key, and a sentence that names
+        /// what placed it, for a coordinator that wants to choose by hand.
+        /// </summary>
+        private static Dictionary<string, object> RankJson(Candidate c)
+        {
+            var r = c.Rank;
+            var record = new Dictionary<string, object>
+            {
+                { "days", r.Record.Days }, { "completed", r.Record.Completed }, { "failed", r.Record.Failed }, { "rate_limited", r.Record.RateLimited },
+                { "score", r.Record.Score }, { "output_tokens_per_second", r.Record.TokensPerSecond },
+            };
+            var d = new Dictionary<string, object>
+            {
+                { "why", RankSentence(c) }, { "preference", r.Preference }, { "room", r.LowRoom ? "low" : "enough" }, { "track_record", record },
+                { "small_reply", r.SmallReply },
+                { "parameters", r.Size == null ? null : (object)r.Size.Parameters }, { "parameters_source", r.Size == null ? null : r.Size.Source },
+                { "request_tokens", r.RequestTokens },
+            };
+            if (r.SamePlace.HasValue) d["same_place"] = r.SamePlace.Value;
+            return d;
+        }
+
+        private static string RankSentence(Candidate c)
+        {
+            var r = c.Rank;
+            var parts = new List<string>();
+            if (r.Preference != "neutral") parts.Add(r.Preference + " by the user");
+            if (r.LowRoom) parts.Add("pool low on room (" + Math.Round(r.RoomRatio.Value * 100) + "% left)");
+            parts.Add(r.Record.Tried || r.Record.RateLimited > 0
+                ? string.Format(CultureInfo.InvariantCulture, "here in {0} days: {1} completed, {2} failed, {3} rate limited", r.Record.Days, r.Record.Completed, r.Record.Failed, r.Record.RateLimited)
+                : "not tried here yet");
+            if (r.SmallReply) parts.Add("replies capped at " + r.MaxOutput.ToString("N0", CultureInfo.InvariantCulture) + " tokens");
+            parts.Add(r.Size == null ? "size unknown" : ModelSizes.Format(r.Size.Parameters) + " weights" + (r.Size.Source == "huggingface" ? " (Hugging Face)" : " (from its id)"));
+            if (r.Context > 0) parts.Add(r.Context.ToString("N0", CultureInfo.InvariantCulture) + " context");
+            if (r.Record.TokensPerSecond.HasValue) parts.Add(r.Record.TokensPerSecond.Value.ToString("0.#", CultureInfo.InvariantCulture) + " output tokens/s here");
+            if (r.RequestTokens.HasValue) parts.Add(c.Access.Runtime + " sends about " + r.RequestTokens.Value.ToString("N0", CultureInfo.InvariantCulture) + " tokens per request");
+            if (r.SamePlace.HasValue) parts.Add(r.SamePlace.Value ? "runs where the caller runs" : "runs in another place than the caller");
+            string text = string.Join("; ", parts);
+            return char.ToUpperInvariant(text[0]) + text.Substring(1) + ".";
         }
 
         /// <summary>A runtime and its place: name and where, with the distribution in WSL.</summary>

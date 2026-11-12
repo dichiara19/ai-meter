@@ -60,6 +60,7 @@ test("a read-only Pi task gets the task on stdin unchanged and releases its leas
   assert.equal(job.summary.answer, "echo: " + task);
   assert.deepEqual(job.candidate, { service: "openrouter", model: "a:free", runtime: "pi", where: "wsl", pool: "openrouter:free" });
   assert.equal(calls().find((c) => c.tool === "list_candidates").arguments.tools, true);
+  assert.equal(calls().find((c) => c.tool === "list_candidates").arguments.from, process.env.AI_METER_PLACE, "AI Meter orders agents in this place first");
   assert.equal(calls().find((c) => c.tool === "claim_capacity").arguments.client, "test");
   assert.deepEqual(released(calls), { lease_id: "lease-1", outcome: "completed", requests: 1, rate_limited: 0, input_tokens: 120, output_tokens: 7 });
 });
@@ -722,6 +723,28 @@ test("delegate_candidates gives a warning shared by a whole pool once, and drops
   assert.deepEqual(shown.excluded[0], { service: "nvidia", reason: "price_not_confirmed", count: 68 });
   assert.deepEqual(shown.excluded[1].models, ["@cf/a", "@cf/b"], "models the user can agree to use stay listed");
   assert.deepEqual(shown.excluded[2], { service: "openrouter", reason: "rate_limited", count: 1, until: "2026-11-12T10:00:00Z" });
+});
+
+test("delegate_candidates keeps each candidate's context, reply size and reason for its place", () => {
+  const rank = { why: "Not tried here yet; 31B weights (Hugging Face); 262,144 context.", preference: "neutral", track_record: { score: 0 } };
+  const limits = { per_request: { context_tokens: { value: 262144, source: "catalogue" }, max_output_tokens: { value: 32768, source: "catalogue" } }, rates: [{ metric: "requests_per_day" }] };
+  const unknown = { per_request: { context_tokens: { value: null, source: "unknown" }, max_output_tokens: { value: null, source: "unknown" } } };
+  const shown = report.candidates({
+    candidates: [{ ...pi, limits, rank }],
+    best_effort: [{ ...other, limits: unknown, estimated: { context_tokens: 131072, max_output_tokens: 16384 } }],
+    pools: [],
+    excluded: [],
+    runtimes: { found: [], unsupported: [] },
+  });
+
+  const first = shown.candidates[0];
+  assert.equal(first.context_tokens, 262144);
+  assert.equal(first.max_output_tokens, 32768);
+  assert.equal(first.why, rank.why);
+  assert.equal(first.limits, undefined, "rates stay in AI Meter's answer");
+  assert.equal(first.rank, undefined, "only the sentence is kept");
+  assert.equal(shown.best_effort[0].context_tokens, 131072, "a best-effort candidate's values come from the agent's list");
+  assert.equal(shown.best_effort[0].why, undefined);
 });
 
 test("activity shortens the task's folder to a relative path, or to . when the path ends there", () => {

@@ -2,6 +2,7 @@
   "id": "opencode",
   "name": "OpenCode",
   "order": 10,
+  "request_tokens": 9600,
   "programs": { "windows": ["opencode"], "wsl": ["opencode"] },
   "folders": [".local/share/opencode", ".config/opencode"],
   "keys": [

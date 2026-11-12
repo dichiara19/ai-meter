@@ -15,8 +15,9 @@ namespace AIMeter
     /// Nothing here starts a process or reserves capacity: coordinator plugins run the agents (ADR 0002), and capacity
     /// leases reserve room.
     ///
-    /// Selection is deterministic: the same snapshot and request give the same order. Models that share a pool share
-    /// its limits, so capacity is reported per pool and never added up across the pool's models.
+    /// Selection is deterministic: the same snapshot, request, leases and known model sizes give the same order (see
+    /// Ordered). Models that share a pool share its limits, so capacity is reported per pool and never added up across
+    /// the pool's models.
     /// </summary>
     internal static class Candidates
     {
@@ -74,8 +75,8 @@ namespace AIMeter
                     result.Exclude(p.Id, m.Id, reason, reason == room.Blocking ? room.Until : null);
                 }
             }
-            result.Chosen = Ordered(result.Chosen);
-            result.BestEffort = Ordered(result.BestEffort);
+            result.Chosen = Ordered(result.Chosen, req, leases, now);
+            result.BestEffort = Ordered(result.BestEffort, req, leases, now);
             return result;
         }
 
@@ -106,14 +107,71 @@ namespace AIMeter
             return added;
         }
 
-        /// <summary>Known room first, most room first; then unknown room; ties by service, model and runtime place.</summary>
-        private static List<Candidate> Ordered(IEnumerable<Candidate> candidates)
+        /// <summary>Known room below this share of the pool's tightest limit puts its candidates after the others.</summary>
+        public const double LowRoomShare = 0.2;
+        /// <summary>A stated reply size below this is too short for most coding tasks: such models come after the others.</summary>
+        public const long SmallReplyTokens = 16384;
+
+        /// <summary>
+        /// The order of candidates (docs/MCP.md, "Order"), most suitable first. Every candidate's pool can start a task;
+        /// among them, by the first key that differs:
+        /// 1. the user's preference (Settings.DelegationModels): preferred, then the others, then avoided;
+        /// 2. room: pools with at least LowRoomShare left, or with unknown room, before pools with less;
+        /// 3. the model's track record on this PC (LeaseBook.Record), highest score first; an untried model scores 0;
+        /// 4. a stated reply size of at least SmallReplyTokens before a smaller one;
+        /// 5. the model's total weights (ModelSizes): unknown first, as closed models are often large, then largest first;
+        /// 6. the largest context window;
+        /// 7. the output speed measured here, fastest first, then models never timed;
+        /// 8. service and model id;
+        /// then, for the same model, the agent that sends fewer tokens per request, the agent in the place the plugin
+        /// runs (Requirements.From), and agent id, place and distribution. Each candidate keeps its Rank, which
+        /// list_candidates explains.
+        /// </summary>
+        private static List<Candidate> Ordered(List<Candidate> candidates, Requirements req, LeaseBook leases, DateTime now)
         {
-            return candidates.OrderBy(c => c.Room.Ratio.HasValue ? 0 : 1).ThenByDescending(c => c.Room.Ratio ?? 0)
+            foreach (var c in candidates) c.Rank = RankOf(c, req, leases, now);
+            return candidates.OrderBy(c => c.Rank.Preference == "preferred" ? 0 : c.Rank.Preference == "avoided" ? 2 : 1)
+                .ThenBy(c => c.Rank.LowRoom ? 1 : 0)
+                .ThenByDescending(c => c.Rank.Record.Score)
+                .ThenBy(c => c.Rank.SmallReply ? 1 : 0)
+                .ThenBy(c => c.Rank.Size == null ? 0 : 1).ThenByDescending(c => c.Rank.Size == null ? 0 : c.Rank.Size.Parameters)
+                .ThenByDescending(c => c.Rank.Context)
+                .ThenBy(c => c.Rank.Record.TokensPerSecond.HasValue ? 0 : 1).ThenByDescending(c => c.Rank.Record.TokensPerSecond ?? 0)
                 .ThenBy(c => c.Provider.Id, StringComparer.Ordinal).ThenBy(c => c.Model.Id, StringComparer.Ordinal)
+                .ThenBy(c => c.Rank.RequestTokens.HasValue ? 0 : 1).ThenBy(c => c.Rank.RequestTokens ?? 0)
+                .ThenBy(c => c.Rank.SamePlace == false ? 1 : 0)
                 .ThenBy(c => c.Access.Runtime, StringComparer.Ordinal).ThenBy(c => c.Access.Where, StringComparer.Ordinal)
                 .ThenBy(c => c.Access.Distro, StringComparer.Ordinal).ToList();
         }
+
+        /// <summary>The values Ordered sorts a candidate by. A best-effort candidate's context and reply size may be the agent's.</summary>
+        private static Rank RankOf(Candidate c, Requirements req, LeaseBook leases, DateTime now)
+        {
+            string preference;
+            if (req.Preferences == null || !req.Preferences.TryGetValue(PreferenceKey(c.Provider.Id, c.Model.Id), out preference) || (preference != Preferred && preference != Avoided))
+                preference = "neutral";
+            long output = c.Model.MaxOutput > 0 ? c.Model.MaxOutput : c.Estimated != null ? c.Estimated.MaxOutput : 0;
+            var kind = Agents.Get(c.Access.Runtime);
+            return new Rank
+            {
+                Preference = preference,
+                LowRoom = c.Room.Ratio.HasValue && c.Room.Ratio.Value < LowRoomShare,
+                RoomRatio = c.Room.Ratio,
+                Record = leases == null ? new LeaseBook.ModelRecord { Days = LeaseBook.KeepDays } : leases.Record(c.Provider.Id, c.Model.Id, now),
+                SmallReply = output > 0 && output < SmallReplyTokens,
+                Size = ModelSizes.Of(c.Model),
+                Context = c.Model.Context > 0 ? c.Model.Context : c.Estimated != null ? c.Estimated.Context : 0,
+                MaxOutput = output,
+                RequestTokens = kind == null ? null : kind.RequestTokens,
+                SamePlace = req.From == null ? (bool?)null : c.Access.Where == req.From,
+            };
+        }
+
+        /// <summary>Values of Settings.DelegationModels.</summary>
+        public const string Preferred = "preferred", Avoided = "avoided";
+
+        /// <summary>The key of a model in Settings.DelegationModels: "service|model".</summary>
+        public static string PreferenceKey(string service, string model) { return service + "|" + model; }
 
         /// <summary>
         /// Whether a model can take the task on what an agent's own list says, where the service's list is silent; null
@@ -547,6 +605,10 @@ namespace AIMeter
         public bool FreeTier;
         /// <summary>Also list best-effort candidates, built on the agents' own model lists.</summary>
         public bool BestEffort;
+        /// <summary>The user's choices for delegation, "service|model" to "preferred" or "avoided" (Settings.DelegationModels).</summary>
+        public IDictionary<string, string> Preferences;
+        /// <summary>Where the plugin that asks runs, "windows" or "wsl": for the same model, agents there come first. Null when not said.</summary>
+        public string From;
     }
 
     /// <summary>A runtime that can call a service with its own key; Credential is an opaque id, never the key or its file.</summary>
@@ -620,6 +682,22 @@ namespace AIMeter
         /// <summary>For a best-effort candidate: what the agent's own list says, and which facts rest on it.</summary>
         public AgentModel Estimated;
         public List<string> Unverified;
+        /// <summary>Why the candidate stands where it is (Candidates.Ordered).</summary>
+        public Rank Rank;
+    }
+
+    /// <summary>The values a candidate is ordered by (Candidates.Ordered), which list_candidates reports as its rank.</summary>
+    internal sealed class Rank
+    {
+        public string Preference;              // "preferred", "neutral" or "avoided".
+        public bool LowRoom;                   // Known room below Candidates.LowRoomShare.
+        public double? RoomRatio;              // The pool's known room, as a share of its tightest limit.
+        public LeaseBook.ModelRecord Record;   // The model's track record on this PC.
+        public bool SmallReply;                // A stated reply size below Candidates.SmallReplyTokens.
+        public ModelSize Size;                 // Total weights; null when unknown.
+        public long Context, MaxOutput;        // Tokens; 0 when unknown.
+        public int? RequestTokens;             // The agent's tokens per request on top of the task; null when not stated.
+        public bool? SamePlace;                // The agent runs where the plugin does; null when the plugin did not say.
     }
 
     /// <summary>

@@ -7,7 +7,7 @@
 // takes the folder explicitly.
 
 import * as jobs from "./lib/jobs.mjs";
-import { withMeter } from "./lib/meter.mjs";
+import { place, withMeter } from "./lib/meter.mjs";
 import * as report from "./lib/report.mjs";
 import { VERSION } from "./lib/version.mjs";
 
@@ -79,7 +79,7 @@ const TOOLS = [
   },
   {
     name: "delegate_candidates",
-    description: "Where a task could run now for free, from AI Meter: candidates in order, each pool's room, why other models are left out and which agents were found. Starts nothing.",
+    description: "Where a task could run now for free, from AI Meter: candidates in order of suitability (the user's preferred models, room, track record on this PC, size, context), each with its context, reply size and why it stands there; each pool's room, why other models are left out and which agents were found. Starts nothing.",
     inputSchema: { type: "object", properties: { ...needs, include_best_effort: bestEffort("Also list"), include_free_tier: freeTier("Also list") } },
   },
 ];
@@ -97,8 +97,10 @@ async function call(name, args) {
       return { jobs: jobs.list(Number(args.limit) || 10).map(report.brief) };
     case "delegate_cancel":
       return report.full(await jobs.cancel(args.job_id), jobs.root());
-    case "delegate_candidates":
-      return report.candidates(await withMeter((meter) => meter.call("list_candidates", { tools: true, ...args })));
+    case "delegate_candidates": {
+      const from = place();
+      return report.candidates(await withMeter((meter) => meter.call("list_candidates", { tools: true, ...(from ? { from } : {}), ...args })));
+    }
     default:
       throw new Error("Unknown tool: " + name);
   }
