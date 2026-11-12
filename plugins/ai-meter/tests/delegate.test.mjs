@@ -10,6 +10,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as jobs from "../scripts/lib/jobs.mjs";
 import * as report from "../scripts/lib/report.mjs";
+import { Activity } from "../scripts/lib/activity.mjs";
 import { looksSecret } from "../scripts/lib/workspace.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -721,4 +722,43 @@ test("delegate_candidates gives a warning shared by a whole pool once, and drops
   assert.deepEqual(shown.excluded[0], { service: "nvidia", reason: "price_not_confirmed", count: 68 });
   assert.deepEqual(shown.excluded[1].models, ["@cf/a", "@cf/b"], "models the user can agree to use stay listed");
   assert.deepEqual(shown.excluded[2], { service: "openrouter", reason: "rate_limited", count: 1, until: "2026-11-12T10:00:00Z" });
+});
+
+test("activity shortens the task's folder to a relative path, or to . when the path ends there", () => {
+  const activity = new Activity("jabc123");
+  const folder = "/mnt/c/Users/u/.aimeter/worktrees/jabc123";
+  assert.equal(activity.shorten(folder + "/slug.js"), "slug.js");
+  assert.equal(activity.shorten("cd " + folder + " && node --test"), "cd . && node --test");
+  assert.equal(activity.shorten("cd " + folder + "/ && node --test"), "cd . && node --test", "a trailing separator does not leave an empty path");
+  assert.equal(activity.shorten('cd "' + folder + '/"'), 'cd "."');
+  assert.equal(activity.shorten(folder + "/"), ".");
+  assert.equal(activity.shorten("C:\\Users\\u\\.aimeter\\snapshots\\jabc123\\src\\a.js"), "src\\a.js");
+  assert.equal(activity.shorten("git checkout ai-meter/jabc123"), "git checkout ai-meter/jabc123", "only the worktrees and snapshots folders are shortened");
+});
+
+test("a tool call that never ends is reported as unfinished", () => {
+  const activity = new Activity("j1");
+  activity.begin("a", "bash", { command: "node --test" });
+  activity.begin("b", "write", { path: "x.js", content: "x" });
+  activity.end("b", { failed: false, output: "ok" });
+  const shown = activity.report();
+
+  assert.deepEqual(shown.calls, [{ tool: "bash", args: "node --test", unfinished: true }, { tool: "write", args: "x.js" }]);
+  assert.deepEqual(shown.commands, [], "a command without its end has no result to report");
+  assert.deepEqual(shown.files_written, ["x.js"]);
+});
+
+test("activity keeps 50 file paths, and counts the others", () => {
+  const activity = new Activity("j1");
+  for (let i = 0; i < 55; i++) {
+    activity.begin(i, "write", { path: "f" + i + ".js", content: "x" });
+    activity.end(i, { failed: false });
+  }
+  activity.begin("again", "edit", { path: "f0.js" });
+  activity.end("again", { failed: false });
+  const shown = activity.report();
+
+  assert.equal(shown.files_written.length, 50);
+  assert.equal(shown.files_written.at(-1), "f49.js");
+  assert.equal(shown.more_files_left_out, 5, "a file written twice counts once");
 });

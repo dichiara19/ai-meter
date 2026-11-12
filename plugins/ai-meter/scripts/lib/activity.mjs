@@ -114,9 +114,18 @@ export class Activity {
     return clip(oneLine(this.shorten(typeof value === "string" ? value : JSON.stringify(value ?? ""))), COMMAND_TOOLS.has(String(tool)) ? COMMAND_CHARACTERS : SUMMARY_CHARACTERS);
   }
 
+  /**
+   * The text with the task's folder shortened: a path through it loses the folder ("…/<id>/slug.js" becomes
+   * "slug.js"), and the folder itself becomes ".", with or without a trailing separator ("cd …/<id>/ && …" becomes
+   * "cd . && …").
+   */
   shorten(text) {
     if (!this.folder || typeof text !== "string") return text;
-    return text.replace(this.folder, (match) => (/[\\/]$/.test(match) ? "" : "."));
+    return text.replace(this.folder, (match, offset, whole) => {
+      const next = whole[offset + match.length];
+      const pathGoesOn = /[\\/]$/.test(match) && next !== undefined && !/[\s"';&|)]/.test(next);
+      return pathGoesOn ? "" : ".";
+    });
   }
 
   /** A short excerpt of a tool's output: its end for a command (where results and errors are), its start otherwise. */
