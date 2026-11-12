@@ -220,6 +220,12 @@ namespace AIMeter
             if (IsFreeTier(m) && !req.FreeTier) return "free_tier_not_allowed";
             bool confirmed = m.Free == null || m.Free.Confirmed;
             if (!confirmed && !(req.CostPolicy == FreeOrUnconfirmed && m.Free.Status == "unknown")) return "price_not_confirmed";
+            return Needs(m, req);
+        }
+
+        /// <summary>Why a model cannot meet what the task needs (tools, context, reply size); null when it can. Unknown limits fail a stated need.</summary>
+        internal static string Needs(FreeModel m, Requirements req)
+        {
             if (req.Tools && !m.Tools) return m.FeaturesUnknown ? "tools_unknown" : "no_tools";
             if (req.MinContext > 0 && m.Context < req.MinContext) return m.Context == 0 ? "context_unknown" : "context_too_small";
             if (req.MinOutput > 0 && m.MaxOutput < req.MinOutput) return m.MaxOutput == 0 ? "output_unknown" : "output_too_small";

@@ -62,8 +62,8 @@ namespace AIMeter
         /// </summary>
         internal static List<FreeModel> PlanModels(RuntimeKind kind, RuntimeAccess access)
         {
-            if (kind.Plan.Models.Length > 0)
-                return kind.Plan.Models.Select(id => new FreeModel { Id = id, Name = id, Tools = true, Free = PlanStatus }).ToList();
+            if (kind.Plan.Models.Count > 0)
+                return kind.Plan.Models.Select(m => new FreeModel { Id = m.Id, Name = m.Id, Tools = true, Context = m.Context, MaxOutput = m.MaxOutput, Free = PlanStatus }).ToList();
             return AgentModels.All(access).Select(m => new FreeModel { Id = m.Id, Name = m.Name ?? m.Id, Tools = true, Context = m.Context, Free = PlanStatus }).ToList();
         }
 
@@ -97,6 +97,13 @@ namespace AIMeter
                 var provider = snap.Providers.FirstOrDefault(p => p.Id == service);
                 for (int i = 0; i < models.Count; i++)
                 {
+                    // The same needs as free models, with the same reasons: a limit nobody states fails a stated need.
+                    string need = Needs(models[i], req);
+                    if (need != null)
+                    {
+                        result.Exclude(service, models[i].Id, need, null);
+                        continue;
+                    }
                     PlanRoom plan;
                     var room = PlanRoomOf(provider, service, models[i].Id, req.Reserves, now, leases, out plan);
                     if (room.Blocking != null)

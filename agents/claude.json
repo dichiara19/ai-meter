@@ -6,7 +6,10 @@
   "package": "@anthropic-ai/claude-code",
   "plan": {
     "service": "claude",
-    "models": ["sonnet", "opus", "fable", "haiku"],
+    "models": [
+      { "id": "sonnet", "context_tokens": 1000000, "max_output_tokens": 128000 },
+      "opus", "fable", "haiku"
+    ],
     "sign_in": { "arguments": ["auth", "status", "--json"], "json_field": "authMethod", "expect": "claude.ai" }
   },
   "dispatch": {

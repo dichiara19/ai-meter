@@ -119,7 +119,7 @@ namespace AIMeter
     internal sealed class AgentPlan
     {
         public string Service;
-        public string[] Models = new string[0];
+        public List<AgentPlanModel> Models = new List<AgentPlanModel>();
         public List<string> SignInArguments = new List<string>();
         public string SignInField, SignInValue, SignInText;
 
@@ -129,14 +129,34 @@ namespace AIMeter
             var plan = new AgentPlan
             {
                 Service = Json.Str(d, "service"),
-                Models = ServiceDefinition.Strings(d, "models").ToArray(),
                 SignInArguments = ServiceDefinition.Strings(signIn, "arguments").ToList(),
                 SignInField = Json.Str(signIn, "json_field"), SignInValue = Json.Str(signIn, "expect"), SignInText = Json.Str(signIn, "text"),
             };
+            // A model is its id, or an object with its id and the limits a source states for it.
+            object list;
+            var entries = d.TryGetValue("models", out list) ? list as IEnumerable : null;
+            if (entries != null && !(entries is string))
+                foreach (var entry in entries)
+                {
+                    var spec = entry as Dictionary<string, object>;
+                    string id = spec != null ? Json.Str(spec, "id") : entry as string;
+                    if (string.IsNullOrEmpty(id)) continue;
+                    plan.Models.Add(new AgentPlanModel
+                    {
+                        Id = id, Context = (long)(Json.Num(spec, "context_tokens") ?? 0), MaxOutput = (long)(Json.Num(spec, "max_output_tokens") ?? 0),
+                    });
+                }
             // Without a way to check the sign-in, a plan agent could start on an API key: such a plan is ignored.
             bool checkable = plan.SignInArguments.Count > 0 && (plan.SignInText != null || (plan.SignInField != null && plan.SignInValue != null));
             return string.IsNullOrEmpty(plan.Service) || !checkable ? null : plan;
         }
+    }
+
+    /// <summary>A model a plan offers through its agent, with the context window and reply size a source states; 0 when unknown.</summary>
+    internal sealed class AgentPlanModel
+    {
+        public string Id;
+        public long Context, MaxOutput;
     }
 
     /// <summary>

@@ -22,6 +22,48 @@ namespace AIMeter
             test("list_candidates reports a plan candidate with its windows, reserve and reason", PlanCandidateTool);
             test("describe_dispatch starts a plan agent from a clean environment, with a sign-in check", PlanDispatch);
             test("claim_capacity checks the plan again and names the windows it draws on", PlanClaim);
+            test("A plan model must meet the task's context and reply size, and unknown limits fail a stated need", PlanNeeds);
+            test("A dispatch refuses a model, workspace or distribution that could become an option or break a line, for every agent", UnsafeValues);
+        }
+
+        private static void PlanNeeds()
+        {
+            NetworkBackoff.Clear();
+            var now = DateTime.Now;
+            Func<long, long, Selection> asking = (context, output) => Candidates.Select(Fixture(now), Scan(),
+                new Requirements { Tools = true, Plan = true, Coordinator = "nobody", PlansAllowed = new[] { "claude", "openai" }, MinContext = context, MinOutput = output }, now);
+
+            var big = asking(300000, 0);
+            Assert(ReasonFor(big, "claude", "sonnet") == null && ReasonFor(big, "claude", "opus") == "context_unknown",
+                "Claude Code's sonnet states its context and opus does not: " + ReasonFor(big, "claude", "opus"));
+            Assert(ReasonFor(big, "openai", "gpt-a") == null && ReasonFor(big, "openai", "gpt-b") == "context_too_small", "Codex's cached context windows were not applied.");
+            var reply = asking(0, 20000);
+            Assert(ReasonFor(reply, "claude", "sonnet") == null && ReasonFor(reply, "claude", "haiku") == "output_unknown" && ReasonFor(reply, "openai", "gpt-a") == "output_unknown",
+                "A stated reply size was not required of plan models.");
+            Assert(Order(asking(0, 0)).Count(c => c.StartsWith("claude/", StringComparison.Ordinal)) == 4, "Without needs every plan model must stay a candidate.");
+        }
+
+        private static void UnsafeValues()
+        {
+            var pi = Candidates.Access("openrouter", "pi", "wsl", "key-openrouter-0123456789");
+            pi.Distro = "Test-1";
+            pi.Program = "/home/me/.npm-global/bin/pi";
+            pi.Provider = "openrouter";
+            var claude = Scan().Access.Single(a => a.Runtime == "claude");
+            foreach (var access in new[] { pi, claude })
+            {
+                Func<string, string, string, string> refusal = (model, workspace, distro) =>
+                {
+                    var plan = Dispatch.Describe(access, model, null, workspace, "windows", distro, null);
+                    return plan.Supported ? null : plan.Reason;
+                };
+                Assert(refusal("a/model:free", @"C:\work", "Test-1") == null, access.Runtime + ": an ordinary model and folder were refused.");
+                Assert(refusal("--dangerously-skip-permissions", @"C:\work", "Test-1").Contains("model starts with \"-\""), access.Runtime + ": a model id that is an option was described.");
+                Assert(refusal("a/model\n--yolo", @"C:\work", "Test-1").Contains("model contains a control character"), access.Runtime + ": a model id with a newline was described.");
+                Assert(refusal("a/model", "-C/etc", "Test-1").Contains("workspace starts with"), access.Runtime + ": a workspace that is an option was described.");
+                Assert(refusal("a/model", "C:\\work\u0000x", "Test-1").Contains("workspace contains a control character"), access.Runtime + ": a workspace with NUL was described.");
+                Assert(refusal("a/model", @"C:\work", "-e").Contains("distribution starts with"), access.Runtime + ": a distribution that is an option was described.");
+            }
         }
 
         private static void Assert(bool condition, string message)

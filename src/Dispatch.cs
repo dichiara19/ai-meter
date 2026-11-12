@@ -42,6 +42,9 @@ namespace AIMeter
             if (access.Where == "wsl" && string.IsNullOrEmpty(distro)) return plan.Refuse("no WSL distribution is known");
             plan.VersionVerified = place.Verifies(version);
             string folder = string.IsNullOrEmpty(workspace) ? "{workspace}" : workspace;
+            string unsafeValue = Unsafe("model", model) ?? Unsafe("provider", access.Provider) ?? Unsafe("workspace", workspace) ?? Unsafe("distribution", distro) ??
+                Unsafe("program", access.Program) ?? Unsafe("home", access.Home);
+            if (unsafeValue != null) return plan.Refuse(unsafeValue);
 
             // From Windows into WSL, wsl.exe --cd already sets the folder, given as a Windows path the agent would not
             // understand inside WSL; the agent then works in its current folder.
@@ -135,6 +138,21 @@ namespace AIMeter
         internal static List<string> Warnings(string service)
         {
             return service == "openrouter" ? new List<string> { ByokFallback } : new List<string>();
+        }
+
+        /// <summary>
+        /// Why a value that goes into the agent's command line cannot, or null when it can. The program is started without
+        /// a shell and every value is its own argument, so quoting cannot break out; but a value starting with "-" would be
+        /// read as one of the agent's options (a model id "--dangerously-…", say), and a control character such as a
+        /// newline or NUL has no place in a model id, a path or a distribution name. Such values come only from outside
+        /// (a service's model list, a caller's workspace), so they are refused rather than escaped.
+        /// </summary>
+        internal static string Unsafe(string what, string value)
+        {
+            if (string.IsNullOrEmpty(value)) return null;
+            if (value[0] == '-') return "the " + what + " starts with \"-\", which the agent would read as an option";
+            if (value.Any(c => c < ' ' || c == '\u007f')) return "the " + what + " contains a control character";
+            return null;
         }
 
         /// <summary>A template with {provider}, {model} and {workspace} filled in one pass, so a value is never read as a placeholder.</summary>

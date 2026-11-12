@@ -59,9 +59,9 @@ namespace AIMeter
             // Plan agents: a clean environment, a sign-in check, and only the places verified (Claude Code not on Windows).
             var claude = Agents.Get("claude");
             var codex = Agents.Get("codex");
-            Assert(claude.Plan.Service == "claude" && claude.Plan.Models[0] == "sonnet" && claude.Plan.SignInField == "authMethod" && claude.Plan.SignInValue == "claude.ai",
+            Assert(claude.Plan.Service == "claude" && claude.Plan.Models[0].Id == "sonnet" && claude.Plan.Models[0].Context == 1000000 && claude.Plan.Models[1].Context == 0 && claude.Plan.SignInField == "authMethod" && claude.Plan.SignInValue == "claude.ai",
                 "Claude Code's plan did not load.");
-            Assert(codex.Plan.Service == "openai" && codex.Plan.Models.Length == 0 && codex.Plan.SignInText == "Logged in using ChatGPT" && codex.Models.Format == "codex",
+            Assert(codex.Plan.Service == "openai" && codex.Plan.Models.Count == 0 && codex.Plan.SignInText == "Logged in using ChatGPT" && codex.Models.Format == "codex",
                 "Codex's plan or model list did not load.");
             Assert(claude.Dispatch.CleanEnvironment && codex.Dispatch.CleanEnvironment && !Agents.Get("pi").Dispatch.CleanEnvironment, "Plan agents must start from a clean environment.");
             // Both verified in WSL only: on Windows, Codex's read-only sandbox refused to read the workspace (2026-11-12).
