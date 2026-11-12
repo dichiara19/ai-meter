@@ -13,8 +13,16 @@ import { copyFileSync, lstatSync, mkdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 function git(folder, ...args) {
+  return gitWithInput(folder, null, ...args);
+}
+
+/** git with input on stdin (null for none), such as a list of paths too long for a command line. */
+function gitWithInput(folder, input, ...args) {
   // Only trailing space is trimmed: porcelain status lines start with a space. A large repository lists many files.
-  return execFileSync("git", ["-C", folder, ...args], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 }).trimEnd();
+  const options = { encoding: "utf8", windowsHide: true, maxBuffer: 256 * 1024 * 1024 };
+  if (input === null) options.stdio = ["ignore", "pipe", "pipe"];
+  else Object.assign(options, { input, stdio: ["pipe", "pipe", "pipe"] });
+  return execFileSync("git", ["-C", folder, ...args], options).trimEnd();
 }
 
 /** The top folder of the Git repository a folder is in. Throws when there is none. */
@@ -101,10 +109,17 @@ export function createWorktree(workspace, jobId, path) {
 
 /**
  * What the agent changed in a worktree since its base commit, committed or not: the commits it made, the changed and
- * new files, and the diff size. Untracked files are listed with status "??"; they are not in the diff until added.
+ * new files, and the diff size.
+ *
+ * New files the agent did not commit are marked intent-to-add (git add -N) first, so that they are in the diff like
+ * every other change: in files with status "A", in diff_stat, and in the review command's output. Otherwise a test
+ * file the agent wrote would be missing from the change the coordinator reviews. This changes only the worktree's own
+ * index, which belongs to the plugin, and records no content: nothing is committed, and the files stay new.
  */
 export function describeChanges(worktree) {
   const base = worktree.base;
+  const untracked = git(worktree.path, "ls-files", "-z", "--others", "--exclude-standard");
+  if (untracked) gitWithInput(worktree.path, untracked, "add", "--intent-to-add", "--pathspec-from-file=-", "--pathspec-file-nul");
   const commits = git(worktree.path, "log", "--format=%h %s", base + "..HEAD");
   const changed = git(worktree.path, "diff", "--name-status", "-z", base).split("\0").filter(Boolean);
   const files = [];
@@ -118,7 +133,6 @@ export function describeChanges(worktree) {
       files.push({ status, path: changed[i++] });
     }
   }
-  for (const path of git(worktree.path, "ls-files", "-z", "--others", "--exclude-standard").split("\0").filter(Boolean)) files.push({ status: "??", path });
   return {
     ...worktree,
     commits: commits ? commits.split("\n") : [],

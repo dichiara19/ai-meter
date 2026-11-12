@@ -1,10 +1,13 @@
 // Reading a coding agent's JSONL events, as describe_dispatch's `output` explains them for each runtime
 // (docs/plans/spike-agents.md). A reader takes one parsed event at a time and, at the end, sums up the task for
-// release_capacity and for the coordinator: outcome, requests, tokens, rate limits, cost and the agent's final answer.
+// release_capacity and for the coordinator: outcome, requests, tokens, rate limits, cost, the agent's final answer, and
+// what it did on the way (its tool calls, files written and commands run: activity.mjs), as evidence for the answer.
 //
 // A task is completed only on positive evidence: the agent's own final event with a normal end. An answer cut off
 // for length, an unknown end, or output with none of the expected events is a failure with the reason, never a
-// success with an empty answer. Tokens are null, not zero, when no event reported any.
+// success with an empty answer. Tokens are null, not zero, when no event reported any. Errors the agent recovered from
+// (a 429 that Pi retried, for example) do not make a completed task look failed: they are reported apart, as
+// recovered_errors, and `error` is kept for tasks that did not complete.
 //
 // Cost: each agent prices its requests from its own model list. A request priced above zero was paid, so `paid`
 // tells the plugin to stop the agent; a zero price does not prove the request was free (an OpenRouter BYOK fallback
@@ -14,9 +17,12 @@
 // allocation. AI Meter's claim_capacity grants such a task a budget in US dollars (allowance); `paid` then means the
 // requests cost more than that budget, beyond which they would be billed or refused.
 
+import { Activity } from "./activity.mjs";
+
 /** Shared counters; the readers below add to them. */
 class Reader {
-  constructor() {
+  /** folderName: the name of the task's folder, to shorten the paths in activity. */
+  constructor(folderName) {
     this.requests = 0;
     this.inputTokens = 0;
     this.outputTokens = 0;
@@ -25,9 +31,11 @@ class Reader {
     this.allowance = 0;   // US dollars the requests may cost: 0 for free models, a free tier's budget otherwise.
     this.paid = false;
     this.error = null;
+    this.errors = 0;
     this.byok = false;
     this.answer = "";
     this.usageSeen = false;
+    this.activity = new Activity(folderName);
   }
 
   /** Why the run did not end normally, or null when it did. */
@@ -37,6 +45,7 @@ class Reader {
 
   fail(message) {
     this.error = message;
+    this.errors++;
     if (/\b429\b/.test(message)) this.rateLimited++;
     if (/"is_byok"\s*:\s*true/.test(message)) this.byok = true;
   }
@@ -50,8 +59,8 @@ class Reader {
 
 /** Pi 1.x in JSON mode. The exit code stays 0 on errors, so the outcome is the last assistant stopReason. */
 class PiReader extends Reader {
-  constructor() {
-    super();
+  constructor(folderName) {
+    super(folderName);
     this.settled = false;
     this.stopReason = null;
   }
@@ -59,6 +68,8 @@ class PiReader extends Reader {
   feed(event) {
     if (event.type === "turn_end") this.requests++;
     if (event.type === "agent_settled") this.settled = true;
+    if (event.type === "tool_execution_start") this.activity.begin(event.toolCallId, event.toolName, event.args);
+    if (event.type === "tool_execution_end") this.activity.end(event.toolCallId, { failed: event.isError === true, output: textOf(event.result?.content) });
     if (event.type !== "message_end" || event.message?.role !== "assistant") return;
 
     const message = event.message;
@@ -92,11 +103,12 @@ class PiReader extends Reader {
  * ends with a step_finish whose reason is "stop"; "tool-calls" means the model wanted to go on.
  */
 class OpenCodeReader extends Reader {
-  constructor() {
-    super();
+  constructor(folderName) {
+    super(folderName);
     this.step = [];
     this.exitCode = null;
     this.lastReason = null;
+    this.calls = 0;
   }
 
   feed(event) {
@@ -112,7 +124,25 @@ class OpenCodeReader extends Reader {
       this.price(event.part?.cost);
       if (this.step.length) this.answer = this.step.join("\n");
     }
+    if (event.type === "tool_use") this.tool(event.part || {});
     if (event.type === "error") this.fail(event.error?.data?.message || event.error?.name || "error");
+  }
+
+  /**
+   * A tool_use part: the tool, and its state with status, input and, once ended, output (or error) and, for bash,
+   * metadata.exit. OpenCode reports a call when it ends; a pending or running state starts it, should one come first.
+   */
+  tool(part) {
+    const id = part.callID ?? part.id ?? "call-" + ++this.calls;
+    const state = part.state || {};
+    this.activity.begin(id, part.tool, state.input);
+    if (state.status !== "completed" && state.status !== "error") return;
+    const exit = state.metadata?.exit;
+    this.activity.end(id, {
+      failed: state.status === "error" || (Number.isInteger(exit) && exit !== 0),
+      output: state.status === "error" ? state.error : state.output ?? state.metadata?.output,
+      exitCode: exit,
+    });
   }
 
   outcome() {
@@ -136,9 +166,10 @@ const READERS = { pi: PiReader, opencode: OpenCodeReader };
  */
 export const canRead = (runtime) => Object.hasOwn(READERS, runtime);
 
-export function readerFor(runtime) {
+/** A reader for a runtime's events. folderName: the name of the task's folder, to shorten paths in activity. */
+export function readerFor(runtime, folderName) {
   if (!canRead(runtime)) throw new Error("No event reader for " + runtime + ".");
-  return new READERS[runtime]();
+  return new READERS[runtime](folderName);
 }
 
 const STOPPED_ERRORS = {
@@ -147,14 +178,17 @@ const STOPPED_ERRORS = {
 
 /**
  * The summary of a task. stopped is "cancelled", "timed_out", "paid" or "output_limit" when the plugin ended it;
- * tokens are then unknown. A task stopped for a paid request or too much output failed.
+ * tokens are then unknown. A task stopped for a paid request or too much output failed. A completed task has no
+ * error: the errors its agent recovered from are counted in recovered_errors, with the last one shortened.
  */
 export function summarise(reader, exitCode, stopped) {
   reader.exitCode = exitCode;
   const failedByPlugin = stopped === "paid" || stopped === "output_limit";
   const tokensKnown = !stopped && reader.usageSeen;
+  const outcome = failedByPlugin ? "failed" : stopped || reader.outcome();
+  const completed = outcome === "completed";
   return {
-    outcome: failedByPlugin ? "failed" : stopped || reader.outcome(),
+    outcome,
     requests: reader.requests,
     rate_limited: reader.rateLimited,
     input_tokens: tokensKnown ? reader.inputTokens : null,
@@ -164,11 +198,34 @@ export function summarise(reader, exitCode, stopped) {
     paid_request: reader.paid,
     byok_fallback: reader.byok,
     error:
-      stopped === "paid" && reader.allowance > 0 ? "Stopped: the requests cost " + reader.cost + " USD, past the free allocation's budget of " + reader.allowance + " USD."
+      completed ? null
+      : stopped === "paid" && reader.allowance > 0 ? "Stopped: the requests cost " + reader.cost + " USD, past the free allocation's budget of " + reader.allowance + " USD."
       : stopped === "paid" ? "Stopped: a request was priced as paid (" + reader.cost + "), so the free route was not used."
       : STOPPED_ERRORS[stopped] || reader.error || (stopped ? null : reader.incomplete()),
+    ...(completed && reader.errors ? { recovered_errors: { count: reader.errors, last: shortError(reader.error) } } : {}),
     answer: reader.answer,
+    activity: reader.activity.report(),
   };
+}
+
+/**
+ * An agent's error in one short line. Providers answer with a JSON body after the status code, as OpenRouter's
+ * "429: {"message":…,"metadata":{"raw":…}}"; its readable part is the provider's own message, when there is one.
+ */
+export function shortError(message) {
+  let text = String(message || "");
+  const body = /^(\d{3}):\s*(\{[\s\S]*\})\s*$/.exec(text);
+  if (body) {
+    try {
+      const parsed = JSON.parse(body[2]);
+      const said = parsed.metadata?.raw || parsed.error?.message || parsed.message;
+      if (typeof said === "string" && said) text = body[1] + ": " + said;
+    } catch {
+      // Not JSON after all: kept as it is.
+    }
+  }
+  text = text.replace(/\s+/g, " ").trim();
+  return text.length > 300 ? text.slice(0, 299) + "…" : text;
 }
 
 function textOf(content) {

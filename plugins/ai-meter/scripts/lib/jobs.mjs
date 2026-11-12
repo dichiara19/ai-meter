@@ -338,7 +338,7 @@ async function runAgent(job, chosen, task, signal) {
   if (job.worktree?.committed_secrets_visible) job.warnings = [...(job.warnings || []), "committed_secret_files_visible"];
   if (signal.aborted) throw signal.reason;
 
-  const reader = readerFor(plan.runtime);
+  const reader = readerFor(plan.runtime, job.id);   // The worktree or snapshot folder is named after the job.
   reader.allowance = chosen.lease.budget?.max_cost || 0;
   const child = spawn(plan.program, plan.arguments, {
     cwd: plan.working_directory || undefined,

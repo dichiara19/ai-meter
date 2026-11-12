@@ -17,14 +17,22 @@
 //   hang      waits until it is stopped;
 //   family    starts a child process that waits, writes its pid to FAKE_CHILD_PID_FILE, then waits until stopped;
 //   holdopen  (Pi) answers as ok, leaving behind a process that keeps a file in its folder open for four seconds, as
-//             WSL keeps a Windows folder open for a while after an agent there exits.
+//             WSL keeps a Windows folder open for a while after an agent there exits;
+//   tools     uses tools before answering, as in a live run: a command that fails, a write, an edit that fails (OpenCode)
+//             and a command that succeeds with long output, each with absolute paths in its folder;
+//   manytools (Pi) makes 45 tool calls before answering;
+//   retried   (Pi) meets a 429, retries as Pi does, then answers normally.
 // Requests are otherwise priced at zero, as the agents do for free models.
 
 import { execFileSync, spawn } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const [runtime, behaviour] = process.argv.slice(2);
 const emit = (event) => process.stdout.write(JSON.stringify(event) + "\n");
+// File contents an agent writes, which the report must never carry, and a command's long output.
+const SECRET_CONTENT = "contents-the-report-must-not-carry";
+const longOutput = () => "✔ case\n".repeat(200) + "ℹ tests 8\nℹ pass 8\nℹ fail 0\n";
 
 let task = "";
 process.stdin.setEncoding("utf8");
@@ -52,6 +60,15 @@ function pi() {
   emit({ type: "session", id: "s1", cwd: process.cwd() });
   emit({ type: "agent_start" });
   emit({ type: "turn_start" });
+  if (behaviour === "tools") piTools();
+  if (behaviour === "manytools") for (let i = 0; i < 45; i++) piTool("bash", { command: "echo " + i }, "" + i, false);
+  if (behaviour === "retried") {
+    const body = '429: {"message":"Provider returned error","code":429,"metadata":{"raw":"a:free is temporarily rate-limited upstream. Please retry shortly.","is_byok":false}}';
+    emit({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: body, usage: { input: 0, output: 0, cost: { total: 0 } } } });
+    emit({ type: "turn_end" });
+    emit({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: body });
+    emit({ type: "auto_retry_end", success: true, attempt: 1 });
+  }
   const failed = behaviour === "error429" || behaviour === "byok";
   const byok = '402: {"message":"Provider returned error","code":402,"metadata":{"provider_name":"Google AI Studio","is_byok":true,' +
     '"previous_errors":[{"code":429,"message":"Provider returned error"}]}}';
@@ -73,6 +90,31 @@ function pi() {
   else emit({ type: "agent_settled", aborted: false });
 }
 
+/** One Pi tool call: its start and its end, with the result as Pi gives it. */
+function piTool(toolName, args, output, isError) {
+  const toolCallId = "call_" + Math.random().toString(16).slice(2);
+  emit({ type: "tool_execution_start", toolCallId, toolName, args });
+  emit({ type: "tool_execution_end", toolCallId, toolName, result: { content: [{ type: "text", text: output }] }, isError, durationMs: 5 });
+}
+
+function piTools() {
+  const here = process.cwd();
+  piTool("bash", { command: `cd ${here} && ls *.json`, timeout: 10 }, "ls: cannot access '*.json': No such file or directory\n\n\nCommand exited with code 2", true);
+  writeFileSync("slug.test.js", SECRET_CONTENT);
+  piTool("write", { path: join(here, "slug.test.js"), content: SECRET_CONTENT }, "Successfully wrote to " + join(here, "slug.test.js"), false);
+  piTool("bash", { command: `cd ${here} && node --test 2>&1`, timeout: 60 }, longOutput(), false);
+}
+
+function openCodeTools() {
+  const here = process.cwd();
+  const tool = (callID, tool, state) => emit({ type: "tool_use", part: { id: "prt_" + callID, callID, type: "tool", tool, state } });
+  tool("c1", "bash", { status: "completed", input: { command: `ls ${here}/*.json`, description: "List" }, output: "ls: cannot access\n", metadata: { exit: 2 } });
+  writeFileSync("slug.test.js", SECRET_CONTENT);
+  tool("c2", "write", { status: "completed", input: { filePath: join(here, "slug.test.js"), content: SECRET_CONTENT }, output: "" });
+  tool("c3", "edit", { status: "error", input: { filePath: join(here, "slug.js"), oldString: "x", newString: "y" }, error: "oldString not found in content" });
+  tool("c4", "bash", { status: "completed", input: { command: "node --test" }, output: longOutput(), metadata: { exit: 0 } });
+}
+
 function openCode() {
   if (behaviour === "silent") return;
   if (behaviour === "write" || behaviour === "commit") {
@@ -88,6 +130,7 @@ function openCode() {
     emit({ type: "error", error: { name: "APIError", data: { message: "Provider returned error 429" } } });
     process.exit(1);
   }
+  if (behaviour === "tools") openCodeTools();
   emit({ type: "tool_use", part: { tool: "read", state: { status: "completed" } } });
   emit({ type: "step_finish", part: { reason: "tool-calls", cost, tokens: { input: 50, output: 5, reasoning: 1, cache: { read: 10, write: 0 } } } });
   if (behaviour === "paid") return setInterval(() => {}, 1000);

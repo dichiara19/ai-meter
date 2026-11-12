@@ -64,7 +64,7 @@ const TOOLS = [
   },
   {
     name: "delegate_result",
-    description: "A delegated job's report: status, the agent's answer, requests and tokens, the changed files of a modify task, and why candidates were skipped.",
+    description: "A delegated job's report: status and duration, the agent's answer, what the agent did (activity: its tool calls, files written, commands and their results, to check the answer against), requests and tokens, the change made by a modify task, and why candidates were skipped.",
     inputSchema: { type: "object", properties: { job_id: text("The job from delegate."), wait_seconds: waitSeconds }, required: ["job_id"] },
   },
   {
