@@ -91,7 +91,7 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `list_free_models` | Free models with id, context window, output limit, tool and reasoning support, last free day, how the price is known (`free`) and their limits (`limits`, see below); filters `tools`, `min_context`, `min_output_tokens` and `include_unconfirmed` |
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
-| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, in a fixed order; each pool's room; why every other model is left out; which agents were found but cannot be used; and, when asked, best-effort candidates built on the agents' own model lists and free-tier candidates (Cloudflare Workers AI). See below |
+| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, most suitable first with the reason for each place; each pool's room; why every other model is left out; which agents were found but cannot be used; and, when asked, best-effort candidates built on the agents' own model lists and free-tier candidates (Cloudflare Workers AI). See below |
 | `describe_dispatch` | How to start a candidate: program, argument list and environment for a verified agent and place. The task goes on stdin, never in the arguments. See below |
 | `claim_capacity`, `renew_capacity`, `release_capacity` | Cooperative capacity leases on a candidate's pool, with the budget of a free tier. These are the only tools that change anything: AI Meter's own lease book. See below |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
@@ -150,6 +150,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 - `service`: only this service;
 - `cost_policy`: `free_only` (default) admits only models whose list states a zero price. `free_or_unconfirmed` also admits models whose price the service does not state, such as NVIDIA and Gemini models;
 - `include_free_tier`: also admit free-tier models, which are priced but free within a daily allocation ([Free tiers](#free-tiers-cloudflare-workers-ai)). Off by default, whatever the `cost_policy`;
+- `from`: where the caller runs, `windows` or `wsl`. For the same model, an agent in that place comes first ([Order](#order));
 - `refresh` and `max_age_seconds`, as in the other tools.
 
 **A candidate is a model, a runtime and a credential.**
@@ -169,10 +170,40 @@ Each model from `list_free_models` says how its price is known and what limits a
 - With *Use API keys already on the PC* turned off, AI Meter cannot check the agents' keys, and says so.
 - `credential` is an opaque id (`cred_…`): the same key gives the same id while AI Meter runs. It is never the key, its file or the account.
 
-**Order.**
-1. Candidates whose pool has known room come first, most room first. The room is the remaining share of the pool's tightest limit with a known value.
-2. Candidates whose room is unknown come next, one task at a time.
-3. Ties are broken by service, model and place, so the same request always gives the same order.
+#### Order
+
+Every candidate's pool can start a task now; a pool that cannot is in `excluded`. Among them, AI Meter puts the most suitable first, by the first of these keys that differs:
+
+1. **The user's preference.** Models marked *Preferred* in Settings › AI apps › Delegated tasks come first, models marked *Avoided* last. An avoided model stays a candidate: it is used when nothing else starts, or when the coordinator pins it.
+2. **Room, in two bands.** Pools with at least 20% of their tightest limit left, or with unknown room, come before pools with less. Above that, room does not reorder models: a pool at 70% and one at 40% count the same.
+3. **The model's track record on this PC.** Over the last 30 days of released leases: completed tasks, minus failed or timed-out ones, minus leases that met a rate limit. The highest score comes first; a model never tried scores 0, so a model that keeps failing or being rate limited drops below untried ones. Cancelled and expired leases are not counted.
+4. **Reply size.** A model whose stated reply size is below 16,384 tokens comes after the others: that is too short for most coding tasks.
+5. **Total weights.** No service list states a model's size. AI Meter takes the number of parameters in its published weights from Hugging Face when the list names the model's repository (OpenRouter's `hugging_face_id`), otherwise the size written in its id (`gemma-4-31b-it`, `mixtral-8x7b`). Models of unknown size come first, as closed models often are large; then the largest first.
+6. **Context window**, largest first.
+7. **Output speed measured here**: output tokens per second of the model's completed tasks over 30 days, tools included. Fastest first, then models never timed.
+8. Service and model id, so the same request always gives the same order.
+
+For the same model, the agent that sends fewer tokens with every request comes first (`request_tokens` in [agent definitions](#agent-definitions): Pi about 4,600, OpenCode about 9,600, against the same free quota); then, with `from`, the agent in the caller's place, which starts without the `wsl.exe` hop; then agent id, place and distribution.
+
+The same snapshot, request, leases, preferences and known sizes give the same order.
+
+**`rank`** on each candidate says why it stands where it is:
+
+```json
+"rank": {
+  "why": "Not tried here yet; 561B weights (Hugging Face); 1,000,000 context; pi sends about 4,600 tokens per request; runs where the caller runs.",
+  "preference": "neutral",
+  "room": "enough",
+  "track_record": { "days": 30, "completed": 0, "failed": 0, "rate_limited": 0, "score": 0, "output_tokens_per_second": null },
+  "small_reply": false,
+  "parameters": 560524578816,
+  "parameters_source": "huggingface",
+  "request_tokens": 4600,
+  "same_place": true
+}
+```
+
+`preference` is `preferred`, `neutral` or `avoided`; `room` is `enough` or `low`; `parameters_source` is `huggingface` or `model_id`, and `parameters` is null when unknown; `same_place` is present only with `from`. The context window and reply size are in `limits.per_request`.
 
 **`pools`** gives each pool once, with `max_new_jobs_now`, `remaining_share` and `binding_limit`. Models in one pool share it, so plan by pool, not by model.
 
@@ -209,7 +240,7 @@ With `include_best_effort: true`, `list_candidates` also returns **`best_effort`
 
 - **They are a separate list, never mixed with `candidates`.** A plugin uses one only when the user agreed beforehand. The task may fail, stop or meet limits nobody has stated, so failures are handled case by case, without automatic retries on the same model.
 - **Without the flag**, `best_effort_available` counts them, and the models keep their exclusions.
-- **Order and room.** Best-effort candidates follow the same order as ordinary ones, and their pools appear in `pools`.
+- **Order and room.** Best-effort candidates follow the same [order](#order) as ordinary ones, with the agent's context window and reply size where the service states none, and their pools appear in `pools`.
 - **What each entry adds:**
   - `warnings` starting with `best_effort`;
   - `estimated`, which gives `source` (`agent:pi`), the agent's `tools`, `reasoning`, `context_tokens`, `max_output_tokens` and `price_per_million`, and `unverified`: what rests on the agent's word (`price`, `tools`, `context`, `output`, and `limits` when the service states none).
@@ -270,7 +301,9 @@ The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code 
 - `claim_capacity` for a free-tier pool also returns its `budget` (see [Free tiers](#free-tiers-cloudflare-workers-ai)).
 - `release_capacity` takes `outcome`, `requests`, `rate_limited`, `retry_after_seconds`, the tokens and `cost`, in US dollars as the agent priced the requests. A rate limit closes the pool until `retry_after_seconds`, or for a minute. The cost counts against a free tier's budget at once.
 - Active leases count in every `headroom` (`leased`). Released outcomes fill `observed` in `list_free_models`, with `coverage: "ai_meter_leases_only"`: tasks run without leases are not counted.
+- Released outcomes are also counted per model: completed, failed (or timed out), rate limited, and the output tokens and time of completed tasks. They are the track record that orders candidates ([Order](#order)).
 - AI Meter keeps the leases in `%APPDATA%\AIMeter\leases.json`. It stores only pool, service, model, agent, client label, times and outcome counters (the cost among them), for 30 days. Never task text, code, logs or keys.
+- Model sizes from Hugging Face are kept in `%APPDATA%\AIMeter\model-sizes.json`: the repository, its number of parameters and when it was checked.
 
 ### Agent definitions
 
@@ -308,6 +341,7 @@ The coding agents AI Meter knows are data, like services: `agents/*.json`, built
 |---|---|
 | `id`, `name` | The runtime id tools use (`a-z`, `0-9`, `-`) and the name shown |
 | `order` | Position in key discovery and lists, lower first (default 1000) |
+| `request_tokens` | About how many tokens the agent sends with every request on top of the task (its system prompt and tools), as started for delegation. For the same model, the agent with fewer comes first among candidates; unstated counts after stated |
 | `programs` | Program names per place (`windows`, `wsl`), without an extension. On Windows `.exe`, `.cmd`, `.bat` and `.ps1` are tried, in that order |
 | `folders` | Settings folders relative to the home: any one shows the agent is set up |
 | `keys` | Where the agent keeps API keys: a home-relative `file` and a JSON `path`, with `{id}` for the service's aliases (`auth.ids` in its service definition), or a `file` with `"format": "env"`, a dotenv file of `NAME=value` lines read by the variable names in the service's `auth.env` (Hermes keeps its keys this way) |

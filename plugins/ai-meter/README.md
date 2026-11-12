@@ -87,7 +87,14 @@ A job runs in its own worker process, so it outlives the call that started it.
 - **`modify`** runs the agent in a new Git worktree on branch `ai-meter/<job id>`, made from the last commit, so ignored files such as `.env` are not in it. Uncommitted changes in your checkout are not in it either, and the report says so; it also lists committed files that look like secrets. The report compares with that base commit, so it shows commits the agent made (`worktree.commits`) as well as uncommitted and new files. New files are marked intent-to-add (`git add -N`) in the worktree's index first, so they are in `files` with status `A`, in `diff_stat` and in the output of the `review` command; no content is staged. OpenCode's `build` agent may not read `.env` files or folders outside the worktree. The plugin never commits, merges or removes the worktree: the report gives the commands to review and to discard it.
 - **Neither is a sandbox.** An agent can still read a path outside its folder if it is given one, Pi in particular, which has no permission rules.
 
-**Choosing a model and an agent.** AI Meter orders candidates by the room left in their pool, not by quality. Within one pool the order is by service, model, agent id and place, alphabetically. So when Pi and OpenCode both have a key, OpenCode comes first, and on Windows before WSL. When it matters, look at `delegate_candidates` and pin `model`, `runtime` or `where`. Pi sends about 4,600 tokens of system prompt per request, and OpenCode, isolated, about 9,600.
+**Choosing a model and an agent.** The plugin takes the first candidate it can start, in AI Meter's [order](../../docs/MCP.md#order):
+1. models you mark *Preferred* in AI Meter's Settings › AI apps › Delegated tasks, and *Avoided* ones last;
+2. pools with at least 20% of their room left, or unknown room;
+3. each model's track record on this PC over 30 days: completed tasks minus failed and rate-limited ones;
+4. a reply size of at least 16,384 tokens;
+5. the model's total weights (from Hugging Face or its id; unknown sizes first), then its context window, then the speed measured here.
+
+For the same model, the agent with the smaller fixed cost per request comes first (Pi sends about 4,600 tokens of system prompt per request, OpenCode, isolated, about 9,600), then the agent in the plugin's own place, which starts without `wsl.exe`. `delegate_candidates` gives each candidate's `context_tokens`, `max_output_tokens` and `why`, the reason for its place. No catalogue states quality: when it matters, pin `model`, `runtime` or `where`.
 
 **Best effort, only with consent.** NVIDIA and the Gemini API do not state prices or tool support, so their models are never ordinary candidates. AI Meter can fill in what is missing from the agent's own model list ([best-effort candidates](../../docs/MCP.md#best-effort-candidates)).
 - With `allow_best_effort: true`, the plugin tries these models after every ordinary candidate.

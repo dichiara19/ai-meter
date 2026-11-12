@@ -27,9 +27,8 @@ The task, and every file the agent reads, go to the provider of the chosen model
 
 ## How
 
-1. **Optionally look first.** `delegate_candidates` lists where a task can run now: candidates in AI Meter's order, each pool's room (and the warnings shared by all its candidates), why other models are left out, and the agents found. `excluded` names the models only where you could act on the reason; otherwise it gives a count. AI Meter orders by room, not by quality or running cost, and breaks ties alphabetically. Choose yourself when it matters, and pass `model` and `runtime`:
-   - a model known to be good at code, with enough context for the files involved, and stated tool support;
-   - for many small tasks, the agent with the smaller fixed cost per request: Pi sends about 4,600 tokens of system prompt with every request, OpenCode about 9,600, and both count against the same free quota;
+1. **Optionally look first.** `delegate_candidates` lists where a task can run now: candidates in AI Meter's order, each with its `context_tokens`, `max_output_tokens` and `why`, the reason for its place; each pool's room (and the warnings shared by all its candidates), why other models are left out, and the agents found. `excluded` names the models only where you could act on the reason; otherwise it gives a count. Without `model`, the first candidate that starts is used. AI Meter puts first the models the user prefers, then pools with room, then the models that worked best on this PC (completed tasks minus failed and rate-limited ones, over 30 days), then models with a reply of at least 16k tokens, the largest models (unknown sizes first), the largest context and the fastest measured; for the same model, the agent with the smaller fixed cost per request (Pi about 4,600 tokens of system prompt per request, OpenCode about 9,600) and the one in the plugin's place. No catalogue states quality, so choose yourself when it matters, and pass `model` and `runtime`:
+   - a model known to be good at code, with enough context for the files involved;
    - the user's preferred agent (`runtime`, and `where`) when they have one.
 2. **Start it.** Call `delegate` with:
    - `task`: complete instructions. Name the files, say what to look for and the shape of the answer. The agent sees nothing else;
