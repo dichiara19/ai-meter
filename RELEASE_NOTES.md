@@ -1,3 +1,27 @@
+## What changed in 0.11.0
+
+### Delegation (preview)
+- **The most suitable model first.** Without a model of your choice, a delegated task went to the first free model in alphabetical order. AI Meter now orders the candidates by suitability and says why each one stands where it is:
+  - your preference comes first: in **Settings → AI apps → Delegated tasks** each free model can be *Preferred* or *Avoided*;
+  - then how each model did on this PC over the last 30 days (tasks completed, failed or rate limited);
+  - then what the model states: a reply long enough for a coding task, the size of its weights, its context window;
+  - for the same model, the agent that spends fewer tokens per request.
+- **Your subscription plans, if you allow it.** A task can run on Claude Code or Codex with the room left in your Claude or ChatGPT plan. It is off by default and never pay-as-you-go:
+  - each plan is turned on in **Settings → AI apps → Delegated tasks**, with a reserve that delegation never touches (40% of the 5-hour window and 25% of the weekly one, unless you change them);
+  - a plan with extra usage or credits on is left out, and so is the plan the coordinator itself runs on;
+  - free models still come first, unless the plan's room would be lost at its next reset;
+  - the agents start without API keys and without your own configuration, and only where their sign-in is with the plan. For now they run in WSL.
+- **A report the coordinator can check.** The result of a task now lists what the agent did (commands, files written, failures), includes new files in the diff, tells errors the agent recovered from apart from a failure, and gives the duration and, for a plan, the window the task drew from.
+- The plugin for Claude Code and Codex is version 0.2.0. It works with older versions of AI Meter, without the new order and the plans.
+
+### Fixes
+- **Settings are not lost when the file is busy.** If another program held `settings.json` for a moment (OneDrive, an antivirus), AI Meter could start as if for the first time and then overwrite your settings with the defaults. It now waits and retries, and never writes over a file it could not read.
+- The Copilot sign-in opens only GitHub's own https page.
+- A model name with an empty part, such as `gpt-5-`, no longer causes an error.
+
+### Privacy
+- To order models by size, AI Meter asks `huggingface.co`'s public API for the number of parameters of a model whose list names its repository, as OpenRouter's does. No key is sent, only the repository's name, once per model.
+
 ## What changed in 0.10.3
 
 - **Start with Windows after moving to the Store version, without a gap.** In 0.10.2, if Windows could not tell AI Meter the state of its startup task at the moment it started, the Store version treated the question as answered and never asked again. It now asks at the next launch instead.
