@@ -164,7 +164,7 @@ test("a plan task from Claude Code runs Codex on the ChatGPT plan with a clean e
   assert.equal(full.plan.service, "openai");
   assert.equal(full.plan.window, "5h");
   assert.deepEqual(full.plan.before, [{ window: "5h", remaining_percent: 60, reserve_percent: 40, resets_at: "2026-11-02T15:00:00+01:00" }]);
-  assert.deepEqual(full.plan.after, [{ window: "5h", remaining_percent: 55, resets_at: "2026-11-02T15:00:00+01:00", source: "ai_meter" }],
+  assert.deepEqual(full.plan.after, [{ window: "5h", remaining_percent: 55, resets_at: "2026-11-02T15:00:00+01:00", source: "ai_meter", read_at: "2026-11-02T14:00:00+01:00" }],
     "Codex does not report the windows: AI Meter reads them again");
   assert.match(full.plan.note, /not billed/);
   assert.equal(calls().find((c) => c.tool === "release_capacity").arguments.requests, null);

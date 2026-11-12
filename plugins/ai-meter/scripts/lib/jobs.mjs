@@ -505,7 +505,9 @@ async function removeSnapshotPatiently(snapshot) {
 
 /**
  * A plan's 5-hour and weekly windows as AI Meter reads them now (get_limits with a fresh reading), or null when they
- * cannot be read. They include anything else the account used meanwhile, on any app or PC.
+ * cannot be read. They include anything else the account used meanwhile, on any app or PC. AI Meter does not read a
+ * service more often than its minimum interval (Codex: every few minutes), so read_at says how new the reading is: one
+ * older than the task shows the room before it.
  */
 async function planWindowsNow(service) {
   try {
@@ -513,7 +515,9 @@ async function planWindowsNow(service) {
     const entry = (found.services || []).find((s) => s.service === service || s.id === service);
     const windows = (entry?.limits || []).filter((l) => (l.kind === "5h" || l.kind === "7d") && typeof l.remaining_percent === "number");
     if (!windows.length) return null;
-    return windows.map((l) => ({ window: l.kind, remaining_percent: l.remaining_percent, ...(l.resets_at ? { resets_at: l.resets_at } : {}), source: "ai_meter" }));
+    return windows.map((l) => ({
+      window: l.kind, remaining_percent: l.remaining_percent, ...(l.resets_at ? { resets_at: l.resets_at } : {}), source: "ai_meter", ...(entry.read_at ? { read_at: entry.read_at } : {}),
+    }));
   } catch {
     return null;
   }

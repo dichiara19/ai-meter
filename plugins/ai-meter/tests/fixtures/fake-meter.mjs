@@ -57,7 +57,7 @@ const tools = {
     };
   },
   release_capacity: (args) => ({ lease_id: args.lease_id, released: true }),
-  get_limits: (args) => ({ services: [{ service: args.service, limits: [{ name: "Session 5 h", kind: "5h", remaining_percent: 55, resets_at: "2026-11-02T15:00:00+01:00" }] }] }),
+  get_limits: (args) => ({ services: [{ service: args.service, read_at: "2026-11-02T14:00:00+01:00", limits: [{ name: "Session 5 h", kind: "5h", remaining_percent: 55, resets_at: "2026-11-02T15:00:00+01:00" }] }] }),
 };
 
 // Plan agents (ADR 0003): AI Meter describes them with a clean environment, a sign-in check and the plan's billing.
