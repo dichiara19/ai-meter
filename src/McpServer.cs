@@ -151,7 +151,9 @@ namespace AIMeter
                      "lists models the service's own list leaves short (price, tool support or limits unstated) that an agent's own model " +
                      "list has at no price: they may fail or stop, so ask the user before using one. With include_free_tier, also models that " +
                      "are priced but free within a daily allocation (Cloudflare Workers AI): a plugin must stop the agent when its " +
-                     "priced requests reach the budget claim_capacity returns, so ask the user first. Nothing is started or reserved.",
+                     "priced requests reach the budget claim_capacity returns, so ask the user first. With include_plan and coordinator, also " +
+                     "Claude Code or Codex on a subscription plan the user allowed in Settings, drawing on room above the user's reserve, " +
+                     "never pay-as-you-go: billing included_in_plan, with the plan's windows. Nothing is started or reserved.",
                      new Dictionary<string, object>
                      {
                          { "service", service },
@@ -164,6 +166,8 @@ namespace AIMeter
                          { "include_free_tier", Property("boolean", "Also accept free-tier models: priced, but free within a daily allocation the plugin must keep to with claim_capacity's budget. Off by default.") },
                          { "from", new Dictionary<string, object> { { "type", "string" }, { "enum", new List<object> { "windows", "wsl" } },
                              { "description", "Where the caller runs. For the same model, an agent in that place comes first, which avoids starting it through wsl.exe." } } },
+                         { "include_plan", Property("boolean", "Also accept capacity included in a subscription plan the user allowed in Settings: Claude Code on the Claude plan, Codex on the ChatGPT plan, with their own sign-in. Never pay-as-you-go: a plan with extra usage or credits on, or below the user's reserve, is excluded. Free models come first unless a plan's room is about to be lost at a reset. Ask the user first. Off by default.") },
+                         { "coordinator", Property("string", "The service the caller itself runs on, such as claude or openai. A plan on that service saves nothing and is excluded (same_plan_as_coordinator); without it, every plan is excluded.") },
                          { "refresh", refresh("their limits") },
                          { "max_age_seconds", maxAge("their limits") },
                      }, true),
@@ -184,6 +188,7 @@ namespace AIMeter
                          { "mode", Enum("read_only (default): the agent can read but not change files. modify: it can change files; run it in a new Git worktree.", Dispatch.ReadOnly, Dispatch.Modify) },
                          { "workspace", Property("string", "The folder the task works in, as seen from where the plugin runs. A placeholder when omitted.") },
                          { "from", Enum("Where the plugin that starts the agent runs (default windows).", "windows", "wsl") },
+                         { "coordinator", Property("string", "For a plan candidate: the service the coordinator runs on, as in list_candidates. Required for plans.") },
                      }, false),
                 Tool("claim_capacity", "Take a slot in a candidate's pool before starting its agent, so that other plugins see it as busy. " +
                      "Refused when the pool has no room. Renew it during long tasks and release it when the task ends; an unreleased " +
@@ -196,6 +201,7 @@ namespace AIMeter
                          { "runtime", Property("string", "The candidate's runtime.") },
                          { "ttl_seconds", Property("integer", "How long the lease lasts without renewal: default 1800, at most 7200.") },
                          { "client", Property("string", "A label for whoever claims, such as claude-code or codex.") },
+                         { "coordinator", Property("string", "For a plan candidate: the service the coordinator runs on. Required for plans; the plan's windows are checked again.") },
                      }, false, false),
                 Tool("renew_capacity", "Extend an active lease from claim_capacity.",
                      new Dictionary<string, object>
@@ -311,6 +317,9 @@ namespace AIMeter
                         MinOutput = (long)(Json.Num(args, "min_output_tokens") ?? 0), CostPolicy = policy, BestEffort = Json.Bool(args, "include_best_effort"),
                         FreeTier = Json.Bool(args, "include_free_tier"), From = KnownPlace(Json.Str(args, "from")),
                         Preferences = Settings.Current == null ? null : Settings.Current.DelegationModels,
+                        Plan = Json.Bool(args, "include_plan"), Coordinator = Json.Str(args, "coordinator"),
+                        PlansAllowed = Settings.Current == null ? null : Settings.Current.PlansAllowed(),
+                        Reserves = Settings.Current == null ? null : Settings.Current.DelegationReserves,
                     }, DateTime.Now, leases), scan);
                     break;
                 default: result = Suggest(snap.Providers); break;
@@ -527,6 +536,46 @@ namespace AIMeter
             return d;
         }
 
+        /// <summary>
+        /// A plan candidate's limits: the context its agent's list states (unknown otherwise), the plan's pool with its
+        /// leases' counters, and its headroom. The plan's windows are in "plan" (PlanJson).
+        /// </summary>
+        private Dictionary<string, object> PlanLimitsJson(Candidate c)
+        {
+            var context = Cap(c.Model.Context);
+            if (c.Model.Context > 0) context["source"] = "agent:" + c.Access.Runtime;
+            return new Dictionary<string, object>
+            {
+                { "per_request", new Dictionary<string, object> { { "context_tokens", context }, { "max_output_tokens", Cap(0) } } },
+                { "pool", c.Pool }, { "rates", new List<object>() }, { "observed", Observed(c.Pool) }, { "headroom", RoomJson(c.Room) },
+            };
+        }
+
+        /// <summary>
+        /// The plan a candidate draws on: its service, when its windows were read, each window with the room left, the
+        /// user's reserve and the reset, the window that binds, and whether room is about to be lost (expiring).
+        /// </summary>
+        internal static Dictionary<string, object> PlanJson(PlanRoom plan)
+        {
+            return new Dictionary<string, object>
+            {
+                { "service", plan.Service }, { "read_at", Time(plan.ReadAt) },
+                { "windows", plan.Windows.Select(w =>
+                    {
+                        var d = new Dictionary<string, object>
+                        {
+                            { "window", w.Window }, { "remaining_percent", Math.Round(w.RemainingPercent, 1) }, { "reserve_percent", w.ReservePercent },
+                            { "resets_at", w.ResetsAt.HasValue ? Time(w.ResetsAt.Value) : null },
+                        };
+                        if (w.Model != null) d["models"] = w.Model;
+                        return (object)d;
+                    }).ToList() },
+                { "binding_window", plan.Binding == null ? null : plan.Binding.Name },
+                { "expiring", plan.Expiring },
+                { "coverage", "the plan's windows count everything the account uses, on every app and PC" },
+            };
+        }
+
         /// <summary>A per-request cap: the catalogue value, or null with source "unknown".</summary>
         private static Dictionary<string, object> Cap(long tokens)
         {
@@ -658,6 +707,7 @@ namespace AIMeter
                 return error("Unknown runtime \"" + runtime + "\": AI Meter knows " + string.Join(", ", Agents.All.Select(a => a.Id)) + ". Call list_candidates for the runtimes found here.");
             var snap = snapshot();
             if (snap == null) return error("AI Meter is still reading the first data; try again in a few seconds.");
+            if (agent.Plan != null && agent.Plan.Service == service) return PlanDelegation(name, args, agent, snap, model, now);
             var provider = snap.Providers.FirstOrDefault(p => p.Catalogue != null && p.Id == service);
             var free = provider == null ? null : provider.Catalogue.Models.FirstOrDefault(m => m.Id == model);
             if (free == null) return error("This model is not in the service's current model list; call list_candidates first.");
@@ -669,7 +719,7 @@ namespace AIMeter
                 return error("No usable " + agent.Name + " is set up here" + (where == "wsl" ? " in WSL" : where == "windows" ? " on Windows" : "") +
                              " (WSL counts only while it runs); list_candidates gives the runtimes found, and runtimes.unsupported why others cannot be used.");
             if (scan.KeyDiscoveryOff) return error("Key discovery is off in AI Meter's settings, so it cannot tell which keys " + agent.Name + " holds.");
-            var access = scan.Access.Where(a => a.Service == service && a.Runtime == runtime && here(a.Where, a.Distro))
+            var access = scan.Access.Where(a => !a.Plan && a.Service == service && a.Runtime == runtime && here(a.Where, a.Distro))
                 .OrderBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).FirstOrDefault();
             if (access == null) return error(agent.Name + " has no key of its own for " + service + " here; call list_candidates first.");
             string pool = provider.Catalogue.PoolOf(free) ?? provider.Id;
@@ -691,6 +741,19 @@ namespace AIMeter
             var plan = Dispatch.Describe(access, model, Json.Str(args, "mode"), Json.Str(args, "workspace"), Json.Str(args, "from") ?? "windows",
                 access.Distro ?? (Settings.Current == null ? null : Settings.Current.WslDistro), access.Version);
             if (!plan.Supported) return ToolResult(new Dictionary<string, object> { { "supported", false }, { "reason", plan.Reason }, { "runtime", runtime }, { "where", access.Where } }, false);
+            var described = DispatchJson(plan, access, pool);
+            if (Candidates.IsFreeTier(free))
+            {
+                plan.Warnings.Add(FreeTierBudget);
+                described["notes"] = plan.Notes.Concat(new[] { FreeTierNote }).Cast<object>().ToList();
+            }
+            if (plan.Warnings.Count > 0) described["warnings"] = plan.Warnings.Cast<object>().ToList();
+            return ToolResult(described, false);
+        }
+
+        /// <summary>A dispatch description as describe_dispatch returns it.</summary>
+        private static Dictionary<string, object> DispatchJson(Dispatch.Plan plan, RuntimeAccess access, string pool)
+        {
             var described = new Dictionary<string, object>
             {
                 { "supported", true }, { "runtime", plan.Runtime }, { "where", plan.Where }, { "version", plan.Version }, { "version_verified", plan.VersionVerified },
@@ -700,13 +763,71 @@ namespace AIMeter
                 { "notes", plan.Notes.Cast<object>().ToList() },
             };
             if (access.Distro != null) described["distro"] = access.Distro;
-            if (Candidates.IsFreeTier(free))
+            if (plan.CleanEnvironment) described["environment_policy"] = "clean";
+            if (plan.Billing != null) described["billing"] = plan.Billing;
+            if (plan.SignIn != null)
             {
-                plan.Warnings.Add(FreeTierBudget);
-                described["notes"] = plan.Notes.Concat(new[] { FreeTierNote }).Cast<object>().ToList();
+                var check = new Dictionary<string, object> { { "program", plan.SignIn.Program }, { "arguments", plan.SignIn.Arguments.Cast<object>().ToList() } };
+                if (plan.SignIn.JsonField != null) { check["json_field"] = plan.SignIn.JsonField; check["expect"] = plan.SignIn.Expect; }
+                if (plan.SignIn.Text != null) check["text"] = plan.SignIn.Text;
+                described["sign_in_check"] = check;
             }
-            if (plan.Warnings.Count > 0) described["warnings"] = plan.Warnings.Cast<object>().ToList();
-            return ToolResult(described, false);
+            return described;
+        }
+
+        /// <summary>
+        /// describe_dispatch and claim_capacity for a plan agent (ADR 0003). Both check again what list_candidates did:
+        /// the plan is allowed in Settings, the coordinator is on another service, the agent is set up here, and the model
+        /// is one the plan offers. claim_capacity also checks the plan's windows now, so a reserve reached since the list
+        /// was made refuses the lease, and its answer names the windows the task draws on.
+        /// </summary>
+        private Dictionary<string, object> PlanDelegation(string name, Dictionary<string, object> args, RuntimeKind agent, Snapshot snap, string model, DateTime now)
+        {
+            Func<string, Dictionary<string, object>> error = text => ToolResult(new Dictionary<string, object> { { "error", text } }, true);
+            string service = agent.Plan.Service, runtime = agent.Id;
+            var settings = Settings.Current;
+            string gate = Candidates.PlanGate(service, new Requirements
+            {
+                Plan = true, Coordinator = Json.Str(args, "coordinator"), PlansAllowed = settings == null ? null : settings.PlansAllowed(),
+            });
+            if (gate == "plan_off_in_settings") return error("Delegated tasks may not draw on the " + service + " plan: the user has not allowed it in AI Meter's Settings › AI apps › Delegated tasks.");
+            if (gate == "coordinator_unknown") return error("Say which service the coordinator runs on (coordinator), so that its own plan is never used.");
+            if (gate != null) return error("The coordinator runs on the " + service + " plan itself: a task there would save nothing (" + gate + ").");
+            if (agent.Dispatch == null) return error(agent.Name + " is not supported for delegation yet: no way to start it has been verified.");
+            string where = Json.Str(args, "where"), distro = Json.Str(args, "distro");
+            var access = runtimes().Access.Where(a => a.Plan && a.Runtime == runtime && (where == null || a.Where == where) && (distro == null || a.Distro == distro))
+                .OrderBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).FirstOrDefault();
+            if (access == null)
+                return error("No usable " + agent.Name + " is set up here" + (where == "wsl" ? " in WSL" : where == "windows" ? " on Windows" : "") +
+                             " (WSL counts only while it runs); list_candidates gives the runtimes found, and runtimes.unsupported why others cannot be used.");
+            if (!Candidates.PlanModels(agent, access).Any(m => m.Id == model)) return error("The " + service + " plan does not offer this model through " + agent.Name + "; call list_candidates first.");
+            var provider = snap.Providers.FirstOrDefault(p => p.Id == service);
+            string pool = Candidates.PlanPool(service);
+            var reserves = settings == null ? null : settings.DelegationReserves;
+
+            if (name == "claim_capacity")
+            {
+                // The room before leases: Claim counts the active ones itself, together with taking the slot.
+                PlanRoom planRoom;
+                var room = Candidates.PlanRoomOf(provider, service, model, reserves, now, null, out planRoom);
+                if (room.Blocking == null && leases.BackoffUntil(pool) > now) { room.Blocking = "rate_limited"; room.Until = leases.BackoffUntil(pool); room.MaxNewJobs = 0; }
+                var lease = room.Blocking != null ? null : leases.Claim(pool, service, model, runtime, Json.Str(args, "client"), (int)(Json.Num(args, "ttl_seconds") ?? 0), room.MaxNewJobs, now);
+                if (lease == null)
+                {
+                    PlanRoom ignored;
+                    return ToolResult(new Dictionary<string, object> { { "refused", true }, { "pool", pool }, { "headroom", RoomJson(Candidates.PlanRoomOf(provider, service, model, reserves, now, leases, out ignored)) } }, false);
+                }
+                return ToolResult(new Dictionary<string, object>
+                {
+                    { "lease_id", lease.Id }, { "pool", pool }, { "expires_at", Time(lease.ExpiresAtUtc.ToLocalTime()) }, { "coverage", "ai_meter_leases_only" },
+                    { "billing", Candidates.IncludedInPlan }, { "plan", PlanJson(planRoom) },
+                }, false);
+            }
+
+            var plan = Dispatch.Describe(access, model, Json.Str(args, "mode"), Json.Str(args, "workspace"), Json.Str(args, "from") ?? "windows",
+                access.Distro ?? (settings == null ? null : settings.WslDistro), access.Version);
+            if (!plan.Supported) return ToolResult(new Dictionary<string, object> { { "supported", false }, { "reason", plan.Reason }, { "runtime", runtime }, { "where", access.Where } }, false);
+            return ToolResult(DispatchJson(plan, access, pool), false);
         }
 
         /// <summary>
@@ -721,8 +842,14 @@ namespace AIMeter
                 {
                     { "service", c.Provider.Id }, { "model", c.Model.Id }, { "name", c.Model.Name },
                     { "runtime", Place(c.Access.Runtime, c.Access.Where, c.Access.Distro) },
-                    { "credential", c.Access.Credential }, { "pool", c.Pool }, { "free", FreeJson(c.Model.Free) }, { "limits", LimitsJson(c.Provider, c.Model) },
+                    { "credential", c.Access.Credential }, { "pool", c.Pool }, { "free", FreeJson(c.Model.Free) },
+                    { "limits", c.Plan != null ? PlanLimitsJson(c) : LimitsJson(c.Provider, c.Model) },
                 };
+                if (c.Plan != null)
+                {
+                    d["billing"] = Candidates.IncludedInPlan;
+                    d["plan"] = PlanJson(c.Plan);
+                }
                 var warnings = Dispatch.Warnings(c.Provider.Id);
                 if (Candidates.IsFreeTier(c.Model)) warnings.Add(FreeTierBudget);
                 if (c.Estimated != null) warnings.Insert(0, "best_effort");
@@ -812,6 +939,11 @@ namespace AIMeter
                 { "request_tokens", r.RequestTokens },
             };
             if (r.SamePlace.HasValue) d["same_place"] = r.SamePlace.Value;
+            if (c.Plan != null)
+            {
+                d["plan"] = c.Plan.Expiring ? "expiring" : "fallback";
+                d["plan_model_order"] = c.Plan.ModelOrder;
+            }
             return d;
         }
 
@@ -819,6 +951,19 @@ namespace AIMeter
         {
             var r = c.Rank;
             var parts = new List<string>();
+            if (c.Plan != null)
+            {
+                // A plan candidate stands by its tier and its plan's own model order: say those, not the free models' keys.
+                var b = c.Plan.Binding;
+                parts.Add("included in the " + c.Plan.Service + " plan" + (c.Plan.Expiring ? "; room about to be lost at a reset, so before free models" : ", after free models"));
+                if (b != null)
+                    parts.Add(string.Format(CultureInfo.InvariantCulture, "{0} window {1:0}% left above a {2}% reserve{3}", b.Name, b.RemainingPercent, b.ReservePercent,
+                        b.ResetsAt.HasValue ? ", resets " + Time(b.ResetsAt.Value) : ""));
+                parts.Add(c.Plan.ModelOrder == 0 ? "the plan's first model" : "model " + (c.Plan.ModelOrder + 1) + " in the plan's list");
+                if (r.SamePlace.HasValue) parts.Add(r.SamePlace.Value ? "runs where the caller runs" : "runs in another place than the caller");
+                string said = string.Join("; ", parts);
+                return char.ToUpperInvariant(said[0]) + said.Substring(1) + ".";
+            }
             if (r.Preference != "neutral") parts.Add(r.Preference + " by the user");
             if (r.LowRoom) parts.Add("pool low on room (" + Math.Round(r.RoomRatio.Value * 100) + "% left)");
             parts.Add(r.Record.Tried || r.Record.RateLimited > 0

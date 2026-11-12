@@ -150,6 +150,9 @@ namespace AIMeter
                 var usage = Parse(result, out plan);
                 string identity = Json.Str(account, "id") ?? Json.Str(account, "email");
                 if (usage != null && identity != null) usage.Identity = HistoryStore.Hash(identity);
+                // Only the sign-in method is kept: "chatgpt" for a plan, "apiKey" for billed API usage (plan delegation).
+                string signIn = Json.Str(account, "type");
+                if (usage != null && signIn != null) usage.SignIn = signIn.ToLowerInvariant();
                 return usage;
             }
             catch (System.ComponentModel.Win32Exception) { return null; }
@@ -202,8 +205,15 @@ namespace AIMeter
 
             var notes = new List<Func<string>>();
             var credits = Json.Obj(rl, "credits");
-            if (credits != null && Json.Bool(credits, "unlimited")) notes.Add(() => L.T("Codex credits: unlimited"));
-            else if (credits != null && Json.Bool(credits, "hasCredits")) { string bal = Json.Str(credits, "balance") ?? "0"; notes.Add(() => L.F("Codex credits: {0}", bal)); }
+            if (credits != null && Json.Bool(credits, "unlimited")) { notes.Add(() => L.T("Codex credits: unlimited")); u.CreditsAvailable = true; }
+            else if (credits != null && Json.Bool(credits, "hasCredits"))
+            {
+                string bal = Json.Str(credits, "balance") ?? "0";
+                notes.Add(() => L.F("Codex credits: {0}", bal));
+                // Past the plan's limits Codex draws on the balance: anything but a balance that reads as zero counts.
+                double amount;
+                u.CreditsAvailable = !double.TryParse(bal, NumberStyles.Float, CultureInfo.InvariantCulture, out amount) || amount > 0;
+            }
 
             var resets = Json.Obj(r, "rateLimitResetCredits");
             var list = resets != null && resets.ContainsKey("credits") ? resets["credits"] as object[] : null;

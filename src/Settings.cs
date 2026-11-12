@@ -82,6 +82,19 @@ namespace AIMeter
         public System.Collections.Generic.Dictionary<string, string> Budgets { get; set; }
         // Delegation: "service|model" to "preferred" (tried first) or "avoided" (tried last); see Candidates.Ordered.
         public System.Collections.Generic.Dictionary<string, string> DelegationModels { get; set; }
+        // Delegation on subscription plans (ADR 0003): service id ("claude", "openai") to whether delegated tasks may draw
+        // on it; a plan not listed is off. Reserves: "service|5h" or "service|7d" to the percentage kept for the user;
+        // a window not listed keeps Candidates.DefaultReserveFiveHours or DefaultReserveWeek.
+        public System.Collections.Generic.Dictionary<string, bool> DelegationPlans { get; set; }
+        public System.Collections.Generic.Dictionary<string, int> DelegationReserves { get; set; }
+
+        /// <summary>The plans the user allowed delegated tasks to draw on.</summary>
+        internal System.Collections.Generic.List<string> PlansAllowed()
+        {
+            var allowed = new System.Collections.Generic.List<string>();
+            if (DelegationPlans != null) foreach (var kv in DelegationPlans) if (kv.Value) allowed.Add(kv.Key);
+            return allowed;
+        }
 
         /// <summary>Per-service pill limit key or "auto"; a missing entry uses Default.</summary>
         public System.Collections.Generic.Dictionary<string, string> PillLimits { get; set; }
@@ -123,6 +136,8 @@ namespace AIMeter
             NotifyResets = new System.Collections.Generic.Dictionary<string, bool>(); PillLimits = new System.Collections.Generic.Dictionary<string, string>();
             Budgets = new System.Collections.Generic.Dictionary<string, string>();
             DelegationModels = new System.Collections.Generic.Dictionary<string, string>();
+            DelegationPlans = new System.Collections.Generic.Dictionary<string, bool>();
+            DelegationReserves = new System.Collections.Generic.Dictionary<string, int>();
             HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
             HistoryEnabled = true;
@@ -219,6 +234,8 @@ namespace AIMeter
             if (s.NotifyResets == null) s.NotifyResets = new System.Collections.Generic.Dictionary<string, bool>();
             if (s.PillLimits == null) s.PillLimits = new System.Collections.Generic.Dictionary<string, string>();
             if (s.DelegationModels == null) s.DelegationModels = new System.Collections.Generic.Dictionary<string, string>();
+            if (s.DelegationPlans == null) s.DelegationPlans = new System.Collections.Generic.Dictionary<string, bool>();
+            if (s.DelegationReserves == null) s.DelegationReserves = new System.Collections.Generic.Dictionary<string, int>();
             if (s.Budgets == null) s.Budgets = new System.Collections.Generic.Dictionary<string, string>();
             if (s.HiddenRows == null) s.HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             return s;

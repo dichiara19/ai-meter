@@ -2,6 +2,37 @@
   "id": "codex",
   "name": "Codex",
   "programs": { "windows": ["codex"], "wsl": ["codex"] },
+  "program_folders": { "windows": ["AppData/Local/OpenAI/Codex/bin/*"] },
   "folders": [".codex"],
-  "package": "@openai/codex"
+  "package": "@openai/codex",
+  "models": { "format": "codex", "file": "{home}/.codex/models_cache.json" },
+  "plan": {
+    "service": "openai",
+    "sign_in": { "arguments": ["login", "status"], "text": "Logged in using ChatGPT" }
+  },
+  "dispatch": {
+    "places": {
+      "wsl": { "versions": ["0.x"] }
+    },
+    "environment_policy": "clean",
+    "arguments": {
+      "read_only": ["exec", "--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--sandbox", "read-only", "-c", "forced_login_method=\"chatgpt\"", "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false", "--disable", "plugins", "--disable", "apps", "--disable", "hooks", "--disable", "memories", "--disable", "multi_agent", "-C", "{workspace}", "-m", "{model}"],
+      "modify": ["exec", "--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--sandbox", "workspace-write", "-c", "forced_login_method=\"chatgpt\"", "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false", "--disable", "plugins", "--disable", "apps", "--disable", "hooks", "--disable", "memories", "--disable", "multi_agent", "-C", "{workspace}", "-m", "{model}"]
+    },
+    "output": {
+      "format": "jsonl",
+      "end": "the process exits",
+      "outcome": "exit code 0 with a turn.completed event and a final agent_message; turn.failed or an error event failed",
+      "requests": "not reported by Codex",
+      "tokens": "usage of turn.completed (input_tokens, which include cached_input_tokens, and output_tokens); unknown when stopped",
+      "rate_limited": "a turn.failed or error message that names a usage limit or 429",
+      "billing": "runs on the ChatGPT plan only: forced_login_method makes Codex refuse an API key; its events say nothing about billing"
+    },
+    "notes": [
+      "Runs on the ChatGPT plan through Codex's own sign-in, never on an API key: start it from an empty environment and run the sign_in_check first (Codex writes its status to stderr).",
+      "--ignore-user-config, skills.include_instructions=false and the disabled features leave out the user's config.toml, MCP servers, skills, plugins, apps, hooks, memories and sub-agents; project_doc_max_bytes=0 leaves out AGENTS.md.",
+      "Codex does not report its requests to the model, only the tokens of each turn.",
+      "Each vendor's terms of use apply to its CLI."
+    ]
+  }
 }

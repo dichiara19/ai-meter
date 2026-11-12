@@ -3,5 +3,36 @@
   "name": "Claude Code",
   "programs": { "windows": ["claude"], "wsl": ["claude"] },
   "folders": [".claude"],
-  "package": "@anthropic-ai/claude-code"
+  "package": "@anthropic-ai/claude-code",
+  "plan": {
+    "service": "claude",
+    "models": ["sonnet", "opus", "fable", "haiku"],
+    "sign_in": { "arguments": ["auth", "status", "--json"], "json_field": "authMethod", "expect": "claude.ai" }
+  },
+  "dispatch": {
+    "places": {
+      "wsl": { "versions": ["2.x"] }
+    },
+    "environment_policy": "clean",
+    "arguments": {
+      "read_only": ["-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--safe-mode", "--restricted", "--strict-mcp-config", "--permission-prompts", "none", "--tools", "Read,Grep,Glob", "--model", "{model}"],
+      "modify": ["-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--safe-mode", "--restricted", "--strict-mcp-config", "--permission-prompts", "none", "--tools", "Read,Grep,Glob,Edit,Write,Bash", "--permission-mode", "acceptEdits", "--allowedTools", "Bash", "--model", "{model}"]
+    },
+    "output": {
+      "format": "jsonl (stream-json)",
+      "end": "the result event",
+      "outcome": "the result event: subtype success and is_error false; anything else failed",
+      "requests": "the number of assistant messages with a distinct message id",
+      "tokens": "usage of the result event (input, cache and output tokens); unknown when stopped",
+      "rate_limited": "a rate_limit_event whose status is rejected, or a result error about a usage limit",
+      "billing": "the system init event's apiKeySource must be none (a plan sign-in); a rate_limit_event with isUsingOverage true means extra usage is billed: stop",
+      "plan_windows": "rate_limit_event.rate_limit_info.unifiedWindows: five_hour and seven_day with utilization (0 to 1) and resetsAt",
+      "cost": "total_cost_usd of the result event is what the requests would cost on the API, not a charge to the plan"
+    },
+    "notes": [
+      "Runs on the Claude plan through Claude Code's own sign-in, never on an API key: start it from an empty environment and run the sign_in_check first.",
+      "--safe-mode leaves out the user's CLAUDE.md, skills, plugins, hooks and MCP servers; --restricted ignores the user's settings files and keeps file tools inside the working folder.",
+      "Each vendor's terms of use apply to its CLI."
+    ]
+  }
 }

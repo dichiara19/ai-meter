@@ -18,8 +18,11 @@ namespace AIMeter
     /// Selection is deterministic: the same snapshot, request, leases and known model sizes give the same order (see
     /// Ordered). Models that share a pool share its limits, so capacity is reported per pool and never added up across
     /// the pool's models.
+    ///
+    /// Capacity already paid for in a subscription plan (Claude, ChatGPT) is offered too, only when asked for and
+    /// allowed in Settings: see CandidatesPlans.cs and ADR 0003.
     /// </summary>
-    internal static class Candidates
+    internal static partial class Candidates
     {
         public const string FreeOnly = "free_only";
         public const string FreeOrUnconfirmed = "free_or_unconfirmed";
@@ -75,6 +78,7 @@ namespace AIMeter
                     result.Exclude(p.Id, m.Id, reason, reason == room.Blocking ? room.Until : null);
                 }
             }
+            SelectPlans(snap, runtimes, req, now, leases, result);
             result.Chosen = Ordered(result.Chosen, req, leases, now);
             result.BestEffort = Ordered(result.BestEffort, req, leases, now);
             return result;
@@ -113,8 +117,9 @@ namespace AIMeter
         public const long SmallReplyTokens = 16384;
 
         /// <summary>
-        /// The order of candidates (docs/MCP.md, "Order"), most suitable first. Every candidate's pool can start a task;
-        /// among them, by the first key that differs:
+        /// The order of candidates (docs/MCP.md, "Order"), most suitable first. Every candidate's pool can start a task.
+        /// Free candidates come before plan ones, except a plan whose room is about to be lost (PlanTier, ADR 0003);
+        /// plan candidates keep their plan's own model order. Then, by the first key that differs:
         /// 1. the user's preference (Settings.DelegationModels): preferred, then the others, then avoided;
         /// 2. room: pools with at least LowRoomShare left, or with unknown room, before pools with less;
         /// 3. the model's track record on this PC (LeaseBook.Record), highest score first; an untried model scores 0;
@@ -130,7 +135,8 @@ namespace AIMeter
         private static List<Candidate> Ordered(List<Candidate> candidates, Requirements req, LeaseBook leases, DateTime now)
         {
             foreach (var c in candidates) c.Rank = RankOf(c, req, leases, now);
-            return candidates.OrderBy(c => c.Rank.Preference == "preferred" ? 0 : c.Rank.Preference == "avoided" ? 2 : 1)
+            return candidates.OrderBy(c => PlanTier(c, now)).ThenBy(c => c.Plan == null ? 0 : c.Plan.ModelOrder)
+                .ThenBy(c => c.Rank.Preference == "preferred" ? 0 : c.Rank.Preference == "avoided" ? 2 : 1)
                 .ThenBy(c => c.Rank.LowRoom ? 1 : 0)
                 .ThenByDescending(c => c.Rank.Record.Score)
                 .ThenBy(c => c.Rank.SmallReply ? 1 : 0)
@@ -342,10 +348,13 @@ namespace AIMeter
         /// </summary>
         internal static string ProgramPath(RuntimeKind kind, string home, bool wsl, IList<string> dirs = null)
         {
-            var names = kind.ProgramsIn(wsl ? "wsl" : "windows");
+            string where = wsl ? "wsl" : "windows";
+            var names = kind.ProgramsIn(where);
             // On Windows a native program first, then the wrappers npm writes.
             var files = wsl ? names : names.SelectMany(n => new[] { ".exe", ".cmd", ".bat", ".ps1" }.Select(x => n + x)).ToArray();
-            foreach (var d in dirs ?? SearchDirs(home, wsl))
+            string[] own;
+            var ownDirs = kind.ProgramFolders.TryGetValue(where, out own) ? own.SelectMany(f => ExpandNewest(home, f)) : Enumerable.Empty<string>();
+            foreach (var d in (dirs ?? SearchDirs(home, wsl)).Concat(ownDirs))
                 foreach (var f in files)
                 {
                     try { if (File.Exists(Path.Combine(d, f))) return Path.Combine(d, f); }
@@ -385,6 +394,28 @@ namespace AIMeter
                 paths = name == "*" ? paths.SelectMany(p => Probe.SafeDirs(p).OrderByDescending(VersionKey, StringComparer.Ordinal)) : paths.Select(p => Path.Combine(p, name));
             }
             return paths;
+        }
+
+        /// <summary>
+        /// A home-relative pattern as paths, each "*" standing for every folder there, the most recently written first:
+        /// for folders named by a build hash rather than a version (RuntimeKind.ProgramFolders).
+        /// </summary>
+        internal static IEnumerable<string> ExpandNewest(string home, string pattern)
+        {
+            IEnumerable<string> paths = new[] { home };
+            foreach (var part in pattern.Split('\\'))
+            {
+                string name = part;
+                paths = name == "*" ? paths.SelectMany(p => Probe.SafeDirs(p).OrderByDescending(WrittenAt)) : paths.Select(p => Path.Combine(p, name));
+            }
+            return paths;
+        }
+
+        private static DateTime WrittenAt(string folder)
+        {
+            try { return Directory.GetLastWriteTimeUtc(folder); }
+            catch (IOException) { return DateTime.MinValue; }
+            catch (UnauthorizedAccessException) { return DateTime.MinValue; }
         }
 
         /// <summary>A folder name's numbers padded so that ordinal order is version order: v9.0.0 before v22.1.0.</summary>
@@ -518,6 +549,14 @@ namespace AIMeter
                     found.Add(Tuple.Create(kind, h, program));
                     scan.Found.Add(new RuntimePlace { Runtime = kind.Id, Where = where, Distro = h.Distro });
                 }
+            // A plan agent uses its own sign-in, not a key, so it does not depend on key discovery. Whether it is signed in
+            // to the plan is checked against the plan's readings (PlanRoom) and by the plugin before it starts the agent.
+            foreach (var f in found.Where(x => x.Item1.Plan != null))
+            {
+                var access = PlanAccess(f.Item1.Plan.Service, f.Item1.Id, f.Item2.Distro != null ? "wsl" : "windows", f.Item2.Distro);
+                Locate(access, f.Item1, f.Item2, f.Item3, dirs[f.Item2]);
+                scan.Access.Add(access);
+            }
             if (!findKeys) { scan.KeyDiscoveryOff = true; return scan; }
             foreach (var d in Definitions.All.Where(x => x.UsesKey))
                 foreach (var f in found)
@@ -531,22 +570,33 @@ namespace AIMeter
                     access.Provider = alias ?? ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id).First();
                     access.KeyFromProfile = fromProfile;
                     access.Distro = f.Item2.Distro;
-                    string package = PackageFolder(f.Item1, f.Item2.Home, inWsl, f.Item3);
-                    access.Version = PackageVersion(package);
-                    if (inWsl)
-                    {
-                        access.Program = LinuxPath(f.Item3, f.Item2.Home);
-                        // An agent npm installed is a Node script: its PATH needs a node, perhaps in a version manager's folder.
-                        access.NeedsNode = package != null;
-                        string node = NodeFolder(f.Item3, dirs[f.Item2]);
-                        access.NodeFolder = node == null ? null : LinuxPath(node, f.Item2.Home);
-                    }
-                    else access.Program = NativeProgram(f.Item1, f.Item3, package);
-                    access.ModelsFile = AgentModels.FileFor(f.Item1, f.Item2.Home, package, access.Provider, access.Version);
-                    access.ModelsFormat = f.Item1.Models == null ? null : f.Item1.Models.Format;
+                    Locate(access, f.Item1, f.Item2, f.Item3, dirs[f.Item2]);
                     scan.Access.Add(access);
                 }
             return scan;
+        }
+
+        /// <summary>
+        /// Fill in where an access's agent runs: its program as the plugin starts it, its version, the node it needs in
+        /// WSL, its Linux home there, and its own model list for the access's provider.
+        /// </summary>
+        private static void Locate(RuntimeAccess access, RuntimeKind kind, WslPlace home, string program, IEnumerable<string> dirs)
+        {
+            bool inWsl = home.Distro != null;
+            string package = PackageFolder(kind, home.Home, inWsl, program);
+            access.Version = PackageVersion(package);
+            if (inWsl)
+            {
+                access.Program = LinuxPath(program, home.Home);
+                access.Home = LinuxPath(home.Home, home.Home);
+                // An agent npm installed is a Node script: its PATH needs a node, perhaps in a version manager's folder.
+                access.NeedsNode = package != null;
+                string node = NodeFolder(program, dirs);
+                access.NodeFolder = node == null ? null : LinuxPath(node, home.Home);
+            }
+            else access.Program = NativeProgram(kind, program, package);
+            access.ModelsFile = AgentModels.FileFor(kind, home.Home, package, access.Provider, access.Version);
+            access.ModelsFormat = kind.Models == null ? null : kind.Models.Format;
         }
 
         /// <summary>The folder of the node an agent's program would run with: its own folder first, then the search folders.</summary>
@@ -609,6 +659,14 @@ namespace AIMeter
         public IDictionary<string, string> Preferences;
         /// <summary>Where the plugin that asks runs, "windows" or "wsl": for the same model, agents there come first. Null when not said.</summary>
         public string From;
+        /// <summary>Also accept capacity included in a subscription plan (ADR 0003). Off by default.</summary>
+        public bool Plan;
+        /// <summary>The service the coordinator itself runs on ("claude", "openai"…): its plan is never offered. Null when not said.</summary>
+        public string Coordinator;
+        /// <summary>The plans the user allowed in Settings (Settings.DelegationPlans), by service id; null or empty allows none.</summary>
+        public ICollection<string> PlansAllowed;
+        /// <summary>The share of each plan window the user keeps, "service|5h" or "service|7d" to a percentage (Settings.DelegationReserves).</summary>
+        public IDictionary<string, int> Reserves;
     }
 
     /// <summary>A runtime that can call a service with its own key; Credential is an opaque id, never the key or its file.</summary>
@@ -633,6 +691,10 @@ namespace AIMeter
         /// Windows through wsl.exe, which reads no profile, would not have it.
         /// </summary>
         public bool KeyFromProfile;
+        /// <summary>In WSL: the Linux home the agent's settings are in, for an agent started from an empty environment.</summary>
+        public string Home;
+        /// <summary>The agent draws on a subscription plan through its own sign-in, not on a key (ADR 0003).</summary>
+        public bool Plan;
     }
 
     /// <summary>An agent set up in one place: "windows", or "wsl" with its distribution.</summary>
@@ -684,6 +746,8 @@ namespace AIMeter
         public List<string> Unverified;
         /// <summary>Why the candidate stands where it is (Candidates.Ordered).</summary>
         public Rank Rank;
+        /// <summary>For a candidate on a subscription plan: its windows, reserve and model order; null for free models.</summary>
+        public PlanRoom Plan;
     }
 
     /// <summary>The values a candidate is ordered by (Candidates.Ordered), which list_candidates reports as its rank.</summary>

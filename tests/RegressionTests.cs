@@ -66,6 +66,7 @@ namespace AIMeter
             DelegationTests.Register(Test);
             WindowsInstallTests.Register(Test);
             AgentTests.Register(Test);
+            PlanTests.Register(Test);
             UpdateTests.Register(Test);
             ValueTests.Register(Test);
             LogoTests.Register(Test);

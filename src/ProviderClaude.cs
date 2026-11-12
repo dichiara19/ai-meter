@@ -441,7 +441,8 @@ namespace AIMeter
         private static Usage Parse(Dictionary<string, object> d)
         {
             if (d == null) return null;
-            var u = new Usage { Source = "live", At = DateTime.Now };
+            // The usage endpoint answers only a plan sign-in, and states extra usage together with the windows.
+            var u = new Usage { Source = "live", At = DateTime.Now, SignIn = "plan" };
             var limits = d.ContainsKey("limits") ? d["limits"] as object[] : null;
             if (limits != null)
             {

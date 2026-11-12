@@ -8,6 +8,7 @@
 
 import * as jobs from "./lib/jobs.mjs";
 import { place, withMeter } from "./lib/meter.mjs";
+import { coordinatorOf } from "./lib/plan.mjs";
 import * as report from "./lib/report.mjs";
 import { VERSION } from "./lib/version.mjs";
 
@@ -28,6 +29,11 @@ const freeTier = (verb) => ({
   type: "boolean",
   description: verb + " free-tier models (Cloudflare Workers AI): priced, but free within a daily allocation. The plugin stops the agent when its requests reach the budget AI Meter grants; one request can still cross it, and on a paid plan that request is billed. Only with the user's agreement. Default false.",
 });
+const plan = (verb) => ({
+  type: "boolean",
+  description: verb + " a coding agent on one of the user's subscription plans, never pay-as-you-go: Codex on the ChatGPT plan, Claude Code on the Claude plan, each with its own sign-in, only for plans the user allowed in AI Meter's Settings and never the plan this coordinator runs on. Free models come first unless a plan's room is about to be lost at a reset. Only with the user's agreement. Default false.",
+});
+const coordinator = text("The service this coordinator runs on (claude or openai), when it is not Claude Code or Codex on its own plan: its plan is never used. Known from the client by default.");
 const bestEffort = (verb) => ({
   type: "boolean",
   description: verb + " best-effort candidates: models whose service states no price or capabilities, filled in from an agent's own model list. They may fail, stop or meet unstated limits. Only with the user's agreement. Default false.",
@@ -37,7 +43,7 @@ const TOOLS = [
   {
     name: "delegate",
     description:
-      "Hand a self-contained task to a coding agent on a free model, chosen with AI Meter: the first candidate in AI Meter's order " +
+      "Hand a self-contained task to a coding agent on a free model (or, with allow_plan, on one of the user's subscription plans), chosen with AI Meter: the first candidate in AI Meter's order " +
       "whose agent can be started here and whose pool has room. Returns a job id at once; follow it with delegate_result. " +
       "The workspace must be in a Git repository. read_only (default) gives the agent reading tools only, on a copy of the " +
       "files Git tracks or would track, without .env and other files whose names suggest secrets. modify runs it in a new " +
@@ -56,6 +62,8 @@ const TOOLS = [
         distro: text("Only agents in this WSL distribution."),
         allow_best_effort: bestEffort("Also use, after every ordinary candidate,"),
         allow_free_tier: freeTier("Also use"),
+        allow_plan: plan("Also use"),
+        coordinator,
         timeout_seconds: integer(`Stop the agent after this long: default ${jobs.DEFAULT_TIMEOUT_SECONDS}, at most ${jobs.MAXIMUM_TIMEOUT_SECONDS}.`),
         wait_seconds: waitSeconds,
       },
@@ -64,7 +72,7 @@ const TOOLS = [
   },
   {
     name: "delegate_result",
-    description: "A delegated job's report: status and duration, the agent's answer, what the agent did (activity: its tool calls, files written, commands and their results, to check the answer against), requests and tokens, the change made by a modify task, and why candidates were skipped.",
+    description: "A delegated job's report: status and duration, the plan window a plan task drew on (plan, plan_after), the agent's answer, what the agent did (activity: its tool calls, files written, commands and their results, to check the answer against), requests and tokens, the change made by a modify task, and why candidates were skipped.",
     inputSchema: { type: "object", properties: { job_id: text("The job from delegate."), wait_seconds: waitSeconds }, required: ["job_id"] },
   },
   {
@@ -80,7 +88,7 @@ const TOOLS = [
   {
     name: "delegate_candidates",
     description: "Where a task could run now for free, from AI Meter: candidates in order of suitability (the user's preferred models, room, track record on this PC, size, context), each with its context, reply size and why it stands there; each pool's room, why other models are left out and which agents were found. Starts nothing.",
-    inputSchema: { type: "object", properties: { ...needs, include_best_effort: bestEffort("Also list"), include_free_tier: freeTier("Also list") } },
+    inputSchema: { type: "object", properties: { ...needs, include_best_effort: bestEffort("Also list"), include_free_tier: freeTier("Also list"), include_plan: plan("Also list"), coordinator } },
   },
 ];
 
@@ -99,7 +107,8 @@ async function call(name, args) {
       return report.full(await jobs.cancel(args.job_id), jobs.root());
     case "delegate_candidates": {
       const from = place();
-      return report.candidates(await withMeter((meter) => meter.call("list_candidates", { tools: true, ...(from ? { from } : {}), ...args })));
+      const own = args.coordinator || coordinatorOf(client);
+      return report.candidates(await withMeter((meter) => meter.call("list_candidates", { tools: true, ...(from ? { from } : {}), ...args, ...(own ? { coordinator: own } : {}) })));
     }
     default:
       throw new Error("Unknown tool: " + name);

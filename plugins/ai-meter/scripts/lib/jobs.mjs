@@ -32,6 +32,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canRead, readerFor, summarise } from "./agents.mjs";
 import { place, ToolError, withMeter } from "./meter.mjs";
+import { checkSignIn, cleanEnvironment, coordinatorOf } from "./plan.mjs";
 import { createSnapshot, createWorktree, describeChanges, removeSnapshot, repositoryOf } from "./workspace.mjs";
 
 const ENDED = new Set(["completed", "failed", "cancelled", "timed_out"]);
@@ -144,6 +145,10 @@ export function start(options) {
     wanted: pick(options, ["service", "model", "runtime", "where", "distro", "min_context", "cost_policy"]),
     allow_best_effort: options.allow_best_effort === true || options.allow_best_effort === "true",
     allow_free_tier: options.allow_free_tier === true || options.allow_free_tier === "true",
+    allow_plan: options.allow_plan === true || options.allow_plan === "true",
+    // The service the coordinator runs on: AI Meter never offers its own plan. Said by the coordinator, or known from
+    // the client that started the plugin (Claude Code, Codex).
+    coordinator: options.coordinator || coordinatorOf(options.client) || null,
     skipped: [],
   };
   save(job);
@@ -262,6 +267,8 @@ async function choose(job, signal) {
       ...pick(wanted, ["service", "min_context", "cost_policy"]),
       ...(job.allow_best_effort ? { include_best_effort: true } : {}),
       ...(job.allow_free_tier ? { include_free_tier: true } : {}),
+      ...(job.allow_plan ? { include_plan: true } : {}),
+      ...(job.coordinator ? { coordinator: job.coordinator } : {}),
     });
     const matches = (c) =>
       (!wanted.model || c.model === wanted.model) && (!wanted.runtime || c.runtime.name === wanted.runtime) && (!wanted.where || c.runtime.where === wanted.where) &&
@@ -285,9 +292,11 @@ async function choose(job, signal) {
         job.skipped.push({ ...which, reason: "it is in WSL distribution " + which.distro + ", and this plugin runs in " + job.from_distro + "; delegation does not cross distributions" });
         continue;
       }
+      const onPlan = c.billing === "included_in_plan";
+      const coordinator = onPlan && job.coordinator ? { coordinator: job.coordinator } : {};
       let plan;
       try {
-        plan = await meter.call("describe_dispatch", { ...which, mode: job.mode, workspace: folder, from: job.from });
+        plan = await meter.call("describe_dispatch", { ...which, mode: job.mode, workspace: folder, from: job.from, ...coordinator });
       } catch (error) {
         if (!(error instanceof ToolError)) throw error;
         job.skipped.push({ ...which, reason: error.message });
@@ -297,7 +306,20 @@ async function choose(job, signal) {
         job.skipped.push({ ...which, reason: plan.reason });
         continue;
       }
-      const lease = await meter.call("claim_capacity", { service: c.service, model: c.model, runtime: c.runtime.name, client: job.client, ttl_seconds: job.timeout_seconds + 120 });
+      // A plan agent must be signed in to its plan, checked with the environment it will start with (ADR 0003).
+      if (onPlan || plan.billing === "included_in_plan") {
+        if (plan.environment_policy !== "clean") {
+          job.skipped.push({ ...which, reason: "AI Meter did not describe a clean environment for this plan agent" });
+          continue;
+        }
+        const signedIn = await checkSignIn(plan.sign_in_check, cleanEnvironment(plan.environment));
+        if (signal.aborted) throw signal.reason;
+        if (!signedIn.ok) {
+          job.skipped.push({ ...which, reason: signedIn.reason });
+          continue;
+        }
+      }
+      const lease = await meter.call("claim_capacity", { service: c.service, model: c.model, runtime: c.runtime.name, client: job.client, ttl_seconds: job.timeout_seconds + 120, ...coordinator });
       if (lease.refused) {
         refusedPools.add(c.pool);
         job.skipped.push({ ...which, reason: "pool " + c.pool + " has no room: " + (lease.headroom?.blocking?.reason || "full") });
@@ -310,7 +332,8 @@ async function choose(job, signal) {
         continue;
       }
       if (lease.budget) job.budget = lease.budget;
-      job.candidate = { ...which, pool: c.pool, ...(c.bestEffort ? { best_effort: true } : {}) };
+      if (lease.plan) job.plan = lease.plan;   // The plan's windows when the lease was taken: where the task draws from.
+      job.candidate = { ...which, pool: c.pool, ...(c.bestEffort ? { best_effort: true } : {}), ...(onPlan ? { billing: "included_in_plan" } : {}) };
       if (c.estimated) job.estimated = c.estimated;
       job.lease_id = lease.lease_id;
       const warnings = [...new Set([...(c.warnings || []), ...(plan.warnings || [])])];
@@ -344,7 +367,8 @@ async function runAgent(job, chosen, task, signal) {
   reader.allowance = chosen.lease.budget?.max_cost || 0;
   const child = spawn(plan.program, plan.arguments, {
     cwd: plan.working_directory || undefined,
-    env: { ...process.env, ...plan.environment },
+    // A plan agent never gets this process's environment: no API key or base URL can make it bill an API (ADR 0003).
+    env: plan.environment_policy === "clean" ? cleanEnvironment(plan.environment) : { ...process.env, ...plan.environment },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     detached: OWN_PROCESS_GROUP,   // Its own process group, so that its children can be stopped with it.
@@ -455,6 +479,8 @@ async function runAgent(job, chosen, task, signal) {
   } catch (error) {
     job.release_error = error.message;
   }
+  // The room a plan task left: Claude Code reports it in its own events; otherwise AI Meter reads the plan again.
+  if (job.candidate?.billing === "included_in_plan") job.plan_after = summary.plan_after || (await planWindowsNow(job.candidate.service));
   job.status = summary.outcome;
   if (summary.outcome !== "completed") job.error = summary.error;
   job.ended_at = new Date().toISOString();
@@ -475,6 +501,22 @@ async function removeSnapshotPatiently(snapshot) {
     await sleep(2000);
   }
   return false;
+}
+
+/**
+ * A plan's 5-hour and weekly windows as AI Meter reads them now (get_limits with a fresh reading), or null when they
+ * cannot be read. They include anything else the account used meanwhile, on any app or PC.
+ */
+async function planWindowsNow(service) {
+  try {
+    const found = await withMeter((meter) => meter.call("get_limits", { service, refresh: true }));
+    const entry = (found.services || []).find((s) => s.service === service || s.id === service);
+    const windows = (entry?.limits || []).filter((l) => (l.kind === "5h" || l.kind === "7d") && typeof l.remaining_percent === "number");
+    if (!windows.length) return null;
+    return windows.map((l) => ({ window: l.kind, remaining_percent: l.remaining_percent, ...(l.resets_at ? { resets_at: l.resets_at } : {}), source: "ai_meter" }));
+  } catch {
+    return null;
+  }
 }
 
 function release(leaseId, outcome) {

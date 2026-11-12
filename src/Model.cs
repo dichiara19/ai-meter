@@ -115,6 +115,17 @@ namespace AIMeter
         public Func<string> CreditsNote;
         /// <summary>Whether paid usage beyond the plan's limits is enabled.</summary>
         public bool ExtraActive;
+        /// <summary>
+        /// Codex: whether purchased credits would be spent once the plan's limits are reached (a balance that is not
+        /// clearly zero, or unlimited credits). Claude's counterpart is ExtraActive.
+        /// </summary>
+        public bool CreditsAvailable;
+        /// <summary>
+        /// How the account behind these windows is signed in, from a reading that also states paid usage beyond the
+        /// plan: "plan" for Claude's usage endpoint, "chatgpt" or "apikey" for Codex's account/read; null when the
+        /// reading does not say (logs, the Claude app's cache). Plan delegation needs it (Candidates.PlanRoom).
+        /// </summary>
+        public string SignIn;
         /// <summary>Today's, this week's and this month's spending in the active language.</summary>
         public Func<string> SpendNote;
         /// <summary>Today's models used through this service, as reported by OpenCode, Pi, Kilo and Hermes.</summary>
@@ -122,7 +133,7 @@ namespace AIMeter
         /// <summary>Copy usage with additional windows, preserving the original provider response.</summary>
         public Usage With(IEnumerable<UsageWindow> extra)
         {
-            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
+            var u = new Usage { Source = Source, At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, CreditsAvailable = CreditsAvailable, SignIn = SignIn, SpendNote = SpendNote, TodayModels = TodayModels };
             u.Windows.AddRange(Windows);
             u.Windows.AddRange(extra);
             return u;
@@ -149,7 +160,7 @@ namespace AIMeter
         /// <summary>Return the same data marked as cached.</summary>
         public Usage AsCache()
         {
-            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, SpendNote = SpendNote, TodayModels = TodayModels };
+            return new Usage { Windows = Windows, Source = "cache", At = At, Identity = Identity, Breakdown = Breakdown, CreditsNote = CreditsNote, ExtraActive = ExtraActive, CreditsAvailable = CreditsAvailable, SignIn = SignIn, SpendNote = SpendNote, TodayModels = TodayModels };
         }
     }
 

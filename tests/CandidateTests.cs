@@ -193,7 +193,8 @@ namespace AIMeter
             Assert(fromProfileIn(pi, profile) && !fromProfileIn(pi, both), "A key from a WSL profile was not marked as such, or an agent's own key was.");
             Assert(Candidates.Kinds.Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi", "crush", "hermes", "antigravity", "claude", "codex", "cursor", "gemini" }),
                 "The known agents changed without updating this test.");
-            Assert(Candidates.Kinds.Where(k => k.Dispatch != null).Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi" }), "The agents delegation runs changed without updating this test.");
+            Assert(Candidates.Kinds.Where(k => k.Dispatch != null).Select(k => k.Id).SequenceEqual(new[] { "opencode", "pi", "claude", "codex" }), "The agents delegation runs changed without updating this test.");
+            Assert(Candidates.Kinds.Where(k => k.Plan != null).Select(k => k.Id + ":" + k.Plan.Service).SequenceEqual(new[] { "claude:claude", "codex:openai" }), "The plan agents changed without updating this test.");
 
             // A configuration folder can outlive its agent: the program must be installed too (checked without starting WSL).
             string root = Path.Combine(Settings.Folder, "distro-" + Guid.NewGuid().ToString("N"));

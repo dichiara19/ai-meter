@@ -54,7 +54,7 @@ jobs:
         run: ./tests/run.ps1
 
       - name: Coordinator plugin tests (fake AI Meter and fake agents)
-        run: node --test plugins/ai-meter/tests/delegate.test.mjs
+        run: node --test plugins/ai-meter/tests/delegate.test.mjs plugins/ai-meter/tests/plan.test.mjs
 
       - name: Build (C# compiler of .NET Framework 4.8, included in Windows)
         shell: powershell
@@ -201,7 +201,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Coordinator plugin tests (fake AI Meter and fake agents)
-        run: node --test plugins/ai-meter/tests/delegate.test.mjs
+        run: node --test plugins/ai-meter/tests/delegate.test.mjs plugins/ai-meter/tests/plan.test.mjs
 
   release:
     needs: build

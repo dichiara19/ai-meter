@@ -44,15 +44,37 @@ const tools = {
       notes: [],
       ...(args.distro ? { distro: args.distro } : {}),
       ...(scenario.warnings ? { warnings: scenario.warnings } : {}),
+      ...(PLAN_AGENTS.includes(args.runtime) ? planDispatch(args) : {}),
     };
   },
   claim_capacity: (args) => {
-    const pool = args.service + ":free";
-    if ((scenario.refuse || []).includes(pool)) return { refused: true, pool, headroom: { blocking: { reason: "leased" } } };
-    return { lease_id: "lease-" + ++leases, pool, expires_at: "2026-11-02T12:00:00+01:00", ...(scenario.budget ? { budget: scenario.budget } : {}) };
+    const onPlan = PLAN_AGENTS.includes(args.runtime);
+    const pool = args.service + (onPlan ? ":plan" : ":free");
+    if ((scenario.refuse || []).includes(pool)) return { refused: true, pool, headroom: { blocking: { reason: onPlan ? "plan_reserve" : "leased" } } };
+    return {
+      lease_id: "lease-" + ++leases, pool, expires_at: "2026-11-02T12:00:00+01:00", ...(scenario.budget ? { budget: scenario.budget } : {}),
+      ...(onPlan ? { billing: "included_in_plan", plan: { service: args.service, binding_window: "5h", windows: PLAN_WINDOWS, expiring: false } } : {}),
+    };
   },
   release_capacity: (args) => ({ lease_id: args.lease_id, released: true }),
+  get_limits: (args) => ({ services: [{ service: args.service, limits: [{ name: "Session 5 h", kind: "5h", remaining_percent: 55, resets_at: "2026-11-02T15:00:00+01:00" }] }] }),
 };
+
+// Plan agents (ADR 0003): AI Meter describes them with a clean environment, a sign-in check and the plan's billing.
+const PLAN_AGENTS = ["claude", "codex"];
+const PLAN_WINDOWS = [{ window: "5h", remaining_percent: 60, reserve_percent: 40, resets_at: "2026-11-02T15:00:00+01:00" }];
+
+function planDispatch(args) {
+  const signIn = (scenario.sign_in || {})[args.runtime] || "plan";
+  return {
+    environment_policy: "clean",
+    billing: "included_in_plan",
+    environment: { FAKE_AGENT_MODE: args.mode, ...(scenario.env_file ? { FAKE_ENV_FILE: scenario.env_file } : {}), ...(scenario.plan_environment || {}) },
+    sign_in_check: args.runtime === "claude"
+      ? { program: process.execPath, arguments: [agent, "signin", "claude", signIn], json_field: "authMethod", expect: "claude.ai" }
+      : { program: process.execPath, arguments: [agent, "signin", "codex", signIn], text: "Logged in using ChatGPT" },
+  };
+}
 
 const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
 
