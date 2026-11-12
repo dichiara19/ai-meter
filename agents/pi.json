@@ -2,6 +2,7 @@
   "id": "pi",
   "name": "Pi",
   "order": 20,
+  "request_tokens": 4600,
   "programs": { "windows": ["pi"], "wsl": ["pi"] },
   "folders": [".pi/agent"],
   "keys": [

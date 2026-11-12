@@ -13,7 +13,7 @@ namespace AIMeter
     {
         internal static void Register(Action<string, Action> test)
         {
-            test("Candidates keep confirmed free models a runtime can call, ordered by known room", OrderAndPolicy);
+            test("Candidates keep confirmed free models a runtime can call, ordered by suitability", OrderAndPolicy);
             test("Task needs, pools, backoff and used-up counters exclude candidates with their reasons", Exclusions);
             test("Every agent with its own key is a candidate, sharing the same pool", SeveralAgents);
             test("The same request gives the same order whatever the order of services", Deterministic);
@@ -23,6 +23,12 @@ namespace AIMeter
             test("Best-effort candidates come from an agent's own list, apart and only when asked for", BestEffortSelection);
             test("A free model the agent's own list prices is not offered through that agent", PricedByAgent);
             test("list_candidates reports best-effort candidates with what rests on the agent's word", BestEffortTool);
+            test("Preference, room and track record come before what the catalogue states", OrderByChoiceRoomAndRecord);
+            test("Reply size, weights (unknown first), context and measured speed break the remaining ties", OrderByFacts);
+            test("For the same model, the cheaper agent and then the caller's place come first", OrderByAgentAndPlace);
+            test("A model's track record counts released leases, is kept on disk and forgets after 30 days", ModelTrackRecord);
+            test("Model sizes come from Hugging Face's answer or the model id, and only a plain repository is looked up", ModelSizeSources);
+            test("list_candidates explains each candidate's rank and orders by the caller's place", RankTool);
         }
 
         private static void Assert(bool condition, string message)
@@ -80,10 +86,10 @@ namespace AIMeter
         {
             NetworkBackoff.Clear();
             var free = Candidates.Select(Fixture(10), Pi(), new Requirements(), DateTime.Now);
-            Assert(Order(free).SequenceEqual(new[] { "openrouter/a/small:free", "openrouter/z/large:free", "experientiallabs/luna" }),
-                "Known room must come first, then unknown room, then ids: " + string.Join(", ", Order(free)));
+            Assert(Order(free).SequenceEqual(new[] { "openrouter/z/large:free", "experientiallabs/luna", "openrouter/a/small:free" }),
+                "Untried models with room must follow reply size, then context: " + string.Join(", ", Order(free)));
             Assert(Math.Abs(free.Chosen[0].Room.Ratio.Value - 0.8) < 1e-9 && free.Chosen[0].Room.BindingMetric == "requests_per_day", "The binding limit or its share is wrong.");
-            Assert(!free.Chosen[2].Room.Ratio.HasValue && free.Chosen[2].Room.MaxNewJobs == 1, "Unknown room must allow exactly one task.");
+            Assert(!free.Chosen[1].Room.Ratio.HasValue && free.Chosen[1].Room.MaxNewJobs == 1, "Unknown room must allow exactly one task.");
             Assert(Excluded(free, "nvidia").Reason == "price_not_confirmed" && Excluded(free, "gemini").Reason == "price_not_confirmed", "free_only admitted an unconfirmed price.");
 
             var open = Candidates.Select(Fixture(10), Pi(), new Requirements { CostPolicy = Candidates.FreeOrUnconfirmed }, DateTime.Now);
@@ -127,7 +133,7 @@ namespace AIMeter
             scan.Access.Add(Candidates.Access("openrouter", "opencode", "windows", "key-openrouter-0123456789"));
             var s = Candidates.Select(Fixture(10), scan, new Requirements { Service = "openrouter" }, DateTime.Now);
             var places = s.Chosen.Select(c => c.Model.Id + "@" + c.Access.Runtime + "/" + c.Access.Where).ToList();
-            Assert(places.SequenceEqual(new[] { "a/small:free@opencode/windows", "a/small:free@pi/wsl", "z/large:free@opencode/windows", "z/large:free@pi/wsl" }),
+            Assert(places.SequenceEqual(new[] { "z/large:free@pi/wsl", "z/large:free@opencode/windows", "a/small:free@pi/wsl", "a/small:free@opencode/windows" }),
                 "Each agent with a key should be a candidate, in a fixed order: " + string.Join(", ", places));
             Assert(s.Chosen.Select(c => c.Pool).Distinct().Count() == 1 && s.Chosen.All(c => c.Room.MaxNewJobs == 1), "Two agents doubled the pool's room.");
         }
@@ -216,7 +222,7 @@ namespace AIMeter
             var reply = Json.Parse(server.Handle("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"list_candidates\",\"arguments\":{\"tools\":true}}}"));
             var content = Json.Obj(Json.Obj(reply, "result"), "structuredContent");
             var candidates = ((IList)content["candidates"]).OfType<Dictionary<string, object>>().ToList();
-            Assert(candidates.Count == 3 && Json.Str(candidates[0], "model") == "a/small:free", "Candidates are missing or out of order.");
+            Assert(candidates.Count == 3 && Json.Str(candidates[0], "model") == "z/large:free", "Candidates are missing or out of order.");
             var first = candidates[0];
             Assert(Json.Str(Json.Obj(first, "runtime"), "where") == "wsl" && Json.Str(first, "credential").StartsWith("cred_") && Json.Obj(first, "limits") != null, "A candidate lacks its runtime, credential or limits.");
             Assert(!JsonText.Indented(content).Contains("key-openrouter"), "A key reached the answer.");
@@ -311,7 +317,7 @@ namespace AIMeter
             var s = Candidates.Select(Fixture(10), scan, new Requirements(), DateTime.Now);
             Assert(!s.Chosen.Any(c => c.Provider.Id == "experientiallabs"), "A model the agent prices was offered through it.");
             Assert(Excluded(s, "experientiallabs").Reason == "agent_lists_price", "The exclusion does not say the agent prices the model.");
-            Assert(Order(s).SequenceEqual(new[] { "openrouter/a/small:free", "openrouter/z/large:free" }), "Other candidates changed: " + string.Join(", ", Order(s)));
+            Assert(Order(s).SequenceEqual(new[] { "openrouter/z/large:free", "openrouter/a/small:free" }), "Other candidates changed: " + string.Join(", ", Order(s)));
 
             // With a second agent that does not price it, the model is still offered, through that agent only.
             scan.Access.Add(Candidates.Access("experientiallabs", "opencode", "windows", "key-experientiallabs-0123456789"));
@@ -368,6 +374,189 @@ namespace AIMeter
             var pools = ((IList)asked["pools"]).OfType<Dictionary<string, object>>().ToList();
             Assert(pools.Any(p => Json.Str(p, "pool") == "nvidia:account"), "A best-effort candidate's pool is missing.");
             Assert(!JsonText.Indented(asked).Contains("key-nvidia"), "A key reached the answer.");
+        }
+
+        /// <summary>A lease for a model, claimed at start and released with its outcome at end.</summary>
+        private static void Ran(LeaseBook book, string service, string model, string outcome, DateTime start, DateTime end, long? outputTokens = null, int rateLimited = 0)
+        {
+            var lease = book.Claim(service + ":pool", service, model, "pi", "test", 7200, 10, start);
+            book.Release(lease.Id, new LeaseBook.Outcome { Result = outcome, OutputTokens = outputTokens, RateLimited = rateLimited }, end);
+        }
+
+        private static void OrderByChoiceRoomAndRecord()
+        {
+            NetworkBackoff.Clear();
+            ModelSizes.Reset();
+            var now = DateTime.Now;
+
+            // Room: a pool below a fifth of its tightest limit goes after pools with more room or unknown room.
+            var low = Order(Candidates.Select(Fixture(45), Pi(), new Requirements(), now));
+            Assert(low.SequenceEqual(new[] { "experientiallabs/luna", "openrouter/z/large:free", "openrouter/a/small:free" }), "Low room did not come last: " + string.Join(", ", low));
+
+            // The user's preference comes before room and everything else; an avoided model stays a candidate, last.
+            var choices = new Dictionary<string, string>
+            {
+                { Candidates.PreferenceKey("openrouter", "a/small:free"), Candidates.Preferred }, { Candidates.PreferenceKey("experientiallabs", "luna"), Candidates.Avoided },
+                { Candidates.PreferenceKey("openrouter", "z/large:free"), "something else" },
+            };
+            var preferred = Order(Candidates.Select(Fixture(45), Pi(), new Requirements { Preferences = choices }, now));
+            Assert(preferred.SequenceEqual(new[] { "openrouter/a/small:free", "openrouter/z/large:free", "experientiallabs/luna" }), "Preferences were not followed: " + string.Join(", ", preferred));
+
+            // Track record: completed counts for a model, failures and rate limits against it; cancelled leases do not count.
+            var book = new LeaseBook(null);
+            Ran(book, "experientiallabs", "luna", "completed", now.AddHours(-2), now.AddHours(-1.9));
+            Ran(book, "experientiallabs", "luna", "cancelled", now.AddHours(-1.5), now.AddHours(-1.4));
+            Ran(book, "openrouter", "z/large:free", "completed", now.AddHours(-1), now.AddHours(-0.9), 1000, 1);
+            Ran(book, "openrouter", "a/small:free", "failed", now.AddHours(-1), now.AddHours(-0.9));
+            var record = Candidates.Select(Fixture(10), Pi(), new Requirements(), now, book);
+            Assert(Order(record).SequenceEqual(new[] { "experientiallabs/luna", "openrouter/z/large:free", "openrouter/a/small:free" }), "The track record was not followed: " + string.Join(", ", Order(record)));
+            var luna = record.Chosen[0].Rank.Record;
+            Assert(luna.Completed == 1 && luna.Failed == 0 && luna.Score == 1, "A cancelled lease counted in the track record.");
+            Assert(record.Chosen[1].Rank.Record.Score == 0 && record.Chosen[1].Rank.Record.RateLimited == 1, "A completed task that met a rate limit should score 0.");
+
+            // Room still comes before the track record.
+            var lowRecord = Order(Candidates.Select(Fixture(45), Pi(), new Requirements(), now, book));
+            Assert(lowRecord.First() == "experientiallabs/luna" && lowRecord.Last() == "openrouter/a/small:free", "The track record outweighed room: " + string.Join(", ", lowRecord));
+        }
+
+        /// <summary>One pool of untried models with room, differing only in what the catalogue states.</summary>
+        private static Snapshot Facts(params FreeModel[] models)
+        {
+            var snap = new Snapshot();
+            var router = new Catalogue { ReadAt = DateTime.Now, Pool = "openrouter:free", Models = models.ToList() };
+            router.Rates.Add(new RateLimit { Metric = "requests_per_day", Limit = 50, Used = 0, Remaining = 50, Scope = "account", Source = "provider_reported" });
+            snap.Providers.Add(new ProviderState { Id = "openrouter", Name = "OpenRouter", Catalogue = router });
+            return snap;
+        }
+
+        private static void OrderByFacts()
+        {
+            NetworkBackoff.Clear();
+            ModelSizes.Reset();
+            ModelSizes.Remember("Big/Repo", 400000000000, DateTime.UtcNow);
+            ModelSizes.Remember("Gated/Repo", null, DateTime.UtcNow);
+            var hf = Model("q/from-hub:free", 131072, 32768, true, FreeStatus.ZeroPrice);
+            hf.HuggingFaceId = "big/repo";
+            var gated = Model("g/closed:free", 131072, 32768, true, FreeStatus.ZeroPrice);
+            gated.HuggingFaceId = "Gated/Repo";
+            var snap = Facts(
+                Model("t/tiny-1.7b:free", 262144, 8192, true, FreeStatus.ZeroPrice),
+                Model("m/mini-8b:free", 1000000, 32768, true, FreeStatus.ZeroPrice),
+                Model("c/coder-70b:free", 131072, 32768, true, FreeStatus.ZeroPrice),
+                hf, gated,
+                Model("w/wide:free", 1000000, 16384, true, FreeStatus.ZeroPrice));
+            var order = Order(Candidates.Select(snap, Pi(), new Requirements(), DateTime.Now));
+            var expected = new[] { "w/wide:free", "g/closed:free", "q/from-hub:free", "c/coder-70b:free", "m/mini-8b:free", "t/tiny-1.7b:free" }.Select(m => "openrouter/" + m);
+            Assert(order.SequenceEqual(expected), "Reply size, weights or context were not followed: " + string.Join(", ", order));
+
+            var chosen = Candidates.Select(snap, Pi(), new Requirements(), DateTime.Now).Chosen;
+            var fromHub = chosen.Single(c => c.Model.Id == "q/from-hub:free").Rank.Size;
+            Assert(fromHub.Parameters == 400000000000 && fromHub.Source == "huggingface", "Hugging Face's number was not used.");
+            Assert(chosen.Single(c => c.Model.Id == "c/coder-70b:free").Rank.Size.Source == "model_id", "The id's size was not used.");
+            Assert(chosen.Single(c => c.Model.Id == "t/tiny-1.7b:free").Rank.SmallReply, "An 8k reply was not marked small.");
+
+            // Measured speed breaks a tie between two models the catalogue cannot tell apart, after an equal record.
+            var now = DateTime.Now;
+            var book = new LeaseBook(null);
+            Ran(book, "openrouter", "a/slow-7b:free", "completed", now.AddMinutes(-30), now.AddMinutes(-30).AddSeconds(100), 1000);
+            Ran(book, "openrouter", "b/fast-7b:free", "completed", now.AddMinutes(-20), now.AddMinutes(-20).AddSeconds(10), 1000);
+            var twins = Facts(Model("a/slow-7b:free", 131072, 32768, true, FreeStatus.ZeroPrice), Model("b/fast-7b:free", 131072, 32768, true, FreeStatus.ZeroPrice));
+            var speed = Candidates.Select(twins, Pi(), new Requirements(), now, book).Chosen;
+            Assert(speed[0].Model.Id == "b/fast-7b:free" && speed[0].Rank.Record.TokensPerSecond == 100 && speed[1].Rank.Record.TokensPerSecond == 10,
+                "Measured speed did not break the tie: " + string.Join(", ", speed.Select(c => c.Model.Id + "=" + c.Rank.Record.TokensPerSecond)));
+            ModelSizes.Reset();
+        }
+
+        private static void OrderByAgentAndPlace()
+        {
+            NetworkBackoff.Clear();
+            var scan = new RuntimeScan();
+            scan.Found.Add(new RuntimePlace { Runtime = "pi", Where = "wsl" });
+            scan.Found.Add(new RuntimePlace { Runtime = "pi", Where = "windows" });
+            scan.Found.Add(new RuntimePlace { Runtime = "opencode", Where = "wsl" });
+            scan.Access.Add(Candidates.Access("openrouter", "opencode", "wsl", "key-openrouter-0123456789"));
+            scan.Access.Add(Candidates.Access("openrouter", "pi", "wsl", "key-openrouter-0123456789"));
+            scan.Access.Add(Candidates.Access("openrouter", "pi", "windows", "key-openrouter-0123456789"));
+            Func<string, List<string>> agents = from => Candidates.Select(Fixture(10), scan, new Requirements { Service = "openrouter", From = from }, DateTime.Now)
+                .Chosen.Where(c => c.Model.Id == "z/large:free").Select(c => c.Access.Runtime + "/" + c.Access.Where).ToList();
+            Assert(agents("windows").SequenceEqual(new[] { "pi/windows", "pi/wsl", "opencode/wsl" }), "The caller's place on Windows was not first: " + string.Join(", ", agents("windows")));
+            Assert(agents("wsl").SequenceEqual(new[] { "pi/wsl", "pi/windows", "opencode/wsl" }), "The caller's place in WSL was not first: " + string.Join(", ", agents("wsl")));
+            Assert(agents(null).SequenceEqual(new[] { "pi/windows", "pi/wsl", "opencode/wsl" }), "Without a place the order is not by place id: " + string.Join(", ", agents(null)));
+            Assert(Candidates.Kinds.Single(k => k.Id == "pi").RequestTokens < Candidates.Kinds.Single(k => k.Id == "opencode").RequestTokens, "The agents' request sizes are missing.");
+        }
+
+        private static void ModelTrackRecord()
+        {
+            string path = Path.Combine(Settings.Folder, "leases-" + Guid.NewGuid().ToString("N") + ".json");
+            var now = DateTime.Now;
+            var book = new LeaseBook(path);
+            Ran(book, "openrouter", "m", "completed", now.AddDays(-40), now.AddDays(-40).AddMinutes(1), 600);
+            Ran(book, "openrouter", "m", "completed", now.AddMinutes(-10), now.AddMinutes(-9), 600);
+            Ran(book, "openrouter", "m", "timed_out", now.AddMinutes(-8), now.AddMinutes(-7), 600, 2);
+            Ran(book, "openrouter", "other", "failed", now.AddMinutes(-8), now.AddMinutes(-7));
+            var record = new LeaseBook(path).Record("openrouter", "m", now);
+            Assert(record.Completed == 1 && record.Failed == 1 && record.RateLimited == 1 && record.Score == -1 && record.Days == 30,
+                "The model's counters were not kept, or kept past 30 days: " + record.Completed + "/" + record.Failed + "/" + record.RateLimited);
+            Assert(record.TokensPerSecond == 10, "Speed should come only from completed leases: " + record.TokensPerSecond);
+            Assert(!new LeaseBook(path).Record("nvidia", "m", now).Tried, "A model's record leaked to another service.");
+
+            // A cancelled lease adds nothing but the rate limit it met, which still lowers the model's score.
+            var cancelled = new LeaseBook(null);
+            Ran(cancelled, "openrouter", "m", "completed", now.AddMinutes(-10), now.AddMinutes(-9), 600);
+            Ran(cancelled, "openrouter", "m", "cancelled", now.AddMinutes(-8), now.AddMinutes(-7), 600);
+            Assert(cancelled.Record("openrouter", "m", now).Score == 1, "A cancelled lease without a rate limit changed the score.");
+            Ran(cancelled, "openrouter", "m", "cancelled", now.AddMinutes(-6), now.AddMinutes(-5), 600, 3);
+            var limited = cancelled.Record("openrouter", "m", now);
+            Assert(limited.RateLimited == 1 && limited.Completed == 1 && limited.Failed == 0 && limited.Score == 0 && limited.TokensPerSecond == 10,
+                "A rate limit on a cancelled lease was not counted once, or the cancelled lease counted otherwise.");
+        }
+
+        private static void ModelSizeSources()
+        {
+            Func<string, long?> id = ModelSizes.FromId;
+            Assert(id("google/gemma-4-31b-it:free") == 31000000000 && id("liquid/lfm-3-1.7b:free") == 1700000000, "A plain size in an id was not read.");
+            Assert(id("nvidia/nemotron-3-ultra-550b-a55b:free") == 550000000000 && id("google/gemma-4-26b-a4b-it") == 26000000000, "The total of a mixture of experts was not the first size.");
+            Assert(id("mistralai/mixtral-8x7b-instruct") == 56000000000 && id("moonshot/kimi-1t") == 1000000000000, "Experts × size or trillions were not read.");
+            Assert(id("liquid/lfm-2.5-2.6b") == 2600000000 && id("google/gemma-3n-e4b-it") == null && id("openai/gpt-6-luna:free") == null && id("a/v2b") == null,
+                "A version or an effective size was read as the total.");
+            Assert(ModelSizes.ParseTotal("{\"id\":\"x/y\",\"safetensors\":{\"parameters\":{\"BF16\":31273088876},\"total\":31273088876}}") == 31273088876, "safetensors.total was not read.");
+            Assert(ModelSizes.ParseTotal("{\"id\":\"x/y\"}") == null && ModelSizes.ParseTotal("not json") == null, "An answer without a total gave a number.");
+            Assert(ModelSizes.Format(560524578816) == "561B" && ModelSizes.Format(1728801536) == "1.7B" && ModelSizes.Format(1200000000000) == "1.2T", "Sizes are formatted wrongly.");
+
+            // Only "owner/name" ids are sent: anything else in a model list is never put in a URL.
+            ModelSizes.Reset();
+            ModelSizes.Remember("x/known", 1, DateTime.UtcNow);
+            var models = new[] { "x/known", "x/new", "../etc", "x/y?z=1", "a/b/c", "X/NEW" }.Select(h => new FreeModel { Id = h, HuggingFaceId = h }).ToList();
+            var asked = ModelSizes.Wanted(models, DateTime.UtcNow);
+            Assert(asked.SequenceEqual(new[] { "x/new" }), "Repositories to look up are wrong: " + string.Join(", ", asked));
+            ModelSizes.Remember("x/none", null, DateTime.UtcNow.AddDays(-8));
+            asked = ModelSizes.Wanted(new List<FreeModel> { new FreeModel { Id = "n", HuggingFaceId = "x/none" } }, DateTime.UtcNow);
+            Assert(asked.Count == 1, "A repository that gave nothing a week ago was not asked again.");
+            ModelSizes.Reset();
+            Assert(ModelSizes.Of(new FreeModel { Id = "q", HuggingFaceId = "x/known" }).Parameters == 1, "A remembered size was not kept on disk.");
+            ModelSizes.Reset();
+        }
+
+        private static void RankTool()
+        {
+            NetworkBackoff.Clear();
+            ModelSizes.Reset();
+            var snap = Fixture(10);
+            var server = new McpServer(() => snap, () => false, null, null, Pi);
+            Func<string, Dictionary<string, object>> call = args => Json.Obj(Json.Obj(Json.Parse(server.Handle(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"list_candidates\",\"arguments\":" + args + "}}")), "result"), "structuredContent");
+            var candidates = ((IList)call("{\"from\":\"windows\"}")["candidates"]).OfType<Dictionary<string, object>>().ToList();
+            var rank = Json.Obj(candidates[0], "rank");
+            Assert(rank != null && Json.Str(rank, "preference") == "neutral" && Json.Str(rank, "room") == "enough" && rank.ContainsKey("parameters") && rank["parameters"] == null,
+                "The rank lacks its values.");
+            Assert(Json.Num(Json.Obj(rank, "track_record"), "score") == 0 && Json.Num(rank, "request_tokens") == 4600 && rank["same_place"] as bool? == false, "The rank's record, agent or place is wrong.");
+            string why = Json.Str(rank, "why");
+            Assert(why.StartsWith("Not tried here yet") && why.Contains("size unknown") && why.Contains("262,144 context") && why.Contains("pi sends about 4,600 tokens per request") && why.EndsWith("."),
+                "The rank's sentence is wrong: " + why);
+            var small = Json.Str(Json.Obj(candidates[2], "rank"), "why");
+            Assert(small.Contains("replies capped at 8,192 tokens"), "A small reply was not explained: " + small);
+            var none = ((IList)call("{\"from\":\"mars\"}")["candidates"]).OfType<Dictionary<string, object>>().First();
+            Assert(!Json.Obj(none, "rank").ContainsKey("same_place"), "An unknown place was taken as the caller's.");
         }
     }
 }

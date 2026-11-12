@@ -257,6 +257,8 @@ async function choose(job, signal) {
   return withMeter(async (meter) => {
     const found = await meter.call("list_candidates", {
       tools: true,
+      // For the same model, AI Meter puts the agent in this place first: it starts without the wsl.exe hop.
+      from: job.from,
       ...pick(wanted, ["service", "min_context", "cost_policy"]),
       ...(job.allow_best_effort ? { include_best_effort: true } : {}),
       ...(job.allow_free_tier ? { include_free_tier: true } : {}),

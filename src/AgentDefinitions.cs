@@ -19,6 +19,11 @@ namespace AIMeter
         public string Id, Name;
         /// <summary>Position in key discovery and in lists: lower first, then by id.</summary>
         public int Order = 1000;
+        /// <summary>
+        /// About how many tokens the agent sends with every request on top of the task (its system prompt and tools), as
+        /// started for delegation; null when not stated. Among candidates for the same model, the cheaper agent comes first.
+        /// </summary>
+        public int? RequestTokens;
         /// <summary>Settings folders relative to a home, with Windows separators; any one shows the agent is set up.</summary>
         public string[] Folders = new string[0];
         /// <summary>Program names per place ("windows" or "wsl"), without an extension.</summary>
@@ -55,6 +60,8 @@ namespace AIMeter
             if (d == null || string.IsNullOrEmpty(id) || !Regex.IsMatch(id, "^[a-z0-9][a-z0-9-]{1,31}$")) return null;
             var kind = new RuntimeKind { Id = id, Name = Json.Str(d, "name") ?? id, Package = Json.Str(d, "package"), Origin = origin };
             kind.Order = (int)(Json.Num(d, "order") ?? kind.Order);
+            double? requestTokens = Json.Num(d, "request_tokens");
+            if (requestTokens > 0) kind.RequestTokens = (int)requestTokens.Value;
             kind.Folders = ServiceDefinition.Strings(d, "folders").Select(Local).ToArray();
             var programs = Json.Obj(d, "programs");
             foreach (var where in new[] { "windows", "wsl" })

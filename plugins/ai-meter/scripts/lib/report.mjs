@@ -45,9 +45,11 @@ export function full(job, jobsFolder) {
 }
 
 /**
- * list_candidates, without the per-model limit details the coordinator does not need to choose. runtimes keeps
- * runtimes.unsupported (from AI Meter's agent table), with a sentence to show for each agent that cannot be used.
- * A warning that every candidate of a pool carries is given once, on that pool in pools, instead of on each candidate.
+ * list_candidates, without the per-model limit details the coordinator does not need to choose. Each candidate keeps
+ * its context window and reply size, so the coordinator can pin a model by hand, and AI Meter's reason for its place
+ * in the order (why). runtimes keeps runtimes.unsupported (from AI Meter's agent table), with a sentence to show for
+ * each agent that cannot be used. A warning that every candidate of a pool carries is given once, on that pool in
+ * pools, instead of on each candidate.
  */
 export function candidates(found) {
   const all = [...found.candidates, ...(found.best_effort || [])];
@@ -65,6 +67,9 @@ export function candidates(found) {
       where: c.runtime.where,
       ...(c.runtime.distro ? { distro: c.runtime.distro } : {}),
       pool: c.pool,
+      context_tokens: c.limits?.per_request?.context_tokens?.value ?? c.estimated?.context_tokens ?? null,
+      max_output_tokens: c.limits?.per_request?.max_output_tokens?.value ?? c.estimated?.max_output_tokens ?? null,
+      ...(c.rank?.why ? { why: c.rank.why } : {}),
       ...(warnings.length ? { warnings } : {}),
       ...(c.estimated ? { estimated: c.estimated } : {}),
     };

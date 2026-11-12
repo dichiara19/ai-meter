@@ -16,7 +16,8 @@ namespace AIMeter
     ///
     /// The book keeps only pools, models, agents, client labels, times and outcome counters (the cost among them, which
     /// a free tier's budget counts before the service's own count catches up): never task text, code,
-    /// logs, paths or keys. It is saved as a small JSON file next to the settings; outcome counters are kept for 30 days.
+    /// logs, paths or keys. It is saved as a small JSON file next to the settings; outcome counters are kept for 30 days,
+    /// per pool and per model. A model's counters are its track record on this PC, which orders candidates (Record).
     /// All members are thread-safe: MCP clients call them from their own threads.
     ///
     /// Times are kept and compared in UTC, so a daylight-saving change cannot stretch or cut a lease. Callers pass "now"
@@ -27,12 +28,15 @@ namespace AIMeter
         public const int DefaultTtlSeconds = 1800, MaxTtlSeconds = 7200;
         /// <summary>Pool backoff after an agent's rate limit without Retry-After: a minute, the window of per-minute limits.</summary>
         public static readonly TimeSpan DefaultRateLimitBackoff = TimeSpan.FromSeconds(60);
-        private const int SchemaVersion = 1, KeepDays = 30;
+        private const int SchemaVersion = 1;
+        /// <summary>Days of outcome counters kept, per pool and per model.</summary>
+        internal const int KeepDays = 30;
 
         private readonly string path;   // Null keeps the book in memory only, as in tests.
         private readonly object sync = new object();
         private readonly List<Lease> leases = new List<Lease>();
         private readonly List<Observation> observed = new List<Observation>();
+        private readonly List<ModelDay> modelDays = new List<ModelDay>();
         private readonly Dictionary<string, DateTime> backoff = new Dictionary<string, DateTime>();   // Pool to UTC time.
 
         public LeaseBook(string path)
@@ -92,6 +96,7 @@ namespace AIMeter
                 if (lease == null) return null;
                 leases.Remove(lease);
                 Record(lease.Pool, outcome, now);
+                RecordModel(lease, outcome, now);
                 if (outcome.RateLimited > 0)
                 {
                     var until = now + (outcome.RetryAfter ?? DefaultRateLimitBackoff);
@@ -142,6 +147,30 @@ namespace AIMeter
             }
         }
 
+        /// <summary>
+        /// A model's track record on this PC over the last KeepDays UTC days, from released leases: how many completed,
+        /// failed (failed or timed_out) or met a rate limit, and how fast completed tasks wrote their output.
+        /// A cancelled lease counts only its rate limit, if it met one; an expired lease, never released, is not counted.
+        /// </summary>
+        public ModelRecord Record(string service, string model, DateTime now)
+        {
+            var since = now.ToUniversalTime().Date.AddDays(-KeepDays);
+            var record = new ModelRecord { Days = KeepDays };
+            long tokens = 0;
+            double seconds = 0;
+            lock (sync)
+                foreach (var d in modelDays.Where(x => x.Service == service && x.Model == model && x.Day >= since))
+                {
+                    record.Completed += d.Completed;
+                    record.Failed += d.Failed;
+                    record.RateLimited += d.RateLimited;
+                    tokens += d.OutputTokens;
+                    seconds += d.Seconds;
+                }
+            if (tokens > 0 && seconds > 0) record.TokensPerSecond = Math.Round(tokens / seconds, 1);
+            return record;
+        }
+
         private static int Ttl(int seconds)
         {
             if (seconds <= 0) seconds = DefaultTtlSeconds;
@@ -183,6 +212,33 @@ namespace AIMeter
             observed.RemoveAll(x => x.Day < day.AddDays(-KeepDays));
         }
 
+        /// <summary>
+        /// Count a released lease in its model's row for the UTC day of now (UTC). A rate limit counts once per lease,
+        /// whatever its outcome, a cancelled one included: the service limited the model all the same. Completion and
+        /// failure count only for those outcomes, so a cancelled lease without a rate limit adds nothing. Output speed
+        /// comes from completed leases that reported their output tokens, over the lease's whole time, tools included.
+        /// Called with the lock held.
+        /// </summary>
+        private void RecordModel(Lease lease, Outcome outcome, DateTime now)
+        {
+            bool completed = outcome.Result == "completed", failed = outcome.Result == "failed" || outcome.Result == "timed_out";
+            bool limited = outcome.RateLimited > 0;
+            if (!completed && !failed && !limited) return;
+            var day = now.Date;
+            var d = modelDays.FirstOrDefault(x => x.Service == lease.Service && x.Model == lease.Model && x.Day == day);
+            if (d == null) modelDays.Add(d = new ModelDay { Service = lease.Service, Model = lease.Model, Day = day });
+            if (completed) d.Completed++;
+            else if (failed) d.Failed++;
+            if (limited) d.RateLimited++;
+            double seconds = (now - lease.ClaimedAtUtc).TotalSeconds;
+            if (completed && outcome.OutputTokens > 0 && seconds > 0)
+            {
+                d.OutputTokens += outcome.OutputTokens.Value;
+                d.Seconds += seconds;
+            }
+            modelDays.RemoveAll(x => x.Day < day.AddDays(-KeepDays));
+        }
+
         // ------------------------------------------------------------ storage
 
         private void Load()
@@ -209,6 +265,17 @@ namespace AIMeter
                         RateLimited = (int)(Json.Num(o, "rate_limited") ?? 0), LastRateLimited = Utc(Json.Str(o, "last_rate_limited")),
                         Cost = Json.Num(o, "cost") ?? 0,
                     });
+                foreach (var m in Json.Items(doc, "models"))
+                {
+                    var day = Json.Day(Json.Str(m, "day"));
+                    if (Json.Str(m, "service") == null || Json.Str(m, "model") == null || !day.HasValue) continue;
+                    modelDays.Add(new ModelDay
+                    {
+                        Service = Json.Str(m, "service"), Model = Json.Str(m, "model"), Day = day.Value,
+                        Completed = (int)(Json.Num(m, "completed") ?? 0), Failed = (int)(Json.Num(m, "failed") ?? 0), RateLimited = (int)(Json.Num(m, "rate_limited") ?? 0),
+                        OutputTokens = (long)(Json.Num(m, "output_tokens") ?? 0), Seconds = Json.Num(m, "seconds") ?? 0,
+                    });
+                }
                 foreach (var b in Json.Items(doc, "backoff"))
                 {
                     var until = Utc(Json.Str(b, "until"));
@@ -249,6 +316,12 @@ namespace AIMeter
                         { "failed", o.Failed }, { "requests", o.Requests }, { "requests_unknown", o.RequestsUnknown }, { "input_tokens", o.InputTokens },
                         { "output_tokens", o.OutputTokens }, { "rate_limited", o.RateLimited }, { "cost", o.Cost },
                         { "last_rate_limited", o.LastRateLimited.HasValue ? Iso(o.LastRateLimited.Value) : null },
+                    }).ToList() },
+                { "models", modelDays.Select(m => (object)new Dictionary<string, object>
+                    {
+                        { "service", m.Service }, { "model", m.Model }, { "day", m.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
+                        { "completed", m.Completed }, { "failed", m.Failed }, { "rate_limited", m.RateLimited },
+                        { "output_tokens", m.OutputTokens }, { "seconds", Math.Round(m.Seconds, 1) },
                     }).ToList() },
                 { "backoff", backoff.Where(kv => kv.Value > DateTime.UtcNow).Select(kv => (object)new Dictionary<string, object> { { "pool", kv.Key }, { "until", Iso(kv.Value) } }).ToList() },
             };
@@ -292,6 +365,26 @@ namespace AIMeter
             public DateTime? LastRateLimited;   // UTC in the book; local in the copies Today returns.
 
             public Observation Copy() { return (Observation)MemberwiseClone(); }
+        }
+
+        /// <summary>One model's counters for one UTC day, from released leases (RecordModel).</summary>
+        private sealed class ModelDay
+        {
+            public string Service, Model;
+            public DateTime Day;
+            public int Completed, Failed, RateLimited;
+            public long OutputTokens;
+            public double Seconds;   // Time of the completed leases that reported their output tokens.
+        }
+
+        /// <summary>A model's track record over Days days (Record). Score is completed − failed − rate limited.</summary>
+        internal sealed class ModelRecord
+        {
+            public int Completed, Failed, RateLimited, Days;
+            /// <summary>Output tokens per second of completed tasks, tools included; null when none reported its tokens.</summary>
+            public double? TokensPerSecond;
+            public int Score { get { return Completed - Failed - RateLimited; } }
+            public bool Tried { get { return Completed + Failed > 0; } }
         }
     }
 }

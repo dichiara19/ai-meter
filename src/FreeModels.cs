@@ -16,6 +16,7 @@ namespace AIMeter
         public bool Tools, Reasoning;
         public bool FeaturesUnknown;   // The list does not say whether the model supports tools or reasoning.
         public DateTime? Expires;   // Last day the model is listed, when the service announces it.
+        public string HuggingFaceId;   // The model's Hugging Face repository ("owner/name"), when the list names it.
         public FreeStatus Free;
     }
 
@@ -276,6 +277,8 @@ namespace AIMeter
                 f.Tools = parameters != null && parameters.Contains("tools");
                 f.Reasoning = parameters != null && parameters.Contains("reasoning");
                 f.MaxOutput = (long)(Json.Num(Json.Obj(m, "top_provider"), "max_completion_tokens") ?? 0);
+                string repository = Json.Str(m, "hugging_face_id");
+                f.HuggingFaceId = string.IsNullOrWhiteSpace(repository) ? null : repository.Trim();
                 list.Add(f);
             }
             // Expiring models first, soonest first; then by name.

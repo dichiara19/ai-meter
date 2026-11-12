@@ -80,6 +80,8 @@ namespace AIMeter
 
         /// <summary>Credit-service budgets keyed by id, stored as amount|period.</summary>
         public System.Collections.Generic.Dictionary<string, string> Budgets { get; set; }
+        // Delegation: "service|model" to "preferred" (tried first) or "avoided" (tried last); see Candidates.Ordered.
+        public System.Collections.Generic.Dictionary<string, string> DelegationModels { get; set; }
 
         /// <summary>Per-service pill limit key or "auto"; a missing entry uses Default.</summary>
         public System.Collections.Generic.Dictionary<string, string> PillLimits { get; set; }
@@ -120,6 +122,7 @@ namespace AIMeter
             Theme = "system"; Language = "system"; Refresh = "auto"; NotifyLow = true; NotifyReset = true;
             NotifyResets = new System.Collections.Generic.Dictionary<string, bool>(); PillLimits = new System.Collections.Generic.Dictionary<string, string>();
             Budgets = new System.Collections.Generic.Dictionary<string, string>();
+            DelegationModels = new System.Collections.Generic.Dictionary<string, string>();
             HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
             HistoryEnabled = true;
@@ -215,6 +218,7 @@ namespace AIMeter
             if (s.ExpandedServices == null) s.ExpandedServices = new System.Collections.Generic.Dictionary<string, bool>();
             if (s.NotifyResets == null) s.NotifyResets = new System.Collections.Generic.Dictionary<string, bool>();
             if (s.PillLimits == null) s.PillLimits = new System.Collections.Generic.Dictionary<string, string>();
+            if (s.DelegationModels == null) s.DelegationModels = new System.Collections.Generic.Dictionary<string, string>();
             if (s.Budgets == null) s.Budgets = new System.Collections.Generic.Dictionary<string, string>();
             if (s.HiddenRows == null) s.HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             return s;

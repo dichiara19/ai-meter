@@ -474,7 +474,8 @@ namespace AIMeter
         /// A service without one, whose limits are not readable, reads the list on its own whenever the key it names is
         /// available; that list is then what tells the user the key works. The request may use {token}, as lists such
         /// as Experiential Labs' need the key. A failed request keeps the previous list and is retried after
-        /// FreeModelsRetryMinutes instead of the full interval.
+        /// FreeModelsRetryMinutes instead of the full interval. A list read looks up, in the background, the sizes of
+        /// the models whose Hugging Face repository it names (ModelSizes.Learn).
         /// </summary>
         private void FetchFreeModels(Probe p, bool hasUsage)
         {
@@ -506,6 +507,7 @@ namespace AIMeter
             if (list != null)
             {
                 catalogue = new Catalogue { Models = list, ReadAt = DateTime.Now };
+                ModelSizes.Learn(list);   // Sizes of the models whose repository the list names, for the order of candidates.
                 if (!hasUsage) problem = null;
             }
             freeNextFetch = DateTime.Now.AddMinutes(list != null ? interval : Math.Min(interval, FreeModelsRetryMinutes));

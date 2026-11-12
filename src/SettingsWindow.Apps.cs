@@ -56,6 +56,55 @@ namespace AIMeter
                     Pair(CopyButton("Windows", () => McpClients.Command(id, McpRelay.Write(), false)),
                          CopyButton("WSL", () => McpClients.Command(id, McpRelay.Write(), true))));
             }).ToArray());
+
+            BuildDelegationModels();
+        }
+
+        /// <summary>
+        /// The user's choice for each free model with tool support, which comes first in the order of delegation
+        /// candidates (Candidates.Ordered). A choice for a model no longer listed stays visible, so it can be undone.
+        /// </summary>
+        private void BuildDelegationModels()
+        {
+            Header(L.T("Delegated tasks"));
+            Hint(L.T("Coding agents that delegate tasks through AI Meter try preferred models first and avoided ones last. The others follow how they did on this PC, then their size and context."));
+            var rows = new List<FrameworkElement>();
+            var listed = new HashSet<string>();
+            var snap = C.Last;
+            if (snap != null)
+                foreach (var p in snap.Providers.Where(x => x.Catalogue != null).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase))
+                    foreach (var m in p.Catalogue.Models.Where(x => x.Tools && (x.Free == null || x.Free.Confirmed)).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase))
+                    {
+                        string key = Candidates.PreferenceKey(p.Id, m.Id);
+                        if (!listed.Add(key)) continue;
+                        var facts = new List<string> { p.Name };
+                        var size = ModelSizes.Of(m);
+                        if (size != null) facts.Add(ModelSizes.Format(size.Parameters));
+                        if (m.Context > 0) facts.Add(L.F("{0} context", FreeModels.Context(m.Context)));
+                        rows.Add(Row(null, m.Name, string.Join(" · ", facts), PreferenceCombo(key)));
+                    }
+            foreach (var key in S.DelegationModels.Keys.Where(k => !listed.Contains(k)).OrderBy(k => k, StringComparer.Ordinal).ToList())
+                rows.Add(Row(null, key.Substring(key.IndexOf('|') + 1), L.T("Not in the current model lists"), PreferenceCombo(key)));
+            if (rows.Count == 0)
+                rows.Add(Row(null, L.T("No free models with tool support yet"), L.T("They appear here once a service with free models is on and its model list has been read."), null));
+            Group(rows.ToArray());
+        }
+
+        /// <summary>Default, preferred or avoided. The settings get a new dictionary, as MCP threads read the current one.</summary>
+        private ComboBox PreferenceCombo(string key)
+        {
+            string current;
+            S.DelegationModels.TryGetValue(key, out current);
+            return Combo(new[]
+            {
+                Tuple.Create("", L.T("Default")), Tuple.Create(Candidates.Preferred, L.T("Preferred")), Tuple.Create(Candidates.Avoided, L.T("Avoided")),
+            }, current ?? "", v =>
+            {
+                var next = new Dictionary<string, string>(S.DelegationModels);
+                if (v == "") next.Remove(key); else next[key] = v;
+                S.DelegationModels = next;
+                S.Save();
+            });
         }
 
         private void ConnectApp(McpClients.Client c, bool on)
