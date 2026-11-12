@@ -499,6 +499,16 @@ namespace AIMeter
                 "The model's counters were not kept, or kept past 30 days: " + record.Completed + "/" + record.Failed + "/" + record.RateLimited);
             Assert(record.TokensPerSecond == 10, "Speed should come only from completed leases: " + record.TokensPerSecond);
             Assert(!new LeaseBook(path).Record("nvidia", "m", now).Tried, "A model's record leaked to another service.");
+
+            // A cancelled lease adds nothing but the rate limit it met, which still lowers the model's score.
+            var cancelled = new LeaseBook(null);
+            Ran(cancelled, "openrouter", "m", "completed", now.AddMinutes(-10), now.AddMinutes(-9), 600);
+            Ran(cancelled, "openrouter", "m", "cancelled", now.AddMinutes(-8), now.AddMinutes(-7), 600);
+            Assert(cancelled.Record("openrouter", "m", now).Score == 1, "A cancelled lease without a rate limit changed the score.");
+            Ran(cancelled, "openrouter", "m", "cancelled", now.AddMinutes(-6), now.AddMinutes(-5), 600, 3);
+            var limited = cancelled.Record("openrouter", "m", now);
+            Assert(limited.RateLimited == 1 && limited.Completed == 1 && limited.Failed == 0 && limited.Score == 0 && limited.TokensPerSecond == 10,
+                "A rate limit on a cancelled lease was not counted once, or the cancelled lease counted otherwise.");
         }
 
         private static void ModelSizeSources()

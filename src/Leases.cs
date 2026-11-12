@@ -150,7 +150,7 @@ namespace AIMeter
         /// <summary>
         /// A model's track record on this PC over the last KeepDays UTC days, from released leases: how many completed,
         /// failed (failed or timed_out) or met a rate limit, and how fast completed tasks wrote their output.
-        /// Cancelled and expired leases say nothing about the model and are not counted.
+        /// A cancelled lease counts only its rate limit, if it met one; an expired lease, never released, is not counted.
         /// </summary>
         public ModelRecord Record(string service, string model, DateTime now)
         {
@@ -214,18 +214,22 @@ namespace AIMeter
 
         /// <summary>
         /// Count a released lease in its model's row for the UTC day of now (UTC). A rate limit counts once per lease,
-        /// whatever its outcome; output speed comes from completed leases that reported their output tokens, over the
-        /// lease's whole time, tools included. Called with the lock held.
+        /// whatever its outcome, a cancelled one included: the service limited the model all the same. Completion and
+        /// failure count only for those outcomes, so a cancelled lease without a rate limit adds nothing. Output speed
+        /// comes from completed leases that reported their output tokens, over the lease's whole time, tools included.
+        /// Called with the lock held.
         /// </summary>
         private void RecordModel(Lease lease, Outcome outcome, DateTime now)
         {
             bool completed = outcome.Result == "completed", failed = outcome.Result == "failed" || outcome.Result == "timed_out";
-            if (!completed && !failed) return;
+            bool limited = outcome.RateLimited > 0;
+            if (!completed && !failed && !limited) return;
             var day = now.Date;
             var d = modelDays.FirstOrDefault(x => x.Service == lease.Service && x.Model == lease.Model && x.Day == day);
             if (d == null) modelDays.Add(d = new ModelDay { Service = lease.Service, Model = lease.Model, Day = day });
-            if (completed) d.Completed++; else d.Failed++;
-            if (outcome.RateLimited > 0) d.RateLimited++;
+            if (completed) d.Completed++;
+            else if (failed) d.Failed++;
+            if (limited) d.RateLimited++;
             double seconds = (now - lease.ClaimedAtUtc).TotalSeconds;
             if (completed && outcome.OutputTokens > 0 && seconds > 0)
             {
