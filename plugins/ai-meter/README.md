@@ -129,7 +129,12 @@ For the same model, the agent with the smaller fixed cost per request comes firs
   - before the lease, the plugin runs the agent's own `claude auth status` or `codex login status` in that environment: anything but a plan sign-in skips the candidate. Only the sign-in method is read; the account it names is dropped;
   - while it runs, Claude Code is stopped if its events show an API key (`apiKeySource`) or extra usage in use (`isUsingOverage`), and the task fails with `counters.billed`.
 - **The report** names the plan and the window the task drew on: `plan.window`, `plan.before` (each window's room, your reserve and the reset when the lease was taken) and `plan.after` (Claude Code's own report of the windows, or AI Meter's reading for Codex, with its `read_at`: AI Meter reads Codex every few minutes, so a reading older than the task still shows the room before it). The room after includes anything else your account used meanwhile, so the difference is not this task's alone. Tokens are counted; no saving in money is claimed.
-- **Where.** Verified in WSL on 2026-11-12 with Claude Code 2.1.322 and Codex 0.163.0, each started as AI Meter describes it; then a whole task through this plugin, from a Claude Code client, on Codex with `gpt-6.1-sol` on the ChatGPT plan (10.8 s, 26,582 input tokens). On Windows, Codex's read-only sandbox refused to read the workspace and Claude Code had no sign-in to check, so neither runs there yet.
+- **Where.** Verified in WSL on 2026-11-12 with Claude Code 2.1.322 and Codex 0.163.0, each started as AI Meter describes it; then whole tasks through this plugin, started from Windows:
+  - from a Claude Code client, a read-only task on Codex with `gpt-6.1-sol` on the ChatGPT plan (10.8 s, 26,582 input tokens);
+  - the same client, a `modify` task on Codex that added one line in a new worktree (16.8 s);
+  - from a Codex client, a read-only task on Claude Code with `sonnet` on the Claude plan (5.5 s, 2 requests, 9,778 input tokens), with the ChatGPT plan left out as the coordinator's own.
+
+  On Windows, Codex's read-only sandbox refused to read the workspace and Claude Code had no sign-in to check, so neither runs there yet.
 - **Each vendor's terms of use apply to its CLI.** The plugin uses only the interfaces Anthropic and OpenAI document for scripted use (`claude -p`, `codex exec`), with your own sign-in, one task at a time per plan.
 
 ## What the coordinators show
@@ -165,6 +170,7 @@ Measured on 2026-11-02 with Claude Code 2.1.316 on Sonnet 5.5 as coordinator, in
 
 - AI Meter describes only the agents and places its definitions mark as verified, today Pi in WSL, OpenCode in WSL and on Windows, and Claude Code and Codex on a plan in WSL. A plugin in WSL cannot start a Windows agent, nor one in another distribution, yet. Other agents found are listed in `runtimes.unsupported` with the reason.
 - The reserve binds only tasks run through AI Meter: your own sessions on the same plan go on as before.
+- An agent in WSL started from Windows works in a Windows worktree, whose `.git` file names a Windows path. Git inside WSL cannot follow it ("not a git repository"), so the agent cannot run `git` there. The plugin reads the change with Git on Windows. A change made through a command rather than an editing tool (Codex often writes files this way) is in the worktree's diff, not in `activity.files_written`.
 - **Not verified live:** that `taskkill /T` on `wsl.exe` ends every Linux process an agent started inside WSL; and OpenCode's permission rules against a real OpenCode 1.x.
 - Long tasks hold one lease for their whole timeout plus two minutes, rather than renewing it.
 - A coordinator inside a packaged app, such as the Claude desktop app, may not see agents installed elsewhere. The plugin uses the paths AI Meter describes and installs nothing.
