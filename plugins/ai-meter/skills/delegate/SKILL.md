@@ -1,11 +1,11 @@
 ---
 name: delegate
-description: Hand a self-contained coding task (reading and summarising code, finding usages, drafting tests, a small mechanical fix) to a coding agent on a free model, chosen with AI Meter, to save the coordinator's own quota. Use when the user asks to delegate, offload or run something on a free model, or when a well-specified side task does not need this conversation's context.
+description: Hand a self-contained coding task (reading and summarising code, finding usages, drafting tests, a small mechanical fix) to a coding agent on a free model, or, with the user's agreement, to Codex or Claude Code on the user's other subscription plan, chosen with AI Meter, to save the coordinator's own quota. Use when the user asks to delegate, offload or run something on a free model or on their other plan, or when a well-specified side task does not need this conversation's context.
 ---
 
 # Delegate a task to a free model with AI Meter
 
-The `ai-meter-delegate` tools run a task with a coding agent already set up on this PC (Pi or OpenCode), on a free model whose pool has room according to AI Meter. You stay the coordinator: you write the task, check the answer and decide what to keep.
+The `ai-meter-delegate` tools run a task with a coding agent already set up on this PC (Pi or OpenCode), on a free model whose pool has room according to AI Meter, or, when the user agrees, with Codex or Claude Code on one of the user's subscription plans (see *Subscription plans* below). You stay the coordinator: you write the task, check the answer and decide what to keep.
 
 ## When to delegate
 
@@ -47,7 +47,7 @@ The task, and every file the agent reads, go to the provider of the chosen model
 
 ## When it does not start
 
-- `error` with `excluded` and `runtimes`: no free model fits, or no agent has a key of its own. Explain the reasons. `runtimes.unsupported` lists agents that are installed but cannot be used (such as Codex or Claude Code), each with a `detail` sentence you can show. Never install an agent or handle a key: the user sets agents up.
+- `error` with `excluded` and `runtimes`: no free model fits, or no agent has a key of its own. Explain the reasons. `runtimes.unsupported` lists agents that are installed but cannot be used (such as Gemini CLI, or Codex and Claude Code on Windows), each with a `detail` sentence you can show. Never install an agent or handle a key: the user sets agents up.
 - `skipped`: candidates that were tried and why, such as AI Meter's own error for that agent, an agent and place it has not verified, an agent in another WSL distribution, a key only exported in a WSL shell profile when the plugin runs on Windows, or a pool with no room.
 - `excluded` with `agent_lists_price`: the service lists the model as free, but the agent's own list prices it, so the agent would pay for the first request before the plugin could stop it.
 - AI Meter must be installed on Windows; its relay starts it when needed.
@@ -67,6 +67,19 @@ Cloudflare Workers AI models are priced, but free within 10,000 Neurons a day. T
 - `delegate_candidates` with `include_free_tier: true` lists them, with `warnings: ["free_tier_budget"]`.
 - **Before using one, ask the user.** Say that the task stops when it reaches what is left of today's free Neurons, and that on Cloudflare's paid plan the one request that crosses the limit is billed. Then call `delegate` with `allow_free_tier: true`.
 - `agent_price_unknown` means no agent with a Cloudflare key prices the model, so its spending would be invisible; `allowance_unknown` that today's use could not be read. Neither can be worked around.
+
+## Subscription plans: only with the user's agreement
+
+The user's other plan can take a task too: from Claude Code, **Codex on the ChatGPT plan**; from Codex, **Claude Code on the Claude plan**. Never the plan you run on: the plugin tells AI Meter which one that is (pass `coordinator` only if you are not Claude Code or Codex on your own plan). A plan task never draws on pay-as-you-go billing.
+
+- They are never candidates unless asked for: `excluded` reports them as `plan_not_requested`. `delegate_candidates` with `include_plan: true` lists them, with `billing: "included_in_plan"` and the plan's `windows` (room left, the user's reserve, the reset).
+- **Before using one, ask the user.** Say which plan and window the task would draw on and how much room is left above their reserve. Then call `delegate` with `allow_plan: true`. Free models are still tried first, unless the plan's room is about to be lost at a reset.
+- `plan_off_in_settings`: the user has not turned the plan on in AI Meter's Settings › AI apps › Delegated tasks. Tell them; do not work around it.
+- `plan_reserve` (with `until`): a window is at or below what the user keeps for themselves. `plan_extra_usage_on`: Claude's extra usage is on and would bill past the plan. `plan_credits_on`: Codex would spend credits past the plan. `plan_usage_unknown` or `plan_sign_in_not_confirmed`: AI Meter cannot see the plan's room or a plan sign-in. None of these can be worked around.
+- A candidate skipped because its sign-in check failed is signed in with an API key, or not signed in: the user signs in themselves. Never sign in or handle a credential.
+- **Tell the user where the task drew from:** `plan.window`, the room `plan.before` and `plan.after` it. The room after includes anything else the account used meanwhile.
+- `counters.billed` means the agent showed billed usage (an API key, or extra usage) and the plugin stopped it: tell the user, and do not retry on that plan.
+- Plan models are strong, but check their answer as you would any other.
 
 ## Money
 

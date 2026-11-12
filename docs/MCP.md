@@ -91,7 +91,7 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `list_free_models` | Free models with id, context window, output limit, tool and reasoning support, last free day, how the price is known (`free`) and their limits (`limits`, see below); filters `tools`, `min_context`, `min_output_tokens` and `include_unconfirmed` |
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
-| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, most suitable first with the reason for each place; each pool's room; why every other model is left out; which agents were found but cannot be used; and, when asked, best-effort candidates built on the agents' own model lists and free-tier candidates (Cloudflare Workers AI). See below |
+| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, most suitable first with the reason for each place; each pool's room; why every other model is left out; which agents were found but cannot be used; and, when asked, best-effort candidates built on the agents' own model lists, free-tier candidates (Cloudflare Workers AI) and Claude Code or Codex on the user's subscription plans. See below |
 | `describe_dispatch` | How to start a candidate: program, argument list and environment for a verified agent and place. The task goes on stdin, never in the arguments. See below |
 | `claim_capacity`, `renew_capacity`, `release_capacity` | Cooperative capacity leases on a candidate's pool, with the budget of a free tier. These are the only tools that change anything: AI Meter's own lease book. See below |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
@@ -151,16 +151,18 @@ Each model from `list_free_models` says how its price is known and what limits a
 - `cost_policy`: `free_only` (default) admits only models whose list states a zero price. `free_or_unconfirmed` also admits models whose price the service does not state, such as NVIDIA and Gemini models;
 - `include_free_tier`: also admit free-tier models, which are priced but free within a daily allocation ([Free tiers](#free-tiers-cloudflare-workers-ai)). Off by default, whatever the `cost_policy`;
 - `from`: where the caller runs, `windows` or `wsl`. For the same model, an agent in that place comes first ([Order](#order));
+- `include_plan`: also admit Claude Code and Codex on the user's subscription plans, never pay-as-you-go ([Subscription plans](#subscription-plans)). Off by default, whatever the `cost_policy`;
+- `coordinator`: the service the caller itself runs on (`claude`, `openai`…). A plan on that service is never offered;
 - `refresh` and `max_age_seconds`, as in the other tools.
 
 **A candidate is a model, a runtime and a credential.**
-- Delegation runs only the agents whose start has been verified for their place, listed in [agent definitions](#agent-definitions): today Pi in WSL, and OpenCode in WSL and on Windows. It uses whichever of these are set up; none is required. An agent counts when its folder exists and its program is installed (a folder can outlive its agent). AI Meter checks the usual install folders, those of Node version managers (nvm, fnm, asdf, Volta) included, on Windows and in every running WSL distribution, through the distribution's file share, without starting anything inside WSL. `runtimes.found` lists the agents found, with `distro` in WSL.
-- **`runtimes.unsupported`** lists the other agents found (by their folder or their program), so that a plugin can say "Codex is installed, but delegation does not support it yet". Each entry has `name`, `display_name`, `where`, `distro` in WSL, `reason` and `detail`, a sentence to show:
+- Delegation runs only the agents whose start has been verified for their place, listed in [agent definitions](#agent-definitions): today Pi in WSL, OpenCode in WSL and on Windows, and Claude Code and Codex on a plan in WSL ([Subscription plans](#subscription-plans)). It uses whichever of these are set up; none is required. An agent counts when its folder exists and its program is installed (a folder can outlive its agent). AI Meter checks the usual install folders, those of Node version managers (nvm, fnm, asdf, Volta) included, on Windows and in every running WSL distribution, through the distribution's file share, without starting anything inside WSL. `runtimes.found` lists the agents found, with `distro` in WSL.
+- **`runtimes.unsupported`** lists the other agents found (by their folder or their program), so that a plugin can say "Gemini CLI is installed, but delegation does not support it yet". Each entry has `name`, `display_name`, `where`, `distro` in WSL, `reason` and `detail`, a sentence to show:
 
   | `reason` | Meaning |
   |---|---|
-  | `no_dispatch` | Delegation does not support this agent (Codex, Claude Code, Gemini CLI, Antigravity CLI, Cursor Agent, Crush, Hermes) |
-  | `place_not_verified` | It supports the agent, but not in this place (Pi on Windows) |
+  | `no_dispatch` | Delegation does not support this agent (Gemini CLI, Antigravity CLI, Cursor Agent, Crush, Hermes) |
+  | `place_not_verified` | It supports the agent, but not in this place (Pi, Claude Code and Codex on Windows) |
   | `program_not_found` | Its settings folder is here, but its program is not in the usual folders |
   | `not_set_up` | Its program is here, but it has no settings folder yet |
 
@@ -172,7 +174,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 
 #### Order
 
-Every candidate's pool can start a task now; a pool that cannot is in `excluded`. Among them, AI Meter puts the most suitable first, by the first of these keys that differs:
+Every candidate's pool can start a task now; a pool that cannot is in `excluded`. Candidates on a subscription plan come after free ones, unless the plan's room is about to be lost ([Subscription plans](#subscription-plans)). Among free candidates, AI Meter puts the most suitable first, by the first of these keys that differs:
 
 1. **The user's preference.** Models marked *Preferred* in Settings › AI apps › Delegated tasks come first, models marked *Avoided* last. An avoided model stays a candidate: it is used when nothing else starts, or when the coordinator pins it.
 2. **Room, in two bands.** Pools with at least 20% of their tightest limit left, or with unknown room, come before pools with less. Above that, room does not reorder models: a pool at 70% and one at 40% count the same.
@@ -232,6 +234,48 @@ AI Meter sees only the rate limits of its own reads and the counters services re
 | `free_tier_budget` | The model is priced and free only within a daily allocation. Stop the agent as soon as its requests cost more than the `budget.max_cost` that `claim_capacity` returns, and release the lease with their `cost` |
 | `openrouter_byok_fallback` | OpenRouter can retry a `:free` request that hit the free route's limit on a provider key the user linked to OpenRouter (BYOK), billed to that provider account. The catalogue's zero price cannot show this. Watch `output.cost` and stop the agent at the first request priced above zero, or ask the user to unlink BYOK keys before delegating |
 
+### Subscription plans
+
+Many users also pay for a Claude or ChatGPT plan, whose 5-hour and weekly windows often reset with room left. With `include_plan`, `list_candidates` also offers that room: **Claude Code on the Claude plan** and **Codex on the ChatGPT plan** (service `openai`), each with its own sign-in ([ADR 0003](adr/0003-delegation-on-subscription-plans.md)). A task on a plan never draws on pay-as-you-go billing.
+
+**When a plan is offered.** All of these must hold, and each failure is an `excluded` reason:
+
+| `reason` | Meaning |
+|---|---|
+| `plan_not_requested` | The request did not set `include_plan` |
+| `plan_off_in_settings` | The user has not allowed this plan in Settings › AI apps › Delegated tasks (off by default) |
+| `coordinator_unknown` | The request did not say which service the coordinator runs on, so its own plan could not be left out |
+| `same_plan_as_coordinator` | The coordinator runs on this plan: a task there would save nothing. AI Meter cannot tell two accounts of one service apart, and does not try |
+| `plan_usage_unknown` | No reading of the plan's windows, or one older than 15 minutes: room is never assumed |
+| `plan_sign_in_not_confirmed` | The reading does not show a plan sign-in: Claude's usage endpoint, or `chatgpt` in Codex's `account/read` (an API key, or a reading from logs, does not count) |
+| `plan_extra_usage_on` | Claude's extra usage is on: past the plan's limits it bills. Turn it off on claude.ai to delegate |
+| `plan_credits_on` | Codex has credits (a balance, or unlimited): past the plan's limits it spends them |
+| `plan_reserve` | A window is at or below the share the user keeps (by default 40% of the 5-hour window, 25% of the weekly one); `until` is when it resets |
+| `plan_models_unknown` | Codex's model list (`~/.codex/models_cache.json`) could not be read |
+
+The windows are the 5-hour one, the weekly one, and the weekly one of the model when the plan has it (Claude's "Opus" window binds Opus only). A plan takes one task at a time (pool `<service>:plan`), and its leases and rate limits count as for free pools.
+
+**Models.** Claude Code offers `sonnet`, `opus`, `fable` and `haiku`, in that order (its definition's list); Codex the models its own cache lists for people to pick, in Codex's order.
+
+**Order.** Free candidates come first and the plan is the fallback, except when a plan's room is about to be lost: a 5-hour window resetting within the hour, or a weekly one within a day, with room above the reserve. Such a plan comes before every free candidate. Among a plan's candidates its own model order holds. `rank.plan` is `expiring` or `fallback`, and `rank.why` says which.
+
+**What a plan candidate adds:**
+
+```json
+"billing": "included_in_plan",
+"plan": {
+  "service": "openai", "read_at": "…",
+  "windows": [ { "window": "5h", "remaining_percent": 62, "reserve_percent": 40, "resets_at": "…" },
+               { "window": "7d", "remaining_percent": 80, "reserve_percent": 25, "resets_at": "…" } ],
+  "binding_window": "5h", "expiring": false,
+  "coverage": "the plan's windows count everything the account uses, on every app and PC"
+}
+```
+
+`binding_window` is the window with the least room above its reserve. `claim_capacity` checks the plan again and returns the same `plan`, so the report can say where the task drew from.
+
+**Agents and places.** Verified in WSL on 2026-11-12: Claude Code 2.1.322 and Codex 0.163.0. On Windows, Claude Code had no sign-in to check with, and Codex's read-only sandbox refused to read the workspace, so both are `place_not_verified` there.
+
 ### Best-effort candidates
 
 Some services list their models without the facts delegation needs. NVIDIA's list gives only ids; the Gemini API's gives no tool support; neither gives prices. Their models are therefore never ordinary candidates. The coding agents often know more: their own model lists give tool support, the context window, the reply size and the price they charge.
@@ -283,8 +327,14 @@ AI Meter starts nothing. A coordinator plugin runs the agent ([ADR 0002](adr/000
 
 The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code and Codex follows these steps.
 
-**`describe_dispatch`** takes the candidate (`service`, `model`, `runtime`, and `where` and `distro` to pick its place), `mode` (`read_only` by default, or `modify`), `workspace`, and `from`, which is where the plugin runs (`windows` by default, or `wsl`).
-- It describes only agents and places with a verified dispatch: Pi in WSL, and OpenCode in WSL and on Windows. Anything else answers `supported: false` with the reason.
+**`describe_dispatch`** takes the candidate (`service`, `model`, `runtime`, and `where` and `distro` to pick its place), `mode` (`read_only` by default, or `modify`), `workspace`, `from`, which is where the plugin runs (`windows` by default, or `wsl`), and, for a plan candidate, `coordinator`.
+- It describes only agents and places with a verified dispatch: Pi in WSL, OpenCode in WSL and on Windows, and Claude Code and Codex on a plan in WSL. Anything else answers `supported: false` with the reason.
+- **A plan agent** ([Subscription plans](#subscription-plans)) comes with `billing: "included_in_plan"`, `environment_policy: "clean"` and a `sign_in_check`:
+  - `environment_policy: "clean"`: start the agent with only what a program needs (system folders, home, PATH) plus `environment`, never the plugin's own environment, so no API key, base URL or coordinator session variable reaches it. From Windows into WSL the description already uses `env -i HOME=… LANG=C.UTF-8 PATH=…`.
+  - `sign_in_check`: `program` and `arguments` of the agent's own status command, in the same place and environment, and what shows a plan sign-in: `json_field` equal to `expect` in its JSON (Claude Code: `authMethod` is `claude.ai`), or `text` in its output (Codex: "Logged in using ChatGPT", on stderr). Read only that; start the agent only when it holds.
+  - Claude Code runs with `--safe-mode --restricted --strict-mcp-config` (no user `CLAUDE.md`, skills, plugins, hooks, MCP servers or settings files, so no `apiKeyHelper`), never `--bare`, which accepts only API keys. Codex runs with `--ignore-user-config`, `forced_login_method="chatgpt"`, `skills.include_instructions=false`, `project_doc_max_bytes=0` and its plugins, apps, hooks, memories and sub-agents disabled.
+  - `output.billing` says how the agent's events show billed usage: Claude Code's `apiKeySource` other than `none`, or a `rate_limit_event` with `isUsingOverage`. Stop the agent then. Codex's events say nothing about billing: its guard is `forced_login_method` and AI Meter's `plan_credits_on`.
+  - An `error` says when the plan is not allowed in Settings, the coordinator is missing or on the same plan, or the plan does not offer the model.
 - Before that, an `error` says which of these went wrong: an unknown `runtime` (with the ids AI Meter knows); AI Meter still reading its first data; a model not in the service's current list; an agent delegation does not support; no usable agent set up here; key discovery turned off; or an agent without a key of its own for the service.
 - `version_verified` and `notes` flag an agent version outside the verified range.
 - **On Windows**, the agent's native program is started directly: the `.exe` found on the PATH, or the one inside its npm package (OpenCode). Never a `.cmd` or `.ps1`, which need a shell: without a native program the answer is `supported: false`.
@@ -299,6 +349,7 @@ The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code 
 - `claim_capacity` refuses when the pool has no room. The answer includes the pool's `headroom`, with `blocking.reason`: `exhausted`, `rate_limited` or `leased`.
 - A lease lasts `ttl_seconds` (default 1800, at most 7200) unless renewed. Unreleased leases expire with an unknown outcome.
 - `claim_capacity` for a free-tier pool also returns its `budget` (see [Free tiers](#free-tiers-cloudflare-workers-ai)).
+- `claim_capacity` for a plan candidate takes `coordinator`, checks the plan's windows again (a reserve reached since `list_candidates` refuses it with `blocking.reason: "plan_reserve"`) and returns `billing` and the `plan` the task draws on.
 - `release_capacity` takes `outcome`, `requests`, `rate_limited`, `retry_after_seconds`, the tokens and `cost`, in US dollars as the agent priced the requests. A rate limit closes the pool until `retry_after_seconds`, or for a minute. The cost counts against a free tier's budget at once.
 - Active leases count in every `headroom` (`leased`). Released outcomes fill `observed` in `list_free_models`, with `coverage: "ai_meter_leases_only"`: tasks run without leases are not counted.
 - Released outcomes are also counted per model: completed, failed (or timed out), rate limited, and the output tokens and time of completed tasks. They are the track record that orders candidates ([Order](#order)).
@@ -346,8 +397,11 @@ The coding agents AI Meter knows are data, like services: `agents/*.json`, built
 | `folders` | Settings folders relative to the home: any one shows the agent is set up |
 | `keys` | Where the agent keeps API keys: a home-relative `file` and a JSON `path`, with `{id}` for the service's aliases (`auth.ids` in its service definition), or a `file` with `"format": "env"`, a dotenv file of `NAME=value` lines read by the variable names in the service's `auth.env` (Hermes keeps its keys this way) |
 | `package` | npm package, to read the version without running the agent; an agent npm installed in WSL also needs `node` |
-| `models` | The agent's own model list, for [best-effort candidates](#best-effort-candidates): `format` (`pi` or `models.dev`), `file` under `{home}/` or `{package}/` with `{provider}` for the service's alias, and optional `versions` whose layout was checked. Pi: `{package}/node_modules/@earendil-works/pi-ai/dist/providers/data/{provider}.json` for 1.x; OpenCode: `{home}/.cache/opencode/models.json` |
+| `models` | The agent's own model list, for [best-effort candidates](#best-effort-candidates) and a plan's models: `format` (`pi`, `models.dev` or `codex`), `file` under `{home}/` or `{package}/` with `{provider}` for the service's alias, and optional `versions` whose layout was checked. Pi: `{package}/node_modules/@earendil-works/pi-ai/dist/providers/data/{provider}.json` for 1.x; OpenCode: `{home}/.cache/opencode/models.json`; Codex: `{home}/.codex/models_cache.json`, of which only each model's slug, name, visibility, priority and context window are read |
+| `program_folders` | Further home-relative folders per place where the program may be, searched after the usual ones; `*` stands for each subfolder, most recently written first (Codex's app keeps `codex.exe` in `AppData/Local/OpenAI/Codex/bin/<build>`) |
+| `plan` | For an agent that runs on a subscription plan with its own sign-in ([Subscription plans](#subscription-plans)): `service` (whose windows AI Meter reads), optional `models` (most suitable first; otherwise the agent's `models` list), and `sign_in`: the `arguments` of its status command, with `json_field` and `expect`, or `text`, that show a plan sign-in. A plan without a sign-in check is ignored |
 | `dispatch` | How a plugin starts it. Without it, the agent is reported in `runtimes.unsupported` |
+| `dispatch.environment_policy` | `clean`: the plugin starts the agent from an empty environment plus `environment`, never its own (plan agents) |
 | `dispatch.places` | The verified places, each with `versions` (`"1.x"` matches every 1.* version, `"1.4.0"` only that one), optional `executables` (native Windows programs inside the npm package) and optional own `arguments` and `environment` |
 | `dispatch.arguments` | The argument list per mode, `read_only` and `modify`. `read_only` must be enforced by what the agent is given, such as Pi's `--tools` list or OpenCode's per-agent `permission` in `OPENCODE_CONFIG_CONTENT` (see `agents/opencode.json`), never by an agent's name and defaults alone |
 | `dispatch.environment` | Variables to set. A value written as a JSON object is serialised after its placeholders are filled, so a model id cannot change its structure |

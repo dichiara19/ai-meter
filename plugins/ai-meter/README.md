@@ -1,6 +1,6 @@
 # AI Meter delegation plugin
 
-A plugin for **Claude Code** and **Codex** that hands self-contained coding tasks to a coding agent you already have, such as Pi or OpenCode, on a free model. [AI Meter](../../README.md) chooses where the task can run and paces it; the plugin runs the agent ([ADR 0002](../../docs/adr/0002-delegation-through-coordinator-plugins.md)).
+A plugin for **Claude Code** and **Codex** that hands self-contained coding tasks to a coding agent you already have, such as Pi or OpenCode, on a free model, or, when you allow it, to Codex or Claude Code on your own subscription plan. [AI Meter](../../README.md) chooses where the task can run and paces it; the plugin runs the agent ([ADR 0002](../../docs/adr/0002-delegation-through-coordinator-plugins.md), [ADR 0003](../../docs/adr/0003-delegation-on-subscription-plans.md)).
 
 The same folder is both plugins, each in its coordinator's standard layout:
 - **Claude Code** reads `.claude-plugin/plugin.json` and `.mcp.json`.
@@ -13,6 +13,7 @@ Both get the same MCP server and the same `delegate` skill. The marketplaces are
 - **AI Meter 0.10.0 or later on Windows**, from the Microsoft Store or from GitHub: it has the delegation tools (`list_candidates`, `describe_dispatch` and the capacity leases). The plugin reaches AI Meter through the relay AI Meter writes, which starts AI Meter when it is not running: `%APPDATA%\AIMeter\mcp.ps1` for the GitHub copy, `~\.aimeter\mcp.ps1` for the Store copy. When both exist, for example after moving from one copy to the other, the plugin uses the one written last, since each copy rewrites its own at every start.
 - **Node.js 18 or later** where the coordinator runs: on Windows, or in WSL.
 - **At least one coding agent set up with its own key** for a service with free models, among those AI Meter can start (its [agent definitions](../../docs/MCP.md#agent-definitions); today Pi in WSL, and OpenCode on Windows or in WSL). The plugin never installs an agent and never handles a key. Set it up yourself, for example with `opencode auth login`.
+- **For tasks on a plan** (optional): Claude Code or Codex in WSL, signed in with your Claude or ChatGPT plan (`claude` then `/login`, or `codex login`), and the plan turned on in AI Meter's Settings › AI apps › Delegated tasks.
 - Git, for tasks that change files.
 
 ## Install
@@ -45,11 +46,11 @@ The coordinator calls these tools of the `ai-meter-delegate` server:
 
 | Tool | What it does |
 |---|---|
-| `delegate` | Starts a background job and returns its id. Takes `task`, `workspace` (absolute path), `mode`, and optionally `service`, `model`, `runtime`, `where`, `distro`, `min_context`, `allow_best_effort`, `allow_free_tier`, `cost_policy`, `timeout_seconds` (default 1200, at most 7000) and `wait_seconds` (at most 50) |
+| `delegate` | Starts a background job and returns its id. Takes `task`, `workspace` (absolute path), `mode`, and optionally `service`, `model`, `runtime`, `where`, `distro`, `min_context`, `allow_best_effort`, `allow_free_tier`, `allow_plan`, `coordinator`, `cost_policy`, `timeout_seconds` (default 1200, at most 7000) and `wait_seconds` (at most 50) |
 | `delegate_result` | The job's report: status and `duration_seconds`, the agent's answer, what the agent did (`activity`), requests, tokens and price, the change made by a `modify` task, AI Meter's `warnings`, and the candidates that were skipped and why (see *The report*) |
 | `delegate_status` | The latest jobs |
 | `delegate_cancel` | Stops the agent and releases the lease |
-| `delegate_candidates` | Where a task could run now, from AI Meter's `list_candidates`, with `runtimes.unsupported`: the agents found that cannot be used, each with a sentence saying why. With `include_best_effort`, also the best-effort candidates; with `include_free_tier`, also the free-tier ones. A warning every candidate of a pool carries is given once, on that pool in `pools`; `excluded` lists model names only for reasons the coordinator can act on (`free_tier_not_allowed`, `runtime_has_no_key`, `context_too_small`, `output_too_small`, `agent_lists_price`), and only the count for the others. Starts nothing |
+| `delegate_candidates` | Where a task could run now, from AI Meter's `list_candidates`, with `runtimes.unsupported`: the agents found that cannot be used, each with a sentence saying why. With `include_best_effort`, also the best-effort candidates; with `include_free_tier`, also the free-tier ones; with `include_plan`, also Claude Code or Codex on your plans, each with `billing` and its `plan` windows. A warning every candidate of a pool carries is given once, on that pool in `pools`; `excluded` lists model names only for reasons the coordinator can act on (`free_tier_not_allowed`, `runtime_has_no_key`, `context_too_small`, `output_too_small`, `agent_lists_price`, `plan_not_requested`, `plan_off_in_settings`, `plan_reserve`), and only the count for the others. Starts nothing |
 
 **How a job runs.**
 1. `list_candidates` with `tools: true`, narrowed by the pins you gave.
@@ -79,7 +80,8 @@ A job runs in its own worker process, so it outlives the call that started it.
   - `commands`: the commands run, with `ok`, `exit_code` when the agent reports it, and `output_tail`, the last 300 characters of the output, where test results and errors usually are.
 
   Paths are relative to the task's folder, which shows as `.`. Only the last 30 calls and 10 commands are kept (`earlier_calls_left_out`, `earlier_commands_left_out`) and 50 file paths (`more_files_left_out`). `activity` never holds file contents, and holds a command's output only as that excerpt. A failed call is not a failed task: agents often try a command that does not match and go on.
-- `counters`: `outcome`, `requests`, `rate_limited`, tokens, `cost`, `paid_request`, `byok_fallback` and `error`. On a completed task, errors the agent recovered from, such as a `429` that Pi retried, are in `recovered_errors`: their `count` and the `last` one, shortened to the provider's message. They are still counted in `rate_limited`.
+- `plan`, for a task on a subscription plan: the plan, the window it drew on, and the room before and after it (see *Your subscription plans*).
+- `counters`: `outcome`, `requests` (`null` for Codex, which does not report them), `rate_limited`, tokens, `cost`, `paid_request`, `byok_fallback`, `billed` for a plan agent stopped for billed usage, and `error`. On a completed task, errors the agent recovered from, such as a `429` that Pi retried, are in `recovered_errors`: their `count` and the `last` one, shortened to the provider's message. They are still counted in `rate_limited`.
 - `worktree` for a `modify` task (see below), `warnings`, `skipped`, `notes` from AI Meter's dispatch description, and `logs`: the paths of the full event log and error output.
 
 **The agent never works in your folder.** The workspace must be in a Git repository.
@@ -115,6 +117,21 @@ For the same model, the agent with the smaller fixed cost per request comes firs
 - When OpenRouter's error names the linked key (`"is_byok":true`), the report sets `byok_fallback: true`. This was seen live on 2026-11-02: a `:free` request fell back to a provider key linked to OpenRouter, whose provider refused it with 402.
 - A fallback that succeeds is not visible to the plugin. To rule it out, unlink BYOK keys in OpenRouter before delegating.
 
+**Your subscription plans, only with consent, never pay-as-you-go.** A Claude or ChatGPT plan often resets with room left. With `allow_plan: true`, a coordinator in Claude Code can hand a task to **Codex on your ChatGPT plan**, and one in Codex to **Claude Code on your Claude plan** ([subscription plans](../../docs/MCP.md#subscription-plans), [ADR 0003](../../docs/adr/0003-delegation-on-subscription-plans.md)).
+- **Two consents.** Turn the plan on in AI Meter's Settings › AI apps › Delegated tasks (off by default), and the coordinator asks you before passing `allow_plan`.
+- **Never the coordinator's own plan.** The plugin tells AI Meter which service the coordinator runs on: Claude Code is `claude`, Codex is `openai`, from the client name; pass `coordinator` to say otherwise. That plan is excluded (`same_plan_as_coordinator`). Two accounts of one service count as the same plan.
+- **Your reserve.** A plan is used only while every window has more room than you keep for yourself: by default 40% of the 5-hour window and 25% of the weekly one, set in the same place. A reading older than 15 minutes, or none, means no plan task.
+- **Order.** Free models come first and the plan is the fallback, except when its room is about to be lost: a 5-hour window resetting within the hour, or a weekly one within a day.
+- **The pay-as-you-go guard**, each layer enough on its own for what it covers:
+  - AI Meter leaves a plan out while Claude's extra usage is on, or Codex has credits it would spend past the plan, and when it cannot see a plan sign-in;
+  - the agent starts from a clean environment: only the system folders, the home and a PATH. No API key, base URL or session variable of the coordinator reaches it (`scripts/lib/plan.mjs`);
+  - Claude Code runs with `--safe-mode --restricted` (no settings files, so no `apiKeyHelper`; no user skills, plugins, hooks or MCP servers), Codex with `--ignore-user-config` and `forced_login_method="chatgpt"`, without your skills, plugins, apps, hooks, memories or `AGENTS.md`;
+  - before the lease, the plugin runs the agent's own `claude auth status` or `codex login status` in that environment: anything but a plan sign-in skips the candidate. Only the sign-in method is read; the account it names is dropped;
+  - while it runs, Claude Code is stopped if its events show an API key (`apiKeySource`) or extra usage in use (`isUsingOverage`), and the task fails with `counters.billed`.
+- **The report** names the plan and the window the task drew on: `plan.window`, `plan.before` (each window's room, your reserve and the reset when the lease was taken) and `plan.after` (Claude Code's own report of the windows, or AI Meter's fresh reading for Codex). The room after includes anything else your account used meanwhile, so the difference is not this task's alone. Tokens are counted; no saving in money is claimed.
+- **Where.** Verified in WSL on 2026-11-12 with Claude Code 2.1.322 and Codex 0.163.0. On Windows, Codex's read-only sandbox refused to read the workspace and Claude Code had no sign-in to check, so neither runs there yet.
+- **Each vendor's terms of use apply to its CLI.** The plugin uses only the interfaces Anthropic and OpenAI document for scripted use (`claude -p`, `codex exec`), with your own sign-in, one task at a time per plan.
+
 ## What the coordinators show
 
 - **Claude Code.** The skill loads as `ai-meter:delegate`; each tool call appears as an MCP call to `ai-meter-delegate` with its arguments, and its JSON result. A job in the background is not shown until the coordinator asks for it with `delegate_status` or `delegate_result`.
@@ -142,10 +159,12 @@ Measured on 2026-11-02 with Claude Code 2.1.316 on Sonnet 5.5 as coordinator, in
 - Worktrees of `modify` tasks are in `~/.aimeter/worktrees` and are never removed by the plugin.
 - AI Meter's lease book holds only pool, model, agent, times and counters ([README](../../README.md#privacy-policy)).
 - OpenRouter can route a `:free` model to a provider key you linked to your OpenRouter account (BYOK), billed to that account.
+- A task on your plan goes to Anthropic or OpenAI under your own account and their terms, as your own use of Claude Code or Codex does. Before starting one, the plugin runs the agent's `auth status` or `login status` and keeps only the sign-in method, never the account.
 
 ## Limits
 
-- AI Meter describes only the agents and places its definitions mark as verified, today Pi in WSL, and OpenCode in WSL and on Windows. A plugin in WSL cannot start a Windows agent, nor one in another distribution, yet. Other agents found, such as Codex or Claude Code, are listed in `runtimes.unsupported` with the reason.
+- AI Meter describes only the agents and places its definitions mark as verified, today Pi in WSL, OpenCode in WSL and on Windows, and Claude Code and Codex on a plan in WSL. A plugin in WSL cannot start a Windows agent, nor one in another distribution, yet. Other agents found are listed in `runtimes.unsupported` with the reason.
+- The reserve binds only tasks run through AI Meter: your own sessions on the same plan go on as before.
 - **Not verified live:** that `taskkill /T` on `wsl.exe` ends every Linux process an agent started inside WSL; and OpenCode's permission rules against a real OpenCode 1.x.
 - Long tasks hold one lease for their whole timeout plus two minutes, rather than renewing it.
 - A coordinator inside a packaged app, such as the Claude desktop app, may not see agents installed elsewhere. The plugin uses the paths AI Meter describes and installs nothing.
@@ -154,7 +173,7 @@ Measured on 2026-11-02 with Claude Code 2.1.316 on Sonnet 5.5 as coordinator, in
 ## Development
 
 ```bash
-node --test plugins/ai-meter/tests/delegate.test.mjs
+node --test plugins/ai-meter/tests/delegate.test.mjs plugins/ai-meter/tests/plan.test.mjs
 ```
 
-The tests use a fake AI Meter (`tests/fixtures/fake-meter.mjs`, through `AI_METER_RELAY`) and fake Pi and OpenCode agents. `AI_METER_JOBS` moves the jobs folder. `scripts/delegate.mjs` offers the same operations from a terminal (`start`, `result`, `status`, `cancel`, `candidates`).
+The tests use a fake AI Meter (`tests/fixtures/fake-meter.mjs`, through `AI_METER_RELAY`) and fake Pi and OpenCode agents. Claude Code and Codex replay runs recorded live on a plan (`tests/fixtures/claude-plan.jsonl`, `codex-plan.jsonl`, trimmed, with no personal data). `AI_METER_JOBS` moves the jobs folder. `scripts/delegate.mjs` offers the same operations from a terminal (`start`, `result`, `status`, `cancel`, `candidates`).
