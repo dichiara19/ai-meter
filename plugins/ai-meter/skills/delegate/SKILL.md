@@ -27,7 +27,7 @@ The task, and every file the agent reads, go to the provider of the chosen model
 
 ## How
 
-1. **Optionally look first.** `delegate_candidates` lists where a task can run now: candidates in AI Meter's order, each pool's room, why other models are left out, and the agents found. AI Meter orders by room, not by quality or running cost, and breaks ties alphabetically. Choose yourself when it matters, and pass `model` and `runtime`:
+1. **Optionally look first.** `delegate_candidates` lists where a task can run now: candidates in AI Meter's order, each pool's room (and the warnings shared by all its candidates), why other models are left out, and the agents found. `excluded` names the models only where you could act on the reason; otherwise it gives a count. AI Meter orders by room, not by quality or running cost, and breaks ties alphabetically. Choose yourself when it matters, and pass `model` and `runtime`:
    - a model known to be good at code, with enough context for the files involved, and stated tool support;
    - for many small tasks, the agent with the smaller fixed cost per request: Pi sends about 4,600 tokens of system prompt with every request, OpenCode about 9,600, and both count against the same free quota;
    - the user's preferred agent (`runtime`, and `where`) when they have one.
@@ -38,9 +38,13 @@ The task, and every file the agent reads, go to the provider of the chosen model
    - optionally `model`, `runtime`, `where`, `min_context`, `timeout_seconds`;
    - `wait_seconds` up to 50, so that short tasks answer in the same call.
 3. **Follow it.** While `status` is `queued`, `starting` or `running`, call `delegate_result` with `wait_seconds: 50`. `delegate_status` lists recent jobs; `delegate_cancel` stops one, with the processes it started, and releases its lease. `timeout_seconds` covers the whole job, choosing the candidate included. At most four jobs run at once: a fifth is refused until one ends.
-4. **Check the answer before using it.** Verify claims against the code. A wrong but confident answer is common on small free models. `completed` means the agent ended normally; an answer cut off for length, or output the plugin could not read, is `failed` with the reason in `error`. Tokens are `null` when no event reported them, which is not zero.
-5. **For `modify`, review the worktree.** The change is in `worktree.path`, on branch `worktree.branch`, made from the commit `worktree.base` (uncommitted changes in the user's checkout are not in it). `worktree.commits` lists commits the agent made, and `files` and `diff_stat` compare with the base, so they include them. Nothing is merged. Read the diff (`worktree.review`), then bring the change over yourself only if the user agrees, or discard it with `worktree.discard`.
-6. **Tell the user** which agent and model ran it, and the requests and tokens from `counters`.
+4. **Check the answer before using it.** `answer` is only the agent's own claim. A wrong but confident answer is common on small free models.
+   - Check its claims against `activity`, which the plugin builds from the agent's tool events: `calls` (each tool call, its arguments in one line, and `failed`), `files_written`, and `commands` with `ok`, `exit_code` and `output_tail`, the end of the output. An answer that says tests pass needs a test command with `ok: true` and a passing result in its `output_tail`; one that says a file was changed needs that file in `files_written`. A claim with no matching call is unverified: say so, or check it yourself. No `activity` means the agent made no tool call.
+   - Verify what matters against the code as well: `activity` shows that a command ran, not that it tested the right thing.
+   - A failed call in `activity` is not a failed task: agents often try a command that does not match and go on.
+   - `completed` means the agent ended normally; an answer cut off for length, or output the plugin could not read, is `failed` with the reason in `error`. On a completed task `error` is null; errors the agent recovered from, such as a rate limit it retried, are in `counters.recovered_errors` and need no action. Tokens are `null` when no event reported them, which is not zero.
+5. **For `modify`, review the worktree.** The change is in `worktree.path`, on branch `worktree.branch`, made from the commit `worktree.base` (uncommitted changes in the user's checkout are not in it). `worktree.commits` lists commits the agent made, and `files` and `diff_stat` compare with the base, so they include them. New files are in the diff too, with status `A` (the plugin marks them intent-to-add, without staging content). Nothing is merged. Read the diff (`worktree.review`), then bring the change over yourself only if the user agrees, or discard it with `worktree.discard`.
+6. **Tell the user** which agent and model ran it, how long it took (`duration_seconds`), and the requests and tokens from `counters`.
 
 ## When it does not start
 
@@ -69,7 +73,7 @@ Cloudflare Workers AI models are priced, but free within 10,000 Neurons a day. T
 
 - `counters.paid_request: true`: a request was priced above zero, so the plugin stopped the agent. That request was already made and is billed: tell the user, with `counters.cost`, and do not retry on the same model.
 - On a free tier, `counters.allowance` is the budget in US dollars, and `paid_request: true` means the requests cost more than it: the free Neurons are used up for today. Tell the user, with `counters.cost`, and do not retry on that service today.
-- `warnings` containing `openrouter_byok_fallback`: OpenRouter can retry a `:free` request on a provider key the user linked to OpenRouter (BYOK), billed to that account, while the agent still shows a price of zero. Mention it once. `counters.byok_fallback: true` means OpenRouter's error named such a key: tell the user that their linked key was used, and suggest unlinking it before delegating again.
+- `warnings` containing `openrouter_byok_fallback` (in `delegate_candidates`, on the OpenRouter pool): OpenRouter can retry a `:free` request on a provider key the user linked to OpenRouter (BYOK), billed to that account, while the agent still shows a price of zero. Mention it once. `counters.byok_fallback: true` means OpenRouter's error named such a key: tell the user that their linked key was used, and suggest unlinking it before delegating again.
 
 ## Good to know
 - Copies of the task text and the agent's output are kept on this PC, in `~/.aimeter/jobs`. Folders of ended jobs are removed a week later, the next time a task starts; nothing removes them if no task starts again. The provider has its own copy (see "What leaves this PC").
