@@ -31,7 +31,10 @@ namespace AIMeter
     internal static class ModelSizes
     {
         private const int SchemaVersion = 1, RetryDays = 7;
-        internal static string ApiBase = "https://huggingface.co/api/models/";
+        private const string ApiBase = "https://huggingface.co/api/models/";
+
+        /// <summary>Both patterns are simple; the timeout only bounds a pathological id from a model list.</summary>
+        private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
 
         private static readonly object Sync = new object();
         private static Dictionary<string, Entry> entries;   // Repository id, case-insensitive, to what it gave.
@@ -46,14 +49,14 @@ namespace AIMeter
         private static string FilePath { get { return Path.Combine(Settings.Folder, "model-sizes.json"); } }
 
         /// <summary>A repository id as "owner/name", the only form sent to Hugging Face.</summary>
-        private static readonly Regex Repository = new Regex(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$");
+        private static readonly Regex Repository = new Regex(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$", RegexOptions.None, MatchTimeout);
 
         /// <summary>
         /// A size written in a model id: a number followed by b (billion) or t (trillion), on its own between separators,
         /// optionally as experts × size. The first one is the total: "-30b-a3b" is 30B with 3B active, and the "a3b" is
         /// skipped because a letter precedes it.
         /// </summary>
-        private static readonly Regex IdSize = new Regex(@"(?<![a-z0-9.])(\d+(?:\.\d+)?)(?:x(\d+(?:\.\d+)?))?([bt])(?![a-z0-9])", RegexOptions.CultureInvariant);
+        private static readonly Regex IdSize = new Regex(@"(?<![a-z0-9.])(\d+(?:\.\d+)?)(?:x(\d+(?:\.\d+)?))?([bt])(?![a-z0-9])", RegexOptions.CultureInvariant, MatchTimeout);
 
         /// <summary>The model's total weights, or null when neither Hugging Face nor its id states them.</summary>
         public static ModelSize Of(FreeModel m)
@@ -74,7 +77,9 @@ namespace AIMeter
         {
             if (string.IsNullOrEmpty(id)) return null;
             string name = id.Substring(id.LastIndexOf('/') + 1).ToLowerInvariant();
-            var match = IdSize.Match(name);
+            Match match;
+            try { match = IdSize.Match(name); }
+            catch (RegexMatchTimeoutException) { return null; }
             if (!match.Success) return null;
             double size = double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
             if (match.Groups[2].Success) size *= double.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
@@ -114,13 +119,19 @@ namespace AIMeter
             lock (Sync)
             {
                 var known = Entries();
-                return models.Select(m => m.HuggingFaceId).Where(id => id != null && Repository.IsMatch(id)).Distinct(StringComparer.OrdinalIgnoreCase)
+                return models.Select(m => m.HuggingFaceId).Where(IsRepository).Distinct(StringComparer.OrdinalIgnoreCase)
                     .Where(id =>
                     {
                         Entry e;
                         return !known.TryGetValue(id, out e) || (e.Parameters == null && nowUtc - e.CheckedUtc > TimeSpan.FromDays(RetryDays));
                     }).ToList();
             }
+        }
+
+        private static bool IsRepository(string id)
+        {
+            try { return id != null && Repository.IsMatch(id); }
+            catch (RegexMatchTimeoutException) { return false; }
         }
 
         /// <summary>
