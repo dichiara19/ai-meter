@@ -5,7 +5,7 @@ description: Hand a self-contained coding task (reading and summarising code, fi
 
 # Delegate a task to a free model with AI Meter
 
-The `ai-meter-delegate` tools run a task with a coding agent already set up on this PC (Pi or OpenCode), on a free model whose pool has room according to AI Meter, or, when the user agrees, with Codex or Claude Code on one of the user's subscription plans (see *Subscription plans* below). You stay the coordinator: you write the task, check the answer and decide what to keep.
+The `ai-meter-delegate` tools run a task with a coding agent already set up on this PC (Pi or OpenCode, or AI Meter's managed Pi), on a free model whose pool has room according to AI Meter, or, when the user agrees, with Codex or Claude Code on one of the user's subscription plans (see *Subscription plans* below). You stay the coordinator: you write the task, check the answer and decide what to keep.
 
 ## When to delegate
 
@@ -34,7 +34,7 @@ The task, and every file the agent reads, go to the provider of the chosen model
    - `task`: complete instructions. Name the files, say what to look for and the shape of the answer. The agent sees nothing else;
    - `workspace`: the absolute path of the repository root (the server may not run in it); it must be in a Git repository;
    - `mode`: `read_only` (default), or `modify` for a task that changes files;
-   - optionally `model`, `runtime`, `where`, `min_context`, `timeout_seconds`;
+   - optionally `model`, `runtime`, `where`, `managed`, `min_context`, `timeout_seconds`;
    - `wait_seconds` up to 50, so that short tasks answer in the same call.
 3. **Follow it.** While `status` is `queued`, `starting` or `running`, call `delegate_result` with `wait_seconds: 50`. `delegate_status` lists recent jobs; `delegate_cancel` stops one, with the processes it started, and releases its lease. `timeout_seconds` covers the whole job, choosing the candidate included. At most four jobs run at once: a fifth is refused until one ends.
 4. **Check the answer before using it.** `answer` is only the agent's own claim. A wrong but confident answer is common on small free models.
@@ -47,10 +47,17 @@ The task, and every file the agent reads, go to the provider of the chosen model
 
 ## When it does not start
 
-- `error` with `excluded` and `runtimes`: no free model fits, or no agent has a key of its own. Explain the reasons. `runtimes.unsupported` lists agents that are installed but cannot be used (such as Gemini CLI, or Codex and Claude Code on Windows), each with a `detail` sentence you can show. Never install an agent or handle a key: the user sets agents up.
+- `error` with `excluded` and `runtimes`: no free model fits, or no agent has a key of its own. Explain the reasons. `runtimes.unsupported` lists agents that are installed but cannot be used (such as Gemini CLI, or Codex and Claude Code on Windows), each with a `detail` sentence you can show. Never install an agent or handle a key: the user sets agents up. When nothing can run the task, the folder is on Windows and `runtimes.managed.installed` is false, you may tell the user about AI Meter's managed Pi (see below).
+- An `error` that ends with the agent's exit code and the start of its error output, such as "No API key found for openrouter.": the agent could not start the task. Show that line to the user; the fix is theirs.
 - `skipped`: candidates that were tried and why, such as AI Meter's own error for that agent, an agent and place it has not verified, an agent in another WSL distribution, a key only exported in a WSL shell profile when the plugin runs on Windows, or a pool with no room.
 - `excluded` with `agent_lists_price`: the service lists the model as free, but the agent's own list prices it, so the agent would pay for the first request before the plugin could stop it.
 - AI Meter must be installed on Windows; its relay starts it when needed.
+
+## AI Meter's managed Pi
+
+A copy of Pi that AI Meter keeps for users with a key and no agent. It exists only if the user installed it in AI Meter's Settings › AI apps › Delegated tasks and ticked there the services whose keys it may use; neither you nor the plugin can install it or give it a key. `runtimes.managed` says whether it is installed, and its candidates have `managed: true`.
+- Windows folders only, and never for a subscription plan. `managed: true` pins it; `managed: false` keeps to the user's own agents.
+- A `modify` task runs commands through Git Bash when Git for Windows is installed, otherwise through PowerShell (`candidate.shell`), never through WSL's `bash.exe`. The shell is chosen only when the task starts, so in a task for it say what to run ("run the tests") rather than bash command lines.
 
 ## Best effort: only with the user's agreement
 

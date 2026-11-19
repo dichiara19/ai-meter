@@ -60,10 +60,16 @@ Three things the PR marked as unverified are still unverified after the release,
 
 1. **Accept [ADR 0001](../adr/0001-optional-agent-orchestration.md).** Resolved: accepted when PR #16 was merged.
 2. **Default refresh behaviour of read tools.** Resolved 2026-11-02: only on request ([contracts §1](orchestration-contracts.md#1-freshness-of-read-tools-m1)).
-3. **Credentials for the runner in the MVP.** The recommendation is that the runtime uses only its own sign-in, and AI Meter never passes a key to it (ADR 0001, decision 3).
+3. **Credentials for the runner in the MVP.** The recommendation is that the runtime uses only its own sign-in, and AI Meter never passes a key to it (ADR 0001, decision 3). Amended for one runtime by [ADR 0004](../adr/0004-managed-pi-for-delegation.md): the managed copy of Pi holds the keys the user chose to copy into it, and nowhere else do keys reach a runtime.
 4. **Epic issue.** Resolved: [#17](https://github.com/dichiara19/ai-meter/issues/17), opened once GitHub CLI 2.103.3 was installed and signed in.
 
 ## Log
+
+- **2026-11-20, managed Pi ([#98](https://github.com/dichiara19/ai-meter/issues/98), [ADR 0004](../adr/0004-managed-pi-for-delegation.md)), `feat/managed-pi`, in progress.**
+  - **The change.** On Windows, a user with no agent of their own can have AI Meter download Pi's standalone build (1.5.2, pinned, checked against a SHA-256 in the sources) from Settings. It runs with its own configuration folder and holds only the keys the user ticked. The user's own agent still comes first. The contract additions are in [contracts §3.1](orchestration-contracts.md#31-describe_dispatch).
+  - **Evidence so far** (the ADR's live test, 2026-11-19, Pi 1.5.2 against a local stand-in for the model): arguments and stdin as in WSL; its own configuration folder with no `~/.pi`; file tools work without bash; PowerShell 5.1 works; Pi uses WSL's `bash.exe` when Git Bash is missing; Git fails on a WSL folder through `\\wsl.localhost`; a child command can outlive `taskkill /T /F` (#37).
+  - **NOT RUN:** a request to a real model from the Windows build; the Store-signed build starting the managed copy; Store certification of the listing's disclosure ([STORE.md](../STORE.md#optional-download-managed-pi)).
+  - **Still to do:** the plugin (0.3.0) that uses `managed`, `commands` and `alternatives`; a daily test by the maintainer; release.
 
 - **2026-11-02, best-effort candidates, and a first task on NVIDIA.**
   - **The change.** NVIDIA and Gemini gave no candidates, because their lists state neither tools nor prices. With the maintainer, they were made a category of their own:

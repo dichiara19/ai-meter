@@ -563,9 +563,7 @@ namespace AIMeter
         {
             get
             {
-                // A packaged app's AppData is private to the package, so other apps could not read the script there.
-                string folder = Native.IsPackaged ? Path.Combine(Probe.Home, ".aimeter") : Settings.Folder;
-                return Path.Combine(folder, "mcp.ps1");
+                return Path.Combine(Settings.SharedFolder, "mcp.ps1");
             }
         }
 

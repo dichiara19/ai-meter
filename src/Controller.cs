@@ -120,6 +120,7 @@ namespace AIMeter
             // AI apps connected through MCP read the latest snapshot, and can ask the collection worker for a fresh one.
             // The relay is written at every start, so it names this copy and exists before anyone adds AI Meter with an
             // agent's own "mcp add" command.
+            SyncManagedPiKeys();
             refreshGate = new RefreshGate((id, catalogue) => collector.Invalidate(id, catalogue), () => wake.Set(), () => paused);
             mcpHost = new McpPipeHost(new McpServer(() => refreshGate.Newest(Last), () => Settings.McpTitles, refreshGate, null, Candidates.ScanRuntimes,
                 new LeaseBook(Path.Combine(Settings.Folder, "leases.json"))));

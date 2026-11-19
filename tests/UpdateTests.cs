@@ -157,7 +157,7 @@ namespace AIMeter
                 "Once a day, ask GitHub whether a newer stable version exists and show a notice. Nothing is downloaded or installed, and the request includes no account or identifier.",
                 "Also tell me about beta and release candidate versions, which can be less stable.",
                 "You are using {0}. Click to open the release page: nothing is downloaded automatically.",
-                "The Microsoft Store installs updates by itself. Once a day AI Meter also asks the Store whether one is waiting, to show it here; it never contacts GitHub.",
+                "The Microsoft Store installs updates by itself. Once a day AI Meter also asks the Store whether one is waiting, to show it here; it never asks GitHub about updates.",
                 "An update is waiting in the Microsoft Store", "Open the Store",
                 "The update check below asks the Microsoft Store whether an update is waiting.",
                 "The update check below also asks GitHub for the latest version.",

@@ -3,7 +3,8 @@
 // ("runtime@where"), the describe_dispatch errors by "runtime@where", the pools that refuse leases, the warnings,
 // the runtimes found and unsupported, the best-effort candidates (returned only with include_best_effort, counted
 // otherwise), the free-tier candidates (returned only with include_free_tier) and the budget a lease grants, the
-// tools it never answers (`silent`, as a relay that stays up but hangs), and how each fake agent behaves.
+// tools it never answers (`silent`, as a relay that stays up but hangs), and how each fake agent behaves. A describe
+// with managed: true is answered as AI Meter's managed Pi.
 
 import { appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -45,6 +46,7 @@ const tools = {
       ...(args.distro ? { distro: args.distro } : {}),
       ...(scenario.warnings ? { warnings: scenario.warnings } : {}),
       ...(PLAN_AGENTS.includes(args.runtime) ? planDispatch(args) : {}),
+      ...(args.managed ? managedDispatch(args) : {}),
     };
   },
   claim_capacity: (args) => {
@@ -73,6 +75,22 @@ function planDispatch(args) {
     sign_in_check: args.runtime === "claude"
       ? { program: process.execPath, arguments: [agent, "signin", "claude", signIn], json_field: "authMethod", expect: "claude.ai" }
       : { program: process.execPath, arguments: [agent, "signin", "codex", signIn], text: "Logged in using ChatGPT" },
+  };
+}
+
+/**
+ * The managed Pi (ADR 0004): its own configuration folder, which commands a mode runs (none, or PowerShell), and for
+ * modify a git_bash alternative. The fake agent gets the shell as an extra argument and names it in its answer.
+ */
+function managedDispatch(args) {
+  const behaviour = (scenario.behaviour || {})[args.runtime] || "ok";
+  const modify = args.mode === "modify";
+  return {
+    managed: true,
+    commands: modify ? "powershell" : "none",
+    arguments: [agent, args.runtime, behaviour, modify ? "powershell" : "none"],
+    ...(modify ? { alternatives: [{ shell: "git_bash", arguments: [agent, args.runtime, behaviour, "git_bash"] }] } : {}),
+    environment: { FAKE_AGENT_MODE: args.mode, PI_CODING_AGENT_DIR: "C:\\AIMeter\\pi\\config", ...(scenario.env_file ? { FAKE_ENV_FILE: scenario.env_file } : {}) },
   };
 }
 

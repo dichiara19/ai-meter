@@ -18,8 +18,9 @@ const SUMMARY_CHARACTERS = 160;
 const COMMAND_CHARACTERS = 240;
 const EXCERPT_CHARACTERS = 300;
 
-// Tool names of Pi and OpenCode, by what they do. Other tools are listed as calls only.
-const COMMAND_TOOLS = new Set(["bash", "shell"]);
+// Tool names of Pi and OpenCode, by what they do. Other tools are listed as calls only. The managed Pi without Git Bash
+// runs commands through its powershell tool, whose call has a command argument as bash's does.
+const COMMAND_TOOLS = new Set(["bash", "shell", "powershell"]);
 const WRITING_TOOLS = new Set(["write", "edit", "multiedit", "patch", "apply_patch"]);
 
 export class Activity {

@@ -76,6 +76,7 @@ namespace AIMeter
             FreeTierTests.Register(Test);
             HermesTests.Register(Test);
             HardeningTests.Register(Test);
+            ManagedPiTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 

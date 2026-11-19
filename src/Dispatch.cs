@@ -35,15 +35,21 @@ namespace AIMeter
             if (from != "windows" && from != "wsl") return plan.Refuse("from must be windows or wsl");
             var kind = Agents.Get(access.Runtime);
             if (kind == null) return plan.Refuse("unknown runtime " + access.Runtime);
-            var place = kind.PlaceFor(access.Where);
+            // The copy AI Meter keeps has a dispatch entry of its own, verified apart from the user's installation.
+            plan.Managed = access.Managed;
+            var place = kind.PlaceFor(access.Managed ? ManagedPi.Place : access.Where);
             if (place == null)
-                return plan.Refuse(access.Runtime + " has not been verified " + (access.Where == "wsl" ? "in WSL" : "on Windows") + " yet");
+                return plan.Refuse(access.Managed ? access.Runtime + " has no managed copy in its definition"
+                    : access.Runtime + " has not been verified " + (access.Where == "wsl" ? "in WSL" : "on Windows") + " yet");
             if (from == "wsl" && access.Where == "windows") return plan.Refuse("starting a Windows agent from WSL has not been verified yet");
             if (access.Where == "wsl" && string.IsNullOrEmpty(distro)) return plan.Refuse("no WSL distribution is known");
+            if (access.Managed && InsideWsl(workspace))
+                return plan.Refuse("the managed copy of " + kind.Name + " works on Windows folders only; a folder inside WSL needs an agent installed there");
+            if (access.Managed && string.IsNullOrEmpty(access.ConfigFolder)) return plan.Refuse("the managed copy's configuration folder is not known");
             plan.VersionVerified = place.Verifies(version);
             string folder = string.IsNullOrEmpty(workspace) ? "{workspace}" : workspace;
             string unsafeValue = Unsafe("model", model) ?? Unsafe("provider", access.Provider) ?? Unsafe("workspace", workspace) ?? Unsafe("distribution", distro) ??
-                Unsafe("program", access.Program) ?? Unsafe("home", access.Home);
+                Unsafe("program", access.Program) ?? Unsafe("home", access.Home) ?? Unsafe("configuration folder", access.ConfigFolder);
             if (unsafeValue != null) return plan.Refuse(unsafeValue);
 
             // From Windows into WSL, wsl.exe --cd already sets the folder, given as a Windows path the agent would not
@@ -51,6 +57,7 @@ namespace AIMeter
             var values = new Dictionary<string, string>
             {
                 { "provider", access.Provider }, { "model", model }, { "workspace", access.Where == "wsl" && from == "windows" ? "." : folder },
+                { "config", access.ConfigFolder },
             };
             List<string> template;
             if (!(place.Arguments ?? kind.Dispatch.Arguments).TryGetValue(plan.Mode, out template))
@@ -59,7 +66,17 @@ namespace AIMeter
             foreach (var kv in place.Environment ?? kind.Dispatch.Environment)
                 plan.Environment[kv.Key] = kv.Value is string ? Fill((string)kv.Value, values) : Json.Serialize(FillAll(kv.Value, values));
             plan.Output = new Dictionary<string, string>(kind.Dispatch.Output);
+            foreach (var kv in place.Output) plan.Output[kv.Key] = kv.Value;
             plan.Notes.AddRange(kind.Dispatch.Notes);
+            plan.Notes.AddRange(place.Notes);
+            string commands;
+            if (place.Commands.TryGetValue(plan.Mode, out commands)) plan.Commands = commands;
+            // Argument lists for another shell, which a plugin may use instead once it has prepared what the shell needs.
+            foreach (var alternative in place.Alternatives.OrderBy(a => a.Key, StringComparer.Ordinal))
+            {
+                List<string> other;
+                if (alternative.Value.TryGetValue(plan.Mode, out other)) plan.Alternatives[alternative.Key] = other.Select(a => Fill(a, values)).ToList();
+            }
             // A plan agent starts from an empty environment, so no API key or base URL can make it bill the API (ADR 0003).
             plan.CleanEnvironment = access.Plan || kind.Dispatch.CleanEnvironment;
             if (access.Plan && kind.Plan == null) return plan.Refuse(kind.Name + " has no plan in its definition");
@@ -155,10 +172,21 @@ namespace AIMeter
             return null;
         }
 
-        /// <summary>A template with {provider}, {model} and {workspace} filled in one pass, so a value is never read as a placeholder.</summary>
+        /// <summary>
+        /// A template with {provider}, {model}, {workspace} and {config} filled in one pass, so a value is never read as
+        /// a placeholder. A placeholder without a value (config, for an installation of the user's) stays as written.
+        /// </summary>
         private static string Fill(string template, Dictionary<string, string> values)
         {
-            return Regex.Replace(template, @"\{(provider|model|workspace)\}", m => values[m.Groups[1].Value] ?? m.Value);
+            return Regex.Replace(template, @"\{(provider|model|workspace|config)\}", m => values[m.Groups[1].Value] ?? m.Value);
+        }
+
+        /// <summary>Whether a Windows path leads into a WSL distribution's files (\\wsl.localhost\… or \\wsl$\…).</summary>
+        internal static bool InsideWsl(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            string unified = path.Replace('/', '\\');
+            return unified.StartsWith(@"\\wsl.localhost\", StringComparison.OrdinalIgnoreCase) || unified.StartsWith(@"\\wsl$\", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>Fill the strings of a JSON value (an environment value written as an object or array).</summary>
@@ -194,6 +222,12 @@ namespace AIMeter
             /// <summary>For a plan agent: the sign-in check to pass before starting it, and "included_in_plan".</summary>
             public SignInCheck SignIn;
             public string Billing;
+            /// <summary>The agent is the copy AI Meter keeps (ADR 0004).</summary>
+            public bool Managed;
+            /// <summary>What the agent runs commands with when started with Arguments: "none", "bash" or "powershell"; null when the definition does not say.</summary>
+            public string Commands;
+            /// <summary>Argument lists for another shell, by the shell's name ("git_bash"), in place of Arguments.</summary>
+            public readonly Dictionary<string, List<string>> Alternatives = new Dictionary<string, List<string>>();
             public List<string> Arguments = new List<string>();
             public Dictionary<string, string> Environment = new Dictionary<string, string>();
             public Dictionary<string, string> Output = new Dictionary<string, string>();

@@ -21,8 +21,10 @@
 //   tools     uses tools before answering, as in a live run: a command that fails, a write, an edit that fails (OpenCode)
 //             and a command that succeeds with long output, each with absolute paths in its folder;
 //   manytools (Pi) makes 45 tool calls before answering;
-//   retried   (Pi) meets a 429, retries as Pi does, then answers normally.
-// Requests are otherwise priced at zero, as the agents do for free models.
+//   retried   (Pi) meets a 429, retries as Pi does, then answers normally;
+//   nokey     (Pi) exits with 1 after its session event, the reason on stderr, as Pi does without a key.
+// Requests are otherwise priced at zero, as the agents do for free models. A third argument (the managed Pi's shell)
+// is named in Pi's answer: "echo via <shell>: <task>".
 //
 // Claude Code and Codex on a plan replay the events recorded live (claude-plan.jsonl, codex-plan.jsonl), with {folder}
 // standing for their folder; FAKE_ENV_FILE, when set, receives the agent's environment as JSON. Behaviours:
@@ -108,6 +110,12 @@ function pi() {
   }
   if (behaviour === "longline") process.stdout.write("x".repeat(5 * 1024 * 1024) + "\n");
   emit({ type: "session", id: "s1", cwd: process.cwd() });
+  if (behaviour === "nokey") {
+    // What Pi 1.5.2 writes on Windows: a warning first when the model is not in its list, pointers to its documentation last.
+    process.stderr.write('Warning: Model "x" not found for provider "openrouter". Using custom model id.\nNo API key found for openrouter.\n\nUse /login to log into a provider via OAuth or API key. See:\n  docs/providers.md\n');
+    process.exitCode = 1;
+    return;
+  }
   emit({ type: "agent_start" });
   emit({ type: "turn_start" });
   if (behaviour === "tools") piTools();
@@ -126,7 +134,7 @@ function pi() {
     type: "message_end",
     message: {
       role: "assistant",
-      content: failed ? [] : [{ type: "text", text: behaviour === "list" ? listFolder() : "echo: " + task }],
+      content: failed ? [] : [{ type: "text", text: behaviour === "list" ? listFolder() : (signIn ? "echo via " + signIn + ": " : "echo: ") + task }],
       stopReason: failed ? "error" : behaviour === "length" ? "length" : "stop",
       errorMessage: behaviour === "byok" ? byok : failed ? "429 Too Many Requests: free-models-per-min" : undefined,
       usage: { input: 100, output: 7, cacheRead: 20, cacheWrite: 0, totalTokens: 127, cost: { total: cost } },

@@ -4,12 +4,17 @@
 
 import { join } from "node:path";
 
+/**
+ * A job in a few fields. The candidate carries managed for AI Meter's managed Pi, and shell when the plugin chose the
+ * shell its commands ran through (git_bash or powershell); a task that runs no command says nothing about shells.
+ */
 export function brief(job) {
+  const shell = job.shell && job.shell !== "none" ? { shell: job.shell } : {};
   return {
     job_id: job.id,
     status: job.status,
     mode: job.mode,
-    candidate: job.candidate || null,
+    candidate: job.candidate ? { ...job.candidate, ...shell } : null,
     created_at: job.created_at,
     ended_at: job.ended_at || null,
     ...(job.ended_at ? { duration_seconds: secondsBetween(job.created_at, job.ended_at) } : {}),
@@ -85,6 +90,7 @@ export function candidates(found) {
       runtime: c.runtime.name,
       where: c.runtime.where,
       ...(c.runtime.distro ? { distro: c.runtime.distro } : {}),
+      ...(c.runtime.managed ? { managed: true } : {}),
       pool: c.pool,
       context_tokens: c.limits?.per_request?.context_tokens?.value ?? c.estimated?.context_tokens ?? null,
       max_output_tokens: c.limits?.per_request?.max_output_tokens?.value ?? c.estimated?.max_output_tokens ?? null,

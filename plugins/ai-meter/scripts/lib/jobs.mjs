@@ -2,7 +2,8 @@
 // coordinator's call returns at once and the task survives the call. The worker (runJob) follows ADR 0002:
 //   list_candidates -> describe_dispatch -> claim_capacity -> start the agent without a shell, task on stdin
 //   -> read its events -> release_capacity with the outcome.
-// It describes before claiming, so a lease is only taken for a candidate the plugin can actually start.
+// It describes before claiming, so a lease is only taken for a candidate the plugin can actually start. For AI Meter's
+// managed Pi (ADR 0004), shell.mjs chooses the shell its commands run through, recorded as job.shell.
 //
 // Each job is a folder under the jobs folder (~/.aimeter/jobs, or AI_METER_JOBS): job.json (the state), task.txt,
 // events.jsonl (the agent's output) and stderr.txt. A "cancel" file asks the worker to stop. A read-only task works
@@ -30,9 +31,10 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, re
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canRead, readerFor, summarise } from "./agents.mjs";
+import { canRead, readerFor, shortError, summarise } from "./agents.mjs";
 import { place, ToolError, withMeter } from "./meter.mjs";
 import { checkSignIn, cleanEnvironment, coordinatorOf } from "./plan.mjs";
+import { shellFor } from "./shell.mjs";
 import { createSnapshot, createWorktree, describeChanges, removeSnapshot, repositoryOf } from "./workspace.mjs";
 
 const ENDED = new Set(["completed", "failed", "cancelled", "timed_out"]);
@@ -44,6 +46,7 @@ export const MAXIMUM_ACTIVE_JOBS = 4;   // Leases pace the services; this bounds
 const LINE_LIMIT_CHARACTERS = 4 * 1024 * 1024;
 const EVENTS_LIMIT_BYTES = 64 * 1024 * 1024;
 const STDERR_LIMIT_BYTES = 1024 * 1024;
+const STDERR_HEAD_BYTES = 4096;
 const OWN_PROCESS_GROUP = process.platform !== "win32";
 
 export const root = () => process.env.AI_METER_JOBS || join(homedir(), ".aimeter", "jobs");
@@ -142,7 +145,11 @@ export function start(options) {
     workspace: options.workspace,
     mode,
     timeout_seconds: timeout,
-    wanted: pick(options, ["service", "model", "runtime", "where", "distro", "min_context", "cost_policy"]),
+    wanted: {
+      ...pick(options, ["service", "model", "runtime", "where", "distro", "min_context", "cost_policy"]),
+      // true: only AI Meter's managed Pi (ADR 0004); false: only agents the user installed.
+      ...(options.managed === undefined || options.managed === null || options.managed === "" ? {} : { managed: options.managed === true || options.managed === "true" }),
+    },
     allow_best_effort: options.allow_best_effort === true || options.allow_best_effort === "true",
     allow_free_tier: options.allow_free_tier === true || options.allow_free_tier === "true",
     allow_plan: options.allow_plan === true || options.allow_plan === "true",
@@ -272,7 +279,7 @@ async function choose(job, signal) {
     });
     const matches = (c) =>
       (!wanted.model || c.model === wanted.model) && (!wanted.runtime || c.runtime.name === wanted.runtime) && (!wanted.where || c.runtime.where === wanted.where) &&
-      (!wanted.distro || c.runtime.distro === wanted.distro);
+      (!wanted.distro || c.runtime.distro === wanted.distro) && (wanted.managed === undefined || Boolean(c.runtime.managed) === wanted.managed);
     const candidates = [
       ...found.candidates.filter(matches),
       ...(job.allow_best_effort ? (found.best_effort || []).filter(matches).map((c) => ({ ...c, bestEffort: true })) : []),
@@ -281,7 +288,8 @@ async function choose(job, signal) {
 
     for (const c of candidates) {
       if (signal.aborted) throw signal.reason;
-      const which = { service: c.service, model: c.model, runtime: c.runtime.name, where: c.runtime.where, ...pick(c.runtime, ["distro"]) };
+      // managed goes back to describe_dispatch, which then describes AI Meter's own copy of the agent (ADR 0004).
+      const which = { service: c.service, model: c.model, runtime: c.runtime.name, where: c.runtime.where, ...pick(c.runtime, ["distro"]), ...(c.runtime.managed ? { managed: true } : {}) };
       if (refusedPools.has(c.pool)) continue;
       if (!canRead(which.runtime)) {
         job.skipped.push({ ...which, reason: "this plugin cannot read " + which.runtime + "'s output yet" });
@@ -365,14 +373,19 @@ async function runAgent(job, chosen, task, signal) {
 
   const reader = readerFor(plan.runtime, job.id);   // The worktree or snapshot folder is named after the job.
   reader.allowance = chosen.lease.budget?.max_cost || 0;
-  const child = spawn(plan.program, plan.arguments, {
+  // A plan agent never gets this process's environment: no API key or base URL can make it bill an API (ADR 0003).
+  const clean = plan.environment_policy === "clean";
+  // The managed Pi runs commands through a shell the plugin chose, never one Pi finds (shell.mjs, ADR 0004).
+  const shell = shellFor(plan, clean ? cleanEnvironment(plan.environment) : { ...process.env, ...plan.environment });
+  const environment = { ...plan.environment, ...shell.environment };
+  const child = spawn(plan.program, shell.arguments, {
     cwd: plan.working_directory || undefined,
-    // A plan agent never gets this process's environment: no API key or base URL can make it bill an API (ADR 0003).
-    env: plan.environment_policy === "clean" ? cleanEnvironment(plan.environment) : { ...process.env, ...plan.environment },
+    env: clean ? cleanEnvironment(environment) : { ...process.env, ...environment },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     detached: OWN_PROCESS_GROUP,   // Its own process group, so that its children can be stopped with it.
   });
+  if (shell.name) job.shell = shell.name;
   job.agent_pid = child.pid;
   job.version = plan.version;
   job.notes = plan.notes;
@@ -430,9 +443,11 @@ async function runAgent(job, chosen, task, signal) {
     }
   });
   let stderrBytes = 0;
+  let stderrHead = Buffer.alloc(0);   // The start of the error output, where an agent that cannot start says why.
   child.stderr.on("data", (chunk) => {
     if (stderrBytes < STDERR_LIMIT_BYTES) errors.write(chunk.subarray(0, STDERR_LIMIT_BYTES - stderrBytes));
     stderrBytes += chunk.length;
+    if (stderrHead.length < STDERR_HEAD_BYTES) stderrHead = Buffer.concat([stderrHead, chunk]).subarray(0, STDERR_HEAD_BYTES);
   });
   child.stdin.on("error", () => {});   // An agent that exits early closes its stdin; the exit says why.
   child.stdin.end(task);
@@ -460,6 +475,7 @@ async function runAgent(job, chosen, task, signal) {
   await Promise.all([new Promise((resolve) => events.end(resolve)), new Promise((resolve) => errors.end(resolve))]);
 
   const summary = summarise(reader, exitCode, stopped);
+  explainExit(summary, reader, exitCode, stopped, stderrHead.toString("utf8"));
   if (summary.answer.length > ANSWER_LIMIT) {
     summary.answer = summary.answer.slice(0, ANSWER_LIMIT);
     summary.answer_truncated = true;
@@ -493,6 +509,22 @@ async function runAgent(job, chosen, task, signal) {
     job.snapshot.left_behind = true;
     save(job);
   }
+}
+
+/**
+ * A failure that the agent's events do not explain (it reported no error of its own and was not stopped by the plugin)
+ * gets the exit code and the start of the agent's error output, where it says why: Pi without a key exits with 1
+ * before agent_settled and writes "No API key found for openrouter." there, after a warning when the model is not in
+ * its list and before pointers to its documentation (seen with Pi 1.5.2 on Windows, 2026-11-20), so neither the
+ * first nor the last line alone would do. Only the agent's own output is quoted, as one line cut to 300 characters;
+ * nothing from the environment is added.
+ */
+function explainExit(summary, reader, exitCode, stopped, errorOutput) {
+  if (summary.outcome !== "failed" || stopped || reader.error) return;
+  const line = errorOutput.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(" ");
+  if (!line) return;
+  const said = (Number.isInteger(exitCode) ? "The agent exited with code " + exitCode + "; its" : "The agent's") + " error output starts: " + shortError(line);
+  summary.error = summary.error ? summary.error + " " + said : said;
 }
 
 async function removeSnapshotPatiently(snapshot) {

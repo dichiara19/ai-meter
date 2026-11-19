@@ -52,7 +52,11 @@ namespace AIMeter
             return Programs.TryGetValue(where, out names) ? names : new string[0];
         }
 
-        /// <summary>The dispatch entry for a place, or null when that place has not been verified.</summary>
+        /// <summary>
+        /// The dispatch entry for a place, or null when that place has not been verified. Besides "windows" and "wsl",
+        /// where the user's own installation runs, a definition may have the place ManagedPi.Place: the copy AI Meter
+        /// keeps on Windows (ADR 0004), verified apart from an installation of the user's there.
+        /// </summary>
         public DispatchPlace PlaceFor(string where)
         {
             DispatchPlace place;
@@ -172,8 +176,9 @@ namespace AIMeter
     /// <summary>
     /// How a plugin starts an agent: per verified place, the version range and (optionally) its own arguments and
     /// environment; otherwise the shared ones. Arguments are kept per mode (read_only, modify). Values may hold the
-    /// placeholders {provider}, {model} and {workspace}; an environment value written as a JSON object is serialised
-    /// after the placeholders are filled, so a model id cannot change its structure.
+    /// placeholders {provider}, {model}, {workspace} and, for a managed copy, {config} (its own configuration folder);
+    /// an environment value written as a JSON object is serialised after the placeholders are filled, so a model id
+    /// cannot change its structure.
     /// </summary>
     internal sealed class AgentDispatch
     {
@@ -197,22 +202,39 @@ namespace AIMeter
                 CleanEnvironment = Json.Str(d, "environment_policy") == "clean",
             };
             var places = Json.Obj(d, "places");
-            foreach (var where in new[] { "windows", "wsl" })
+            foreach (var where in new[] { "windows", "wsl", ManagedPi.Place })
             {
                 var p = Json.Obj(places, where);
                 if (p == null) continue;
-                dispatch.Places[where] = new DispatchPlace
+                var place = new DispatchPlace
                 {
                     Versions = ServiceDefinition.Strings(p, "versions").ToArray(),
                     Executables = ServiceDefinition.Strings(p, "executables").Select(RuntimeKind.Local).ToArray(),
                     Arguments = ArgumentsFrom(Json.Obj(p, "arguments")),
                     Environment = Json.Obj(p, "environment"),
+                    Providers = ServiceDefinition.Strings(p, "providers").ToArray(),
                 };
+                place.Notes.AddRange(ServiceDefinition.Strings(p, "notes"));
+                AddStrings(place.Output, Json.Obj(p, "output"));
+                AddStrings(place.Commands, Json.Obj(p, "commands"));
+                var alternatives = Json.Obj(p, "alternatives");
+                if (alternatives != null)
+                    foreach (var name in alternatives.Keys)
+                    {
+                        var arguments = ArgumentsFrom(Json.Obj(alternatives, name));
+                        if (arguments != null) place.Alternatives[name] = arguments;
+                    }
+                dispatch.Places[where] = place;
             }
-            var output = Json.Obj(d, "output");
-            if (output != null) foreach (var kv in output) if (kv.Value is string) dispatch.Output[kv.Key] = (string)kv.Value;
+            AddStrings(dispatch.Output, Json.Obj(d, "output"));
             dispatch.Notes.AddRange(ServiceDefinition.Strings(d, "notes"));
             return dispatch;
+        }
+
+        /// <summary>Copy an object's string values, leaving out anything else.</summary>
+        private static void AddStrings(Dictionary<string, string> target, Dictionary<string, object> source)
+        {
+            if (source != null) foreach (var kv in source) if (kv.Value is string) target[kv.Key] = (string)kv.Value;
         }
 
         private static Dictionary<string, List<string>> ArgumentsFrom(Dictionary<string, object> d)
@@ -230,6 +252,23 @@ namespace AIMeter
         /// <summary>This place's own arguments or environment; null to use the shared ones.</summary>
         public Dictionary<string, List<string>> Arguments;
         public Dictionary<string, object> Environment;
+        /// <summary>What replaces or adds to the shared output description in this place, by the same keys.</summary>
+        public readonly Dictionary<string, string> Output = new Dictionary<string, string>();
+        /// <summary>Notes for this place, after the shared ones.</summary>
+        public readonly List<string> Notes = new List<string>();
+        /// <summary>
+        /// Per mode, what the agent runs commands with when started with this place's arguments: "none", "bash" or
+        /// "powershell". Empty when the definition does not say.
+        /// </summary>
+        public readonly Dictionary<string, string> Commands = new Dictionary<string, string>();
+        /// <summary>
+        /// Other argument lists a plugin may use instead, per mode, keyed by the shell they give the agent ("git_bash").
+        /// The place's own arguments are the ones that are safe without any preparation; a plugin uses an alternative
+        /// only after it has prepared what that shell needs (docs/MCP.md, "Managed Pi").
+        /// </summary>
+        public readonly Dictionary<string, Dictionary<string, List<string>>> Alternatives = new Dictionary<string, Dictionary<string, List<string>>>();
+        /// <summary>For a managed copy: the provider ids its build has built in, so a key alone is enough to call them.</summary>
+        public string[] Providers = new string[0];
 
         public bool Verifies(string version)
         {

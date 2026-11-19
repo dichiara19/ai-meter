@@ -87,6 +87,10 @@ namespace AIMeter
         // a window not listed keeps Candidates.DefaultReserveFiveHours or DefaultReserveWeek.
         public System.Collections.Generic.Dictionary<string, bool> DelegationPlans { get; set; }
         public System.Collections.Generic.Dictionary<string, int> DelegationReserves { get; set; }
+        // The managed Pi (ADR 0004): the services whose key the user chose to copy into its key file, by service id;
+        // and whether it is offered also where the user has a Pi of their own that delegation can run.
+        public System.Collections.Generic.List<string> ManagedPiServices { get; set; }
+        public bool ManagedPiBesideOwn { get; set; }
 
         /// <summary>The plans the user allowed delegated tasks to draw on.</summary>
         internal System.Collections.Generic.List<string> PlansAllowed()
@@ -138,6 +142,7 @@ namespace AIMeter
             DelegationModels = new System.Collections.Generic.Dictionary<string, string>();
             DelegationPlans = new System.Collections.Generic.Dictionary<string, bool>();
             DelegationReserves = new System.Collections.Generic.Dictionary<string, int>();
+            ManagedPiServices = new System.Collections.Generic.List<string>();
             HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
             HistoryEnabled = true;
@@ -174,6 +179,12 @@ namespace AIMeter
 #if AIMETER_TEST
         internal static string TestFolder;
 #endif
+
+        /// <summary>
+        /// The folder for files that programs outside AI Meter must read or start: the relay script and the managed Pi.
+        /// A packaged app's AppData is private to the package, so the Store build keeps them in the user's profile.
+        /// </summary>
+        public static string SharedFolder { get { return Native.IsPackaged ? Path.Combine(Probe.Home, ".aimeter") : Folder; } }
 
         /// <summary>
         /// The data folder as File Explorer can show it. In the Store build, files that AI Meter creates in AppData land
@@ -236,6 +247,7 @@ namespace AIMeter
             if (s.DelegationModels == null) s.DelegationModels = new System.Collections.Generic.Dictionary<string, string>();
             if (s.DelegationPlans == null) s.DelegationPlans = new System.Collections.Generic.Dictionary<string, bool>();
             if (s.DelegationReserves == null) s.DelegationReserves = new System.Collections.Generic.Dictionary<string, int>();
+            if (s.ManagedPiServices == null) s.ManagedPiServices = new System.Collections.Generic.List<string>();
             if (s.Budgets == null) s.Budgets = new System.Collections.Generic.Dictionary<string, string>();
             if (s.HiddenRows == null) s.HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             return s;

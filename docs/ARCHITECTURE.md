@@ -11,6 +11,7 @@ coordinator (Claude Code / Codex)
             ├─ relay (PowerShell, mcp.ps1) ── named pipe ── AI Meter (McpServer.cs, Candidates.cs, CandidatesPlans.cs, Dispatch.cs, Leases.cs)
             └─ coding agent (Pi / OpenCode;    started without a shell, task on stdin
                Claude Code / Codex on a plan)  plan agents: clean environment, sign-in checked first (scripts/lib/plan.mjs)
+                                               managed Pi: the copy AI Meter keeps (ManagedPi.cs), own configuration folder
                  └─ model provider (network)  receives the task and every file the agent reads
 ```
 
@@ -22,9 +23,10 @@ coordinator (Claude Code / Codex)
 | Plugin → agent's folder | The files the agent can see. | `read_only`: a snapshot of the files Git tracks or would track, without names that suggest secrets. `modify`: a new worktree from the last commit. Neither is a sandbox: a path named outside them can still be read. |
 | Agent → provider | The task and every file the agent reads. | Out of AI Meter's control: providers of free models may log or train on them. Models an agent prices are not offered; the first priced request stops the agent, after it was paid. |
 | Plan agent → billing | Requests on the user's Claude or ChatGPT plan. | Never pay-as-you-go (ADR 0003): AI Meter excludes a plan with extra usage or credits on, below the user's reserve or without a fresh reading of a plan sign-in; the plugin starts the agent from a clean environment (no API key, base URL or coordinator session reaches it), checks its sign-in first, and stops it when its events show billed usage. |
+| Managed Pi (optional) | One pinned Pi release, downloaded only when the user presses the button in Settings; the keys of the services the user ticked. | `ManagedPi.cs` checks the archive against a SHA-256 in AI Meter's sources, discards anything else and unpacks only inside its own folder. The copy lives in the shared folder (`Settings.SharedFolder`: `%APPDATA%\AIMeter`, or `%USERPROFILE%\.aimeter` in the Store build, whose AppData is private to the package) under `managed\pi`, outside `PATH`, with its own configuration folder, so the user's `~/.pi` is never read or written. Its `auth.json` is plain text, as in any Pi installation; it holds only ticked services and is rewritten when a choice or a key changes. No MCP tool installs, updates or removes it, or returns a key ([ADR 0004](adr/0004-managed-pi-for-delegation.md), [MCP.md](MCP.md#managed-pi)). |
 | Agent process tree | Processes the agent starts. | The worker owns them: a Linux process group, signalled as a whole; `taskkill /T` on Windows when stopping (processes left after a normal exit on Windows are not tracked). A job whose worker died is settled by the next coordinator call. |
 
-**Windows and WSL.** AI Meter runs on Windows and finds agents on Windows and in every running WSL distribution. A plugin on Windows starts an agent in WSL through `wsl.exe -e env … <program>`: no Linux shell, so no shell profile is read, and an agent whose key is only exported in a profile is refused from Windows. A plugin in WSL starts agents in its own distribution only, by their Linux path; agents in other distributions, and Windows agents, are skipped with the reason.
+**Windows and WSL.** AI Meter runs on Windows and finds agents on Windows and in every running WSL distribution. The managed Pi serves Windows folders and Windows coordinators only. A plugin on Windows starts an agent in WSL through `wsl.exe -e env … <program>`: no Linux shell, so no shell profile is read, and an agent whose key is only exported in a profile is refused from Windows. A plugin in WSL starts agents in its own distribution only, by their Linux path; agents in other distributions, and Windows agents, are skipped with the reason.
 
 ## Local history
 

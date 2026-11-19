@@ -189,7 +189,7 @@ namespace AIMeter
             if (Native.IsPackaged)
             {
                 rows.Add(Row(Ui.Glyph("\uE895", 20, "Text"), L.T("Check for updates"),
-                    L.T("The Microsoft Store installs updates by itself. Once a day AI Meter also asks the Store whether one is waiting, to show it here; it never contacts GitHub."),
+                    L.T("The Microsoft Store installs updates by itself. Once a day AI Meter also asks the Store whether one is waiting, to show it here; it never asks GitHub about updates."),
                     Toggle(S.UpdateCheck, v => { S.UpdateCheck = v; recheck(); })));
                 if (S.UpdateCheck && C.StoreUpdateWaiting)
                     rows.Add(Row(null, L.T("An update is waiting in the Microsoft Store"), null,

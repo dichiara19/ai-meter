@@ -20,7 +20,7 @@ try {
     }
     $fw = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319'
     $refs = "$fw\WPF\PresentationCore.dll", "$fw\WPF\PresentationFramework.dll", "$fw\WPF\WindowsBase.dll", "$fw\System.Xaml.dll",
-            "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll", "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll"
+            "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll", "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.IO.Compression.dll", "$fw\System.IO.Compression.FileSystem.dll"
     $env:AIMETER_HOME = $root
     $src = @(Get-ChildItem (Join-Path $root 'src\*.cs') | ForEach-Object FullName) + (Join-Path $PSScriptRoot 'MediaRenderer.cs') + (Join-Path $PSScriptRoot 'StoreScreenshots.cs')
     Add-Type -Path $src -ReferencedAssemblies $refs

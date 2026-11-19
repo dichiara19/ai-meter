@@ -10,7 +10,7 @@ $parameters.CompilerOptions = '/langversion:5 /define:AIMETER_TEST'
 @(
     "$fw\WPF\PresentationCore.dll", "$fw\WPF\PresentationFramework.dll", "$fw\WPF\WindowsBase.dll",
     "$fw\System.Xaml.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll",
-    "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
+    "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.IO.Compression.dll", "$fw\System.IO.Compression.FileSystem.dll", "$fw\System.dll"
 ) | ForEach-Object { [void]$parameters.ReferencedAssemblies.Add($_) }
 $source = @(Get-ChildItem (Join-Path $root 'src\*.cs') | ForEach-Object { $_.FullName })
 $source += Join-Path $PSScriptRoot 'HistoryPreview.cs'

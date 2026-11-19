@@ -55,7 +55,7 @@ namespace AIMeter
         public void EnterApiKey(ServiceDefinition d, string slot)
         {
             var w = new ApiKeyWindow(d, slot);
-            w.Saved += () => { RefreshNow(); if (settingsWindow != null) settingsWindow.Build(); };
+            w.Saved += () => { RefreshNow(); SyncManagedPiKeys(); if (settingsWindow != null) settingsWindow.Build(); };
             w.Show();
             w.Activate();
         }
@@ -74,6 +74,7 @@ namespace AIMeter
         public void RemoveApiKey(ServiceDefinition d)
         {
             ApiKeys.Remove(d.Id);
+            SyncManagedPiKeys();
             RefreshNow();
         }
 

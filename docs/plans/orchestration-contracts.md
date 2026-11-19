@@ -216,6 +216,12 @@ Output:
 - `where: "wsl"` means the plugin starts the agent inside WSL, which must already be running. AI Meter never starts WSL.
 - An agent without a verified row returns `unsupported`, and the reason. Before that, distinct errors name an unknown runtime, AI Meter still reading its first data, an agent not set up here, key discovery turned off, and an agent without its own key for the service.
 - An agent npm installed in WSL needs `node`: its folder goes next to the agent's in the generated PATH (nvm, fnm and asdf included), and without one the answer is `unsupported`. On Windows only a native `.exe` is described, never a `.cmd` or `.ps1` wrapper.
+- **Managed Pi ([ADR 0004](../adr/0004-managed-pi-for-delegation.md)).** The contract gains, all optional and additive:
+  - a candidate's `runtime.managed: true`, the same in `runtimes.found`, and a `runtimes.managed` block (`name`, `where`, `installed`, `version`, `services`, `set_up_in`, `note`) that lets a coordinator tell the user where to install it;
+  - `describe_dispatch` takes `managed` (boolean) to choose between the user's own installation and the copy AI Meter keeps, and, for the copy, returns `managed: true`, `commands` (`none`, `bash` or `powershell`: what the agent runs commands with) and `alternatives` (`[{ shell, arguments }]`: `git_bash`, `modify` only, for a plugin that has put Git for Windows' `bin` first on PATH);
+  - an agent definition may have the dispatch place `managed`, with `providers`, `alternatives`, `commands`, its own `output` and `notes`, and the `{config}` placeholder.
+
+  Nothing in MCP installs it, updates it or returns a key; the key file is the user's choice in Settings. It is offered for Windows folders and Windows coordinators only, never for a plan, and not for free-tier models. The reference is [docs/MCP.md, *Managed Pi*](../MCP.md#managed-pi).
 
 ### 3.2 Leases
 

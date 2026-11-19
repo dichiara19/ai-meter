@@ -1,0 +1,114 @@
+using System;
+
+namespace AIMeter
+{
+    internal static partial class L
+    {
+        /// <summary>
+        /// The managed Pi's strings (ADR 0004) in Settings › AI apps › Delegated tasks and in its installer's messages,
+        /// registered like the update strings.
+        /// </summary>
+        private static void RegisterManagedPiStrings()
+        {
+            string[] languages = { "it", "es", "fr", "de", "pt" };
+            foreach (string[] row in ManagedPiStrings)
+                for (int i = 0; i < languages.Length; i++) Register(languages[i], row[0], row[i + 1]);
+        }
+
+        /// <summary>English, then Italian, Spanish, French, German and Portuguese.</summary>
+        internal static readonly string[][] ManagedPiStrings =
+        {
+            new[] { "No coding agent on Windows? AI Meter can download Pi, an open-source coding agent, and keep it for delegated tasks on Windows folders. It is used only where you have no Pi of your own, with the keys you choose here, and never on a subscription plan.",
+                    "Nessun agente di programmazione su Windows? AI Meter può scaricare Pi, un agente di programmazione open source, e tenerlo per i compiti delegati sulle cartelle di Windows. Viene usato solo dove non hai un tuo Pi, con le chiavi che scegli qui, e mai su un piano in abbonamento.",
+                    "¿Ningún agente de programación en Windows? AI Meter puede descargar Pi, un agente de programación de código abierto, y conservarlo para las tareas delegadas en carpetas de Windows. Solo se usa donde no tienes tu propio Pi, con las claves que elijas aquí, y nunca en un plan de suscripción.",
+                    "Aucun agent de programmation sous Windows ? AI Meter peut télécharger Pi, un agent de programmation open source, et le conserver pour les tâches déléguées sur les dossiers Windows. Il n’est utilisé que là où vous n’avez pas votre propre Pi, avec les clés que vous choisissez ici, et jamais sur un abonnement.",
+                    "Kein Coding-Agent unter Windows? AI Meter kann Pi, einen quelloffenen Coding-Agenten, herunterladen und für delegierte Aufgaben in Windows-Ordnern bereithalten. Er wird nur dort verwendet, wo Sie kein eigenes Pi haben, mit den hier gewählten Schlüsseln und nie mit einem Abonnement.",
+                    "Nenhum agente de programação no Windows? O AI Meter pode transferir o Pi, um agente de programação de código aberto, e mantê-lo para as tarefas delegadas em pastas do Windows. Só é usado onde não tem o seu próprio Pi, com as chaves que escolher aqui, e nunca num plano de subscrição." },
+            new[] { "Pi for delegated tasks", "Pi per i compiti delegati", "Pi para tareas delegadas", "Pi pour les tâches déléguées", "Pi für delegierte Aufgaben", "Pi para tarefas delegadas" },
+            new[] { "Download", "Scarica", "Descargar", "Télécharger", "Herunterladen", "Transferir" },
+            new[] { "Downloading {0} of {1} MB…", "Scarico {0} di {1} MB…", "Descargando {0} de {1} MB…", "Téléchargement de {0} sur {1} Mo…", "{0} von {1} MB werden heruntergeladen…", "A transferir {0} de {1} MB…" },
+            new[] { "Not installed. Downloads Pi {0} from its project on GitHub ({1} MB) and checks the file before unpacking it.",
+                    "Non installato. Scarica Pi {0} dal suo progetto su GitHub ({1} MB) e controlla il file prima di estrarlo.",
+                    "No instalado. Descarga Pi {0} desde su proyecto en GitHub ({1} MB) y comprueba el archivo antes de descomprimirlo.",
+                    "Non installé. Télécharge Pi {0} depuis son projet sur GitHub ({1} Mo) et vérifie le fichier avant de le décompresser.",
+                    "Nicht installiert. Lädt Pi {0} von seinem Projekt auf GitHub herunter ({1} MB) und prüft die Datei vor dem Entpacken.",
+                    "Não instalado. Transfere o Pi {0} do seu projeto no GitHub ({1} MB) e verifica o ficheiro antes de o extrair." },
+            new[] { "Pi {0} is installed, and this version of AI Meter works with Pi {1}. Download it to keep delegating ({2} MB).",
+                    "È installato Pi {0}, e questa versione di AI Meter funziona con Pi {1}. Scaricalo per continuare a delegare ({2} MB).",
+                    "Está instalado Pi {0}, y esta versión de AI Meter funciona con Pi {1}. Descárgalo para seguir delegando ({2} MB).",
+                    "Pi {0} est installé, et cette version d’AI Meter fonctionne avec Pi {1}. Téléchargez-le pour continuer à déléguer ({2} Mo).",
+                    "Pi {0} ist installiert, und diese Version von AI Meter arbeitet mit Pi {1}. Laden Sie es herunter, um weiter zu delegieren ({2} MB).",
+                    "Está instalado o Pi {0}, e esta versão do AI Meter funciona com o Pi {1}. Transfira-o para continuar a delegar ({2} MB)." },
+            new[] { "Pi {0} is installed in {1}.", "Pi {0} è installato in {1}.", "Pi {0} está instalado en {1}.", "Pi {0} est installé dans {1}.", "Pi {0} ist in {1} installiert.", "O Pi {0} está instalado em {1}." },
+            new[] { "Also offer it beside your own Pi", "Proponilo anche accanto al tuo Pi", "Ofrecerlo también junto a tu propio Pi", "Le proposer aussi à côté de votre propre Pi", "Auch neben Ihrem eigenen Pi anbieten", "Oferecê-lo também ao lado do seu próprio Pi" },
+            new[] { "When off, delegated tasks on Windows use your own Pi wherever it can run them.",
+                    "Se disattivato, i compiti delegati su Windows usano il tuo Pi ovunque possa eseguirli.",
+                    "Si está desactivado, las tareas delegadas en Windows usan tu propio Pi siempre que pueda ejecutarlas.",
+                    "Si désactivé, les tâches déléguées sous Windows utilisent votre propre Pi partout où il peut les exécuter.",
+                    "Wenn aus, verwenden delegierte Aufgaben unter Windows Ihr eigenes Pi, wo immer es sie ausführen kann.",
+                    "Quando desativado, as tarefas delegadas no Windows usam o seu próprio Pi sempre que este as possa executar." },
+            new[] { "A key you turn on is copied into Pi's own key file as plain text, as in any Pi installation; AI Meter's own copy stays encrypted. Turning it off, or removing Pi, deletes it from there.",
+                    "Una chiave che attivi viene copiata nel file di chiavi di Pi come testo in chiaro, come in ogni installazione di Pi; la copia di AI Meter resta cifrata. Disattivarla, o rimuovere Pi, la cancella da lì.",
+                    "Una clave que activas se copia en el archivo de claves de Pi como texto sin cifrar, como en cualquier instalación de Pi; la copia de AI Meter sigue cifrada. Al desactivarla, o al quitar Pi, se borra de allí.",
+                    "Une clé que vous activez est copiée dans le fichier de clés de Pi en texte clair, comme dans toute installation de Pi ; la copie d’AI Meter reste chiffrée. La désactiver, ou supprimer Pi, l’efface de ce fichier.",
+                    "Ein Schlüssel, den Sie einschalten, wird als Klartext in Pis eigene Schlüsseldatei kopiert, wie in jeder Pi-Installation; die Kopie von AI Meter bleibt verschlüsselt. Ausschalten oder das Entfernen von Pi löscht ihn dort.",
+                    "Uma chave que ativa é copiada para o ficheiro de chaves do Pi como texto simples, como em qualquer instalação do Pi; a cópia do AI Meter continua cifrada. Desativá-la, ou remover o Pi, apaga-a de lá." },
+            new[] { "No keys to copy yet", "Ancora nessuna chiave da copiare", "Aún no hay claves que copiar", "Aucune clé à copier pour l’instant", "Noch keine Schlüssel zum Kopieren", "Ainda não há chaves para copiar" },
+            new[] { "Turn on a service with free models, such as OpenRouter, and give AI Meter its key: it then appears here.",
+                    "Attiva un servizio con modelli gratuiti, come OpenRouter, e dai ad AI Meter la sua chiave: comparirà qui.",
+                    "Activa un servicio con modelos gratuitos, como OpenRouter, y da su clave a AI Meter: entonces aparecerá aquí.",
+                    "Activez un service avec des modèles gratuits, comme OpenRouter, et donnez sa clé à AI Meter : il apparaîtra alors ici.",
+                    "Schalten Sie einen Dienst mit kostenlosen Modellen ein, etwa OpenRouter, und geben Sie AI Meter dessen Schlüssel: Er erscheint dann hier.",
+                    "Ative um serviço com modelos gratuitos, como o OpenRouter, e dê a respetiva chave ao AI Meter: aparecerá então aqui." },
+            new[] { "{0} key", "Chiave di {0}", "Clave de {0}", "Clé {0}", "{0}-Schlüssel", "Chave de {0}" },
+            new[] { "Lets Pi run delegated tasks on this service's free models.",
+                    "Permette a Pi di eseguire i compiti delegati sui modelli gratuiti di questo servizio.",
+                    "Permite a Pi ejecutar tareas delegadas en los modelos gratuitos de este servicio.",
+                    "Permet à Pi d’exécuter les tâches déléguées sur les modèles gratuits de ce service.",
+                    "Lässt Pi delegierte Aufgaben mit den kostenlosen Modellen dieses Dienstes ausführen.",
+                    "Permite ao Pi executar tarefas delegadas nos modelos gratuitos deste serviço." },
+            new[] { "Remove Pi, its settings and the keys copied into it? Your own agents and AI Meter's keys are not touched.",
+                    "Rimuovere Pi, le sue impostazioni e le chiavi copiate al suo interno? I tuoi agenti e le chiavi di AI Meter non vengono toccati.",
+                    "¿Quitar Pi, su configuración y las claves copiadas en él? Tus propios agentes y las claves de AI Meter no se tocan.",
+                    "Supprimer Pi, ses réglages et les clés qui y ont été copiées ? Vos propres agents et les clés d’AI Meter ne sont pas modifiés.",
+                    "Pi, seine Einstellungen und die hineinkopierten Schlüssel entfernen? Ihre eigenen Agenten und die Schlüssel von AI Meter bleiben unberührt.",
+                    "Remover o Pi, as suas definições e as chaves copiadas para ele? Os seus próprios agentes e as chaves do AI Meter não são alterados." },
+            new[] { "Pi's key file could not be written. Check that no delegated task is running, then try again.",
+                    "Non è stato possibile scrivere il file di chiavi di Pi. Controlla che nessun compito delegato sia in corso, poi riprova.",
+                    "No se pudo escribir el archivo de claves de Pi. Comprueba que no haya ninguna tarea delegada en curso y vuelve a intentarlo.",
+                    "Le fichier de clés de Pi n’a pas pu être écrit. Vérifiez qu’aucune tâche déléguée n’est en cours, puis réessayez.",
+                    "Pis Schlüsseldatei konnte nicht geschrieben werden. Prüfen Sie, dass keine delegierte Aufgabe läuft, und versuchen Sie es erneut.",
+                    "Não foi possível escrever o ficheiro de chaves do Pi. Verifique que não há nenhuma tarefa delegada em curso e tente de novo." },
+            new[] { "The downloaded file is not the expected Pi release. It was deleted and nothing was installed.",
+                    "Il file scaricato non è la versione di Pi attesa. È stato cancellato e non è stato installato nulla.",
+                    "El archivo descargado no es la versión de Pi esperada. Se ha eliminado y no se ha instalado nada.",
+                    "Le fichier téléchargé n’est pas la version de Pi attendue. Il a été supprimé et rien n’a été installé.",
+                    "Die heruntergeladene Datei ist nicht die erwartete Pi-Version. Sie wurde gelöscht, und nichts wurde installiert.",
+                    "O ficheiro transferido não é a versão do Pi esperada. Foi eliminado e nada foi instalado." },
+            new[] { "The downloaded archive does not contain Pi's program. Nothing was installed.",
+                    "L’archivio scaricato non contiene il programma di Pi. Non è stato installato nulla.",
+                    "El archivo descargado no contiene el programa de Pi. No se ha instalado nada.",
+                    "L’archive téléchargée ne contient pas le programme de Pi. Rien n’a été installé.",
+                    "Das heruntergeladene Archiv enthält Pis Programm nicht. Es wurde nichts installiert.",
+                    "O arquivo transferido não contém o programa do Pi. Nada foi instalado." },
+            new[] { "The downloaded archive could not be read. Nothing was installed.",
+                    "Non è stato possibile leggere l’archivio scaricato. Non è stato installato nulla.",
+                    "No se pudo leer el archivo descargado. No se ha instalado nada.",
+                    "L’archive téléchargée n’a pas pu être lue. Rien n’a été installé.",
+                    "Das heruntergeladene Archiv konnte nicht gelesen werden. Es wurde nichts installiert.",
+                    "Não foi possível ler o arquivo transferido. Nada foi instalado." },
+            new[] { "The download from GitHub failed. Check the connection and try again.",
+                    "Lo scaricamento da GitHub non è riuscito. Controlla la connessione e riprova.",
+                    "La descarga desde GitHub ha fallado. Comprueba la conexión y vuelve a intentarlo.",
+                    "Le téléchargement depuis GitHub a échoué. Vérifiez la connexion et réessayez.",
+                    "Der Download von GitHub ist fehlgeschlagen. Prüfen Sie die Verbindung und versuchen Sie es erneut.",
+                    "A transferência a partir do GitHub falhou. Verifique a ligação e tente de novo." },
+            new[] { "Pi could not be removed: one of its files is in use. Wait for delegated tasks to end, then try again.",
+                    "Non è stato possibile rimuovere Pi: uno dei suoi file è in uso. Aspetta la fine dei compiti delegati, poi riprova.",
+                    "No se pudo quitar Pi: uno de sus archivos está en uso. Espera a que terminen las tareas delegadas y vuelve a intentarlo.",
+                    "Pi n’a pas pu être supprimé : l’un de ses fichiers est utilisé. Attendez la fin des tâches déléguées, puis réessayez.",
+                    "Pi konnte nicht entfernt werden: Eine seiner Dateien wird verwendet. Warten Sie, bis delegierte Aufgaben beendet sind, und versuchen Sie es erneut.",
+                    "Não foi possível remover o Pi: um dos seus ficheiros está em uso. Aguarde o fim das tarefas delegadas e tente de novo." },
+        };
+    }
+}

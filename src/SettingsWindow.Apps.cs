@@ -99,7 +99,7 @@ namespace AIMeter
         private void BuildDelegationPlans()
         {
             var kinds = Agents.All.Where(k => k.Plan != null && k.Dispatch != null).ToList();
-            if (kinds.Count == 0) return;
+            if (kinds.Count == 0) { BuildManagedPi(); return; }
             Hint(L.T("Delegated tasks can also run in Claude Code or Codex on your own plan, never on paid usage. A plan is used only if you turn it on here and an AI app asks for it; it is skipped while extra usage or credits are on, and below what you keep of each window."));
             var rows = new List<FrameworkElement>();
             var snap = C.Last;
@@ -123,6 +123,7 @@ namespace AIMeter
                 rows.Add(Row(null, L.T("Reserve in the weekly window"), L.T("Delegated tasks leave this share of the window for you."), ReserveCombo(service, UsageWindow.ShortWeek)));
             }
             Group(rows.ToArray());
+            BuildManagedPi();
         }
 
         /// <summary>The share of a plan window kept for the user. The settings get a new dictionary, as MCP threads read the current one.</summary>

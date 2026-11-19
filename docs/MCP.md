@@ -91,7 +91,7 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 | `list_free_models` | Free models with id, context window, output limit, tool and reasoning support, last free day, how the price is known (`free`) and their limits (`limits`, see below); filters `tools`, `min_context`, `min_output_tokens` and `include_unconfirmed` |
 | `get_spend` | Today's models per service with cost, tokens and replies, and money limits such as budgets and credits |
 | `list_local_models` | Models loaded by Ollama, LM Studio, llama.cpp and other local servers |
-| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, most suitable first with the reason for each place; each pool's room; why every other model is left out; which agents were found but cannot be used; and, when asked, best-effort candidates built on the agents' own model lists, free-tier candidates (Cloudflare Workers AI) and Claude Code or Codex on the user's subscription plans. See below |
+| `list_candidates` | Where a task can run now for free: free models that meet its needs, that a coding agent on this PC (Pi or OpenCode, on Windows or in any running WSL distribution) can call with its own key, and whose limits have room, most suitable first with the reason for each place; each pool's room; why every other model is left out; which agents were found but cannot be used; and, when asked, best-effort candidates built on the agents' own model lists, free-tier candidates (Cloudflare Workers AI) and Claude Code or Codex on the user's subscription plans. Also names the optional [managed Pi](#managed-pi). See below |
 | `describe_dispatch` | How to start a candidate: program, argument list and environment for a verified agent and place. The task goes on stdin, never in the arguments. See below |
 | `claim_capacity`, `renew_capacity`, `release_capacity` | Cooperative capacity leases on a candidate's pool, with the budget of a free tier. These are the only tools that change anything: AI Meter's own lease book. See below |
 | `suggest_service` | Services ordered by the room left in their tightest limit, with their number of free models |
@@ -158,7 +158,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 - `refresh` and `max_age_seconds`, as in the other tools.
 
 **A candidate is a model, a runtime and a credential.**
-- Delegation runs only the agents whose start has been verified for their place, listed in [agent definitions](#agent-definitions): today Pi in WSL, OpenCode in WSL and on Windows, and Claude Code and Codex on a plan in WSL ([Subscription plans](#subscription-plans)). It uses whichever of these are set up; none is required. An agent counts when its folder exists and its program is installed (a folder can outlive its agent). AI Meter checks the usual install folders, those of Node version managers (nvm, fnm, asdf, Volta) included, on Windows and in every running WSL distribution, through the distribution's file share, without starting anything inside WSL. `runtimes.found` lists the agents found, with `distro` in WSL.
+- Delegation runs only the agents whose start has been verified for their place, listed in [agent definitions](#agent-definitions): today Pi in WSL, OpenCode in WSL and on Windows, and Claude Code and Codex on a plan in WSL ([Subscription plans](#subscription-plans)), and, if the user installed it, the [managed Pi](#managed-pi) on Windows. It uses whichever of these are set up; none is required. An agent counts when its folder exists and its program is installed (a folder can outlive its agent). AI Meter checks the usual install folders, those of Node version managers (nvm, fnm, asdf, Volta) included, on Windows and in every running WSL distribution, through the distribution's file share, without starting anything inside WSL. `runtimes.found` lists the agents found, with `distro` in WSL. The managed Pi appears there as a runtime of its own, with `managed: true`, and `runtimes.managed` describes it ([Managed Pi](#managed-pi)).
 - **`runtimes.unsupported`** lists the other agents found (by their folder or their program), so that a plugin can say "Gemini CLI is installed, but delegation does not support it yet". Each entry has `name`, `display_name`, `where`, `distro` in WSL, `reason` and `detail`, a sentence to show:
 
   | `reason` | Meaning |
@@ -170,7 +170,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 
   An agent in `unsupported` is never a candidate.
 - A model is a candidate for an agent only when that agent already has its own key for the service: in its own files, or in the environment it starts with. That means this process's variables on Windows, or shell-profile exports in WSL. Each agent with a key is a separate candidate, and they all share the same pool.
-- Keys saved in AI Meter do not count: AI Meter never hands a key to a runtime.
+- Keys saved in AI Meter do not count: AI Meter never hands a key to a runtime. The one exception is the managed Pi, whose key file holds only the keys the user chose to copy in Settings ([Managed Pi](#managed-pi)).
 - With *Use API keys already on the PC* turned off, AI Meter cannot check the agents' keys, and says so.
 - `credential` is an opaque id (`cred_…`): the same key gives the same id while AI Meter runs. It is never the key, its file or the account.
 
@@ -187,7 +187,7 @@ Every candidate's pool can start a task now; a pool that cannot is in `excluded`
 7. **Output speed measured here**: output tokens per second of the model's completed tasks over 30 days, tools included. Fastest first, then models never timed.
 8. Service and model id, so the same request always gives the same order.
 
-For the same model, the agent that sends fewer tokens with every request comes first (`request_tokens` in [agent definitions](#agent-definitions): Pi about 4,600, OpenCode about 9,600, against the same free quota); then, with `from`, the agent in the caller's place, which starts without the `wsl.exe` hop; then agent id, place and distribution.
+For the same model, the agent that sends fewer tokens with every request comes first (`request_tokens` in [agent definitions](#agent-definitions): Pi about 4,600, OpenCode about 9,600, against the same free quota); then, with `from`, the agent in the caller's place, which starts without the `wsl.exe` hop; then agent id, place and distribution; then the user's own installation before the managed copy.
 
 The same snapshot, request, leases, preferences and known sizes give the same order.
 
@@ -304,7 +304,7 @@ Cloudflare prices every Workers AI model in Neurons, but the first 10,000 Neuron
 - **The list.** AI Meter reads the models from [models.dev](https://models.dev)'s public catalogue every 12 hours, with no key. It is the catalogue Pi and OpenCode price Cloudflare's models from, so the ids and prices match what the agents report. Each model has `free: { "status": "confirmed_free", "kind": "free_tier" }` and the pool `cloudflare-workers-ai:neurons`.
 - **The limit.** The pool's `neurons_per_day` limit is 10,000, with today's use read from Cloudflare's analytics (`provider_reported`), which can lag a few minutes. The documented 300 requests per minute is listed too.
 - **Consent.** They are candidates only with `include_free_tier: true`, never best effort.
-- **The agent must price them.** A free-tier model is offered only through an agent whose own model list prices it, the opposite of free models. Otherwise the agent would report a cost of zero and the plugin could not see what the task spends (`agent_price_unknown`).
+- **The agent must price them.** A free-tier model is offered only through an agent whose own model list prices it, the opposite of free models. Otherwise the agent would report a cost of zero and the plugin could not see what the task spends (`agent_price_unknown`). The [managed Pi](#managed-pi) has no model list AI Meter can read, so these models are not offered through it.
 - **The budget.** `headroom.budget` in `pools` and in `list_free_models`, and `budget` in the answer of `claim_capacity`:
 
   ```json
@@ -329,8 +329,8 @@ AI Meter starts nothing. A coordinator plugin runs the agent ([ADR 0002](adr/000
 
 The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code and Codex follows these steps.
 
-**`describe_dispatch`** takes the candidate (`service`, `model`, `runtime`, and `where` and `distro` to pick its place), `mode` (`read_only` by default, or `modify`), `workspace`, `from`, which is where the plugin runs (`windows` by default, or `wsl`), and, for a plan candidate, `coordinator`.
-- It describes only agents and places with a verified dispatch: Pi in WSL, OpenCode in WSL and on Windows, and Claude Code and Codex on a plan in WSL. Anything else answers `supported: false` with the reason.
+**`describe_dispatch`** takes the candidate (`service`, `model`, `runtime`, and `where` and `distro` to pick its place), `mode` (`read_only` by default, or `modify`), `workspace`, `from`, which is where the plugin runs (`windows` by default, or `wsl`), `managed` and, for a plan candidate, `coordinator`.
+- It describes only agents and places with a verified dispatch: Pi in WSL, OpenCode in WSL and on Windows, and Claude Code and Codex on a plan in WSL, and the managed Pi on Windows. Anything else answers `supported: false` with the reason.
 - **A plan agent** ([Subscription plans](#subscription-plans)) comes with `billing: "included_in_plan"`, `environment_policy: "clean"` and a `sign_in_check`:
   - `environment_policy: "clean"`: start the agent with only what a program needs (system folders, home, PATH) plus `environment`, never the plugin's own environment, so no API key, base URL or coordinator session variable reaches it. From Windows into WSL the description already uses `env -i HOME=… LANG=C.UTF-8 PATH=…`.
   - `sign_in_check`: `program` and `arguments` of the agent's own status command, in the same place and environment, and what shows a plan sign-in: `json_field` equal to `expect` in its JSON (Claude Code: `authMethod` is `claude.ai`), or `text` in its output (Codex: "Logged in using ChatGPT", on stderr). Read only that; start the agent only when it holds.
@@ -346,6 +346,23 @@ The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code 
 - **OpenCode is isolated** from the user's skills and project configuration, and its title model is set to the same free model. Otherwise it would call a paid one.
 - **`output`** says how to tell the end, the outcome (Pi's exit code stays 0 on errors), the requests, the tokens, the rate limits and `cost`: where the agent reports each request's price (Pi: `usage.cost.total` of assistant messages; OpenCode: `step_finish.part.cost`). Both agents price requests from their own model list, so a value above zero means a paid request and the plugin should stop; zero does not prove the request was free, as an agent cannot see a BYOK fallback billed by the provider.
 - **`warnings`** repeats the candidate's warnings, such as `openrouter_byok_fallback`.
+- **`commands`** says what the agent runs commands with when started with these `arguments`: `none`, `bash` or `powershell`. It is present only when the agent's definition says so (today, the managed Pi).
+- **The managed Pi.** `managed` is an optional boolean: the candidate's `runtime.managed`, which picks the copy AI Meter keeps or the user's own installation when both are set up. Left out, the user's own is described first. For the managed copy the answer has `managed: true`, `commands` and, in `modify` mode, `alternatives`:
+
+  ```json
+  {
+    "supported": true, "runtime": "pi", "where": "windows", "managed": true, "version": "1.5.2", "version_verified": true,
+    "mode": "modify", "program": "C:\\Users\\<you>\\AppData\\Roaming\\AIMeter\\managed\\pi\\1.5.2\\pi.exe",
+    "arguments": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--tools", "read,powershell,edit,write", "--provider", "<provider>", "--model", "<model>"],
+    "environment": { "PI_CODING_AGENT_DIR": "C:\\Users\\<you>\\AppData\\Roaming\\AIMeter\\managed\\pi\\config", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0" },
+    "commands": "powershell",
+    "alternatives": [
+      { "shell": "git_bash", "arguments": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--tools", "read,bash,edit,write", "--provider", "<provider>", "--model", "<model>"] }
+    ]
+  }
+  ```
+
+  In `read_only` mode `commands` is `none` and there are no `alternatives`: that task needs no shell. The rules for choosing the shell are in [Managed Pi](#managed-pi).
 - **`stop`** says how to stop the agent: `taskkill /T /F` on Windows, which also ends an agent started in WSL.
 
 **Leases.**
@@ -358,6 +375,57 @@ The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code 
 - Released outcomes are also counted per model: completed, failed (or timed out), rate limited, and the output tokens and time of completed tasks. They are the track record that orders candidates ([Order](#order)).
 - AI Meter keeps the leases in `%APPDATA%\AIMeter\leases.json`. It stores only pool, service, model, agent, client label, times and outcome counters (the cost among them), for 30 days. Never task text, code, logs or keys.
 - Model sizes from Hugging Face are kept in `%APPDATA%\AIMeter\model-sizes.json`: the repository, its number of parameters and when it was checked.
+
+### Managed Pi
+
+On Windows, a user with no agent of their own can let AI Meter keep a copy of Pi for delegation ([ADR 0004](adr/0004-managed-pi-for-delegation.md)). The default stays "use the agent you have": nothing is downloaded unless the user asks.
+
+**What it is.** Pi's official standalone build for Windows (MIT licence, [earendil-works/pi](https://github.com/earendil-works/pi)), one pinned release: 1.5.2, `pi-windows-x64.zip`, 59 MB, about 131 MB unpacked. It is the x64 build; on Windows on ARM it runs under emulation.
+
+**Who installs it.** Only the user, with the button in Settings › AI apps › Delegated tasks, which also removes it. No MCP tool installs, updates or removes anything, and none returns a key. A coordinator that finds the copy missing tells the user where to set it up (`runtimes.managed.set_up_in`) and does not try to.
+- AI Meter downloads the pinned release from `github.com` (GitHub redirects to its release storage host), checks it against a SHA-256 kept in its own sources and discards any other file. A newer Pi is adopted only by a new AI Meter version, after its dispatch is verified.
+- It is unpacked to `managed\pi\<version>` in AI Meter's shared folder: `%APPDATA%\AIMeter` for the GitHub build, `%USERPROFILE%\.aimeter` for the Microsoft Store build, because a packaged app's AppData is private to the package. It is outside `PATH`, and nothing else on the PC is changed.
+
+**Its own configuration and keys.**
+- The copy runs with its own folder, `managed\pi\config`, passed as `PI_CODING_AGENT_DIR` (the `{config}` placeholder of its definition). It never reads or writes the user's `~/.pi`.
+- For each service the user ticks in Settings, AI Meter copies that service's key into `config\auth.json`. Only services Pi has a built-in provider for can be ticked (the `providers` list of the definition). The file is plain text, as in any Pi installation, where AI Meter's own key store is encrypted for the Windows user. Unticking the service, removing the key in AI Meter or removing the copy deletes it from there.
+- No MCP tool returns a key. `describe_dispatch` gives the path of the configuration folder, which is not a secret.
+
+**Listing it.** In `list_candidates` the copy is a runtime of its own, on candidates and in `runtimes.found`:
+
+```json
+"runtime": { "name": "pi", "where": "windows", "managed": true }
+```
+
+`runtimes.managed` is present whenever the build offers the copy, installed or not:
+
+```json
+"managed": {
+  "name": "pi", "where": "windows", "installed": true, "version": "1.5.2", "services": ["deepseek", "openrouter"],
+  "set_up_in": "AI Meter › Settings › AI apps › Delegated tasks",
+  "note": "An optional copy of Pi that AI Meter downloads when the user asks, for tasks on Windows folders. Only the user can install it or give it a key, in Settings: tell them, do not try to."
+}
+```
+
+`services` are those it holds a key for. These keys are the user's explicit choice, so they count with *Use API keys already on the PC* turned off too.
+
+**When it is offered.**
+- The user's own agent wins, service by service: the copy is not offered for a service that a usable Pi of the user's on Windows can already call with its own key, unless the user chose otherwise in Settings (setting `ManagedPiBesideOwn`). Today no Pi of the user's on Windows is verified, so the copy is offered whenever it is installed. When both are offered, each is named, and for the same model the user's own comes first.
+- Windows folders only. A coordinator in WSL (`from: "wsl"`) is not offered it, and a `workspace` under `\\wsl.localhost\` or `\\wsl$\` answers `supported: false`: a folder in WSL keeps using the agents installed there.
+- Never for a subscription plan, which needs the vendor's own CLI and sign-in.
+- Not for free-tier models (Cloudflare Workers AI) in this phase: AI Meter cannot read the standalone build's own price list, so they are excluded as `agent_price_unknown`.
+- The Microsoft Store build offers it unless certification refuses the listing's disclosure ([STORE.md](STORE.md)); the Store build then keeps "use the agent you have".
+
+**Choosing the shell.** The plugin starts the copy with a shell it has chosen, never with one Pi finds.
+- The `arguments` of `describe_dispatch` need no preparation: in `modify` mode they give Pi its PowerShell tool and no bash (`commands: "powershell"`); in `read_only` mode Pi gets only reading tools (`commands: "none"`).
+- `alternatives` lists the arguments for `git_bash` (`modify` only). A plugin uses them only after putting the `bin` folder of Git for Windows first on `PATH` for that process. Otherwise Pi may find WSL's `bash.exe` and run commands inside WSL.
+
+**Outcome and exit code.** As for Pi in WSL, with one difference: the standalone Windows build exits with 1 when it cannot make a request at all (no key for the provider). There is then no `agent_settled` event and the reason is on stderr. Errors during a run still end with exit code 0 and a `stopReason`. The copy starts with `PI_SKIP_VERSION_CHECK=1` and `PI_TELEMETRY=0`; once it runs a task it contacts the model's service like any agent.
+
+**Limits.**
+- A request to a real model from the Windows build, and the Store-signed build starting it, were not verified when this was written; the live test used a local stand-in for the model.
+- Stopping a task with `taskkill /T /F` ends Pi and its shells, but a command a shell started can outlive them (issue [#37](https://github.com/dichiara19/ai-meter/issues/37)).
+- It is the x64 build only.
 
 ### Agent definitions
 
@@ -405,12 +473,24 @@ The coding agents AI Meter knows are data, like services: `agents/*.json`, built
 | `plan` | For an agent that runs on a subscription plan with its own sign-in ([Subscription plans](#subscription-plans)): `service` (whose windows AI Meter reads), optional `models`, most suitable first: ids, or objects with `id` and the `context_tokens` and `max_output_tokens` a source states (otherwise the agent's `models` list), and `sign_in`: the `arguments` of its status command, with `json_field` and `expect`, or `text`, that show a plan sign-in. A plan without a sign-in check is ignored |
 | `dispatch` | How a plugin starts it. Without it, the agent is reported in `runtimes.unsupported` |
 | `dispatch.environment_policy` | `clean`: the plugin starts the agent from an empty environment plus `environment`, never its own (plan agents) |
-| `dispatch.places` | The verified places, each with `versions` (`"1.x"` matches every 1.* version, `"1.4.0"` only that one), optional `executables` (native Windows programs inside the npm package) and optional own `arguments` and `environment` |
+| `dispatch.places` | The verified places, each with `versions` (`"1.x"` matches every 1.* version, `"1.4.0"` only that one), optional `executables` (native Windows programs inside the npm package) and optional own `arguments` and `environment`. Besides `windows` and `wsl`, the user's own installations, a place may be `managed`: the copy AI Meter keeps (see below) |
 | `dispatch.arguments` | The argument list per mode, `read_only` and `modify`. `read_only` must be enforced by what the agent is given, such as Pi's `--tools` list or OpenCode's per-agent `permission` in `OPENCODE_CONFIG_CONTENT` (see `agents/opencode.json`), never by an agent's name and defaults alone |
 | `dispatch.environment` | Variables to set. A value written as a JSON object is serialised after its placeholders are filled, so a model id cannot change its structure |
 | `dispatch.output`, `dispatch.notes` | Returned as they are in `describe_dispatch` |
 
-Placeholders, filled in one pass: `{provider}` (the alias the agent keeps the key under), `{model}` and `{workspace}` (`.` inside WSL when started from Windows, where `wsl.exe --cd` already sets the folder). Agents without a verified dispatch are still useful: their folders and programs show them in `runtimes.unsupported`, and their `keys` let AI Meter find keys for the services it meters.
+The `managed` place ([Managed Pi](#managed-pi); `agents/pi.json` is the only built-in definition with one) is not an installation the user made, so AI Meter does not look for it: it counts when the user installed the copy. Its own `output` and `notes` are added to the shared ones, and it may hold:
+
+| Field | Meaning |
+|---|---|
+| `versions` | The exact release AI Meter downloads, such as `["1.5.2"]` |
+| `providers` | The provider ids the standalone build has built in. A service can have its key copied into the copy only if one of its aliases (`auth.ids`) is listed |
+| `arguments` | The argument list per mode, safe without preparation. For Pi in `modify`, it gives the PowerShell tool and no bash |
+| `alternatives` | Argument lists by shell name, then mode (`git_bash.modify`), that a plugin may use instead once it has prepared what that shell needs. `describe_dispatch` returns them as `[{ "shell", "arguments" }]` |
+| `commands` | Per mode, what the agent runs commands with when started with `arguments`: `none`, `bash` or `powershell` |
+| `environment` | As for other places; `{config}` stands for the copy's own configuration folder, as in `"PI_CODING_AGENT_DIR": "{config}"` |
+| `output`, `notes` | `output` replaces the shared `dispatch.output` by key (Pi's exit code is 1 when it cannot make a request at all); `notes` come after the shared `dispatch.notes` |
+
+Placeholders, filled in one pass: `{provider}` (the alias the agent keeps the key under), `{model}`, `{workspace}` (`.` inside WSL when started from Windows, where `wsl.exe --cd` already sets the folder) and, in the `managed` place only, `{config}`. Agents without a verified dispatch are still useful: their folders and programs show them in `runtimes.unsupported`, and their `keys` let AI Meter find keys for the services it meters.
 
 ## Fresh data
 

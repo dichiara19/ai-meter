@@ -24,6 +24,7 @@ You will get an answer within a week. Once the issue is fixed, the advisory is p
 Of particular interest:
 - how tokens and API keys are read, stored and sent (only to the service they belong to, never refreshed or stored for other apps);
 - loading of service definitions from `%APPDATA%\AIMeter\providers`;
+- the optional managed Pi ([ADR 0004](docs/adr/0004-managed-pi-for-delegation.md)): the download of a pinned release and its SHA-256 check, unpacking, and the plain-text `auth.json` under `managed\pi\config` that holds the keys the user chose to copy into it (AI Meter's own key store is encrypted with DPAPI; this file, like any Pi installation's, is not);
 - requests to local model servers on `127.0.0.1`;
 - the MCP server: the per-user named pipe, the `mcp.ps1` relay, what its tools return, and the configuration files of other apps that it edits from Settings → AI apps;
 - once they ship, delegation ([ADR 0002](docs/adr/0002-delegation-through-coordinator-plugins.md)): dispatch descriptions (no shell strings, no task text), capacity leases and what they store, and the coordinator plugins in `plugins/` (how they start agents, worktree isolation), and where credentials go;

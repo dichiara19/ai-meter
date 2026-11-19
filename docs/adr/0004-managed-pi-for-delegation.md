@@ -11,7 +11,7 @@ Delegation uses a coding agent the user already has, in the place where the task
 
 Coordinator plugins that hand work from Claude Code to Codex, or the other way, ask for the other CLI to be installed. AI Meter can ask the same for subscription plans, where nothing else is possible: without an API key, a plan is reachable only through its vendor's CLI with the user's sign-in. For services reached with a key (free models and free tiers) the agent is interchangeable, and Pi already speaks to all of them.
 
-Pi is MIT-licensed and publishes a standalone build for Windows that needs no Node. A live test on 2026-11-19 with Pi 1.5.2 (`pi-windows-x64.zip`, 59.1 MB, 191 MB unpacked), driven by a local stand-in for the model, found that it:
+Pi is MIT-licensed and publishes a standalone build for Windows that needs no Node. A live test on 2026-11-19 with Pi 1.5.2 (`pi-windows-x64.zip`, 59.1 MB, 131 MB unpacked), driven by a local stand-in for the model, found that it:
 - accepts the arguments of `agents/pi.json` and the task on stdin, and emits the same JSON events as in WSL;
 - keeps to its own configuration folder with `PI_CODING_AGENT_DIR`, without creating `~/.pi`;
 - reads, writes and edits files without any bash, where only commands fail; its PowerShell tool works with Windows PowerShell 5.1;
@@ -54,7 +54,7 @@ A request to a real model from the Windows build was not part of that test.
 - A Windows user with a key and no agent can delegate after one action in Settings.
 - AI Meter takes on a third-party program's versions: each adopted Pi release needs its dispatch verified, and a security fix in Pi reaches users only with an AI Meter release.
 - A key the user chose now also lies in a plain-text file under AI Meter's data folder.
-- 59 MB are downloaded and 191 MB kept, only for those who ask.
+- 59 MB are downloaded and 131 MB kept, only for those who ask.
 - Tasks that must run commands still depend on Git Bash or PowerShell, and stopping a task can leave a child process until #37 is done.
 - Users with only Windows and a subscription plan gain nothing: Claude Code and Codex on Windows are still unverified.
 

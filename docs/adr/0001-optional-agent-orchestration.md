@@ -1,6 +1,6 @@
 # ADR 0001: Optional local agent orchestration
 
-- **Status:** accepted with the M0 pull request. Decisions 2, 5, 6 and 7 are superseded by [ADR 0002](0002-delegation-through-coordinator-plugins.md) (delegation through coordinator plugins), which also means AI Meter itself executes nothing (decision 1).
+- **Status:** accepted with the M0 pull request. Decisions 2, 5, 6 and 7 are superseded by [ADR 0002](0002-delegation-through-coordinator-plugins.md) (delegation through coordinator plugins), which also means AI Meter itself executes nothing (decision 1). Decisions 3 and 4 are amended for the managed copy of Pi by [ADR 0004](0004-managed-pi-for-delegation.md).
 - **Date:** 2026-11-02
 - **Plan:** [docs/plans/agent-orchestration.md](../plans/agent-orchestration.md)
 

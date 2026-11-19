@@ -104,7 +104,7 @@ function Invoke-Csc([string]$out, [string[]]$extra = @()) {
     $refs = @(
         "$fw\WPF\PresentationCore.dll", "$fw\WPF\PresentationFramework.dll", "$fw\WPF\WindowsBase.dll",
         "$fw\System.Xaml.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Windows.Forms.dll",
-        "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.dll"
+        "$fw\System.Drawing.dll", "$fw\System.Core.dll", "$fw\System.Security.dll", "$fw\System.IO.Compression.dll", "$fw\System.IO.Compression.FileSystem.dll", "$fw\System.dll"
     ) | ForEach-Object { "/r:$_" }
     # The app icon and the official logos bundled for built-in services whose app may be missing.
     $res = @('app.ico', 'antigravity.png', 'openai.png', 'openai-dark.png', 'copilot.png', 'copilot-dark.png' | ForEach-Object { "/resource:$(Join-Path $root "assets\$_"),$_" })

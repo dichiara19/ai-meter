@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import * as jobs from "../scripts/lib/jobs.mjs";
 import * as report from "../scripts/lib/report.mjs";
 import { Activity } from "../scripts/lib/activity.mjs";
+import { findGitBash } from "../scripts/lib/shell.mjs";
 import { looksSecret } from "../scripts/lib/workspace.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -769,6 +770,73 @@ test("a tool call that never ends is reported as unfinished", () => {
   assert.deepEqual(shown.calls, [{ tool: "bash", args: "node --test", unfinished: true }, { tool: "write", args: "x.js" }]);
   assert.deepEqual(shown.commands, [], "a command without its end has no result to report");
   assert.deepEqual(shown.files_written, ["x.js"]);
+});
+
+const managedPi = { service: "openrouter", model: "a:free", runtime: { name: "pi", where: "windows", managed: true }, pool: "openrouter:free" };
+
+test("a managed Pi candidate is described as managed, and a read-only task says nothing about shells", async () => {
+  const { workspace, calls } = setUp({ candidates: [managedPi] });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(job.status, "completed", job.error || "");
+  assert.equal(calls().find((c) => c.tool === "describe_dispatch").arguments.managed, true);
+  assert.equal(calls().find((c) => c.tool === "claim_capacity").arguments.managed, undefined, "a lease names the runtime only");
+  assert.deepEqual(job.candidate, { service: "openrouter", model: "a:free", runtime: "pi", where: "windows", managed: true, pool: "openrouter:free" });
+  assert.equal(job.shell, "none");
+  assert.equal(job.summary.answer, "echo via none: x", "the described arguments were used");
+  assert.equal(report.full(job, jobs.root()).candidate.shell, undefined);
+});
+
+test("managed pins the managed Pi, or the user's own agents", async () => {
+  const { workspace } = setUp({ candidates: [managedPi, pi] });
+  assert.equal((await jobs.wait(jobs.start({ task: "x", workspace, managed: false }).id, 20)).candidate.managed, undefined);
+  assert.equal((await jobs.wait(jobs.start({ task: "x", workspace, managed: "true" }).id, 20)).candidate.managed, true, "as the command line passes it");
+});
+
+test("a managed modify task runs commands through Git Bash when it is found, else through PowerShell", async () => {
+  const { folder } = setUp({ candidates: [managedPi] });
+  const envFile = join(folder, "env.json");
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], env_file: envFile });
+  const repository = join(folder, "repo");
+  execFileSync("git", ["init", "-q", repository]);
+  writeFileSync(join(repository, "a.txt"), "a\n");
+  execFileSync("git", ["-C", repository, "add", "."]);
+  execFileSync("git", ["-C", repository, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"]);
+  // Either way is right, depending on this machine: Windows sets %ProgramFiles% for every new process, so a test cannot
+  // stand in its own Git for Windows. On Linux the plugin looks for Windows paths and finds none (tests/shell.test.mjs
+  // covers each case with made-up files).
+  const bin = process.platform === "win32" ? findGitBash() : null;
+  const shell = bin ? "git_bash" : "powershell";
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: repository, mode: "modify" }).id, 20);
+
+  assert.equal(job.status, "completed", job.error || "");
+  assert.equal(job.shell, shell);
+  assert.equal(job.summary.answer, "echo via " + shell + ": x", "the arguments for that shell were used");
+  assert.equal(report.full(job, jobs.root()).candidate.shell, shell, "the report says where commands ran");
+  const env = JSON.parse(readFileSync(envFile, "utf8"));
+  assert.equal(env.PI_CODING_AGENT_DIR, "C:\\AIMeter\\pi\\config");
+  const paths = Object.keys(env).filter((key) => key.toLowerCase() === "path");
+  assert.equal(paths.length, 1, "one PATH variable");
+  if (bin) assert.equal(env[paths[0]].split(";")[0], bin, "Git's bin folder comes first");
+});
+
+test("an agent that exits without explaining itself in its events gets its exit code and the start of its error output in the error", async () => {
+  const { workspace } = setUp({ candidates: [pi], behaviour: { pi: "nokey" } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.equal(job.exit_code, 1);
+  assert.equal(job.error, 'Pi exited before agent_settled. The agent exited with code 1; its error output starts: Warning: Model "x" not found for provider "openrouter". ' +
+    "Using custom model id. No API key found for openrouter. Use /login to log into a provider via OAuth or API key. See: docs/providers.md");
+  assert.equal(job.summary.error, job.error);
+});
+
+test("Pi's powershell tool calls are commands, as its bash ones are", () => {
+  const activity = new Activity("j1");
+  activity.begin("a", "powershell", { command: "Get-ChildItem *.json" });
+  activity.end("a", { failed: true, output: "No such file\n\nCommand exited with code 1" });
+  assert.deepEqual(activity.report().commands, [{ command: "Get-ChildItem *.json", ok: false, exit_code: 1, output_tail: "No such file\n\nCommand exited with code 1" }]);
 });
 
 test("activity keeps 50 file paths, and counts the others", () => {
