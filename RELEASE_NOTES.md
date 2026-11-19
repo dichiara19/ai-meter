@@ -1,3 +1,9 @@
+## What changed in 0.11.1
+
+- **Antigravity is found on Windows.** Current versions of Antigravity CLI keep their sign-in in Windows Credential Manager instead of a file, so AI Meter said "Not found on this PC" although the CLI was signed in (#94). AI Meter now reads the sign-in from there. It only reads it and never changes it.
+- **Sign in…** for Antigravity opens the CLI in your user folder, so it no longer asks whether to trust a Windows system folder.
+- **Gemini quotas for Antigravity.** The 5-hour and weekly limits of the Gemini models now appear beside those of the Claude and GPT models. Thanks to Juris-S (#93).
+
 ## What changed in 0.11.0
 
 ### Delegation (preview)
