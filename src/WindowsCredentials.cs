@@ -11,8 +11,9 @@ namespace AIMeter
     {
         private const int GenericType = 1; // CRED_TYPE_GENERIC
 
+        // A class with a fixed layout rather than a struct: it is only ever filled from Windows' buffer, never compared.
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-        private struct CREDENTIAL
+        private sealed class CREDENTIAL
         {
             public uint Flags;
             public uint Type;

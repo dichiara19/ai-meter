@@ -93,8 +93,9 @@ namespace AIMeter
             {
                 string exe = AntigravityProvider.CliPath();
                 if (exe != null)
+                    // Started by the shell, which gives a console program its own window, with no command line to build.
                     // In the user's folder: the CLI asks whether to trust the folder it starts in, which would otherwise be AI Meter's own.
-                    Process.Start(new ProcessStartInfo("cmd.exe", "/c \"\"" + exe + "\"\"") { UseShellExecute = true, WorkingDirectory = Probe.Home });
+                    Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = Probe.Home });
                 else if (MayBeInWsl(@".local\bin\agy"))
                     Process.Start(new ProcessStartInfo("wsl.exe", "-d " + Settings.WslDistro + " -- bash -lc \"~/.local/bin/agy\"") { UseShellExecute = true });
                 else
