@@ -115,7 +115,8 @@ namespace AIMeter
             return new List<object>
             {
                 Tool("get_limits", "Usage limits of each service the user turned on in AI Meter: percentage used, when each limit resets, " +
-                     "the forecast time it runs out at the current pace, and spending against money limits. freshness tells how recent each service's reading is.",
+                     "the forecast time it runs out at the current pace, and spending against money limits. remaining_percent is the room that can be used: " +
+                     "a model's limit inside a tighter plan limit reports the plan's room and names it in capped_by. freshness tells how recent each service's reading is.",
                      new Dictionary<string, object> { { "service", service }, { "refresh", refresh("their limits") }, { "max_age_seconds", maxAge("their limits") } }, true),
                 Tool("list_sessions", "Running and recent sessions of AI apps and coding agents (Claude, Codex, Copilot, Pi, OpenCode and others), " +
                      "with agent, status, model and the provider the session uses.",
@@ -466,6 +467,10 @@ namespace AIMeter
             {
                 d["used_percent"] = Math.Round(w.Used, 1);
                 d["remaining_percent"] = Math.Round(usage.Room(w), 1);
+                // A model's limit sits inside the plan's limit of the same length: when that one has less room, it is
+                // the room left, and used and remaining no longer add up to 100. Say which limit decided.
+                var enclosing = usage.ParentOf(w);
+                if (enclosing != null && enclosing.Remaining < w.Remaining) d["capped_by"] = enclosing.Label;
             }
             if (w.ResetsAt.HasValue) d["resets_at"] = Time(w.ResetsAt.Value);
             if (w.RunsOutAt.HasValue) d["runs_out_at"] = Time(w.RunsOutAt.Value);

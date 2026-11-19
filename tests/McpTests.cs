@@ -32,6 +32,7 @@ namespace AIMeter
             test("Codex TOML that the editor cannot follow is refused, not rewritten", TomlRefusals);
             test("A save that fails keeps the previous file and removes the temporary one", FailedSave);
             test("Antigravity CLI is found by its own folder and its empty MCP file is connected", AntigravityCli);
+            test("A model's limit inside a tighter plan limit reports the plan's room and names it", CappedRoom);
             test("The Store build connects Claude Desktop and VS Code only through files that already exist", PackagedAppDataClients);
             test("Command-line installation quotes paths and places -- for each agent", Commands);
             test("A copy button confirms the copy on itself, then returns to its label", CopiedFeedback);
@@ -126,6 +127,27 @@ namespace AIMeter
             Assert(Json.Num(Json.Obj(Reply(server, "not json"), "error"), "code") == -32700, "Invalid JSON was not refused.");
             var early = Json.Obj(Reply(server, "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"get_limits\"}}"), "result");
             Assert(Json.Obj(early, "structuredContent").ContainsKey("status"), "A call before the first snapshot gave no explanation.");
+        }
+
+        private static void CappedRoom()
+        {
+            Func<double, double, Dictionary<string, object>> model = (week, weekOfModel) =>
+            {
+                var snap = new Snapshot();
+                var claude = new ProviderState { Id = "claude", Name = "Claude", Usage = new Usage { Source = "live", At = DateTime.Now } };
+                claude.Usage.Windows.Add(new UsageWindow { Label = "Week", Short = UsageWindow.ShortWeek, Used = week });
+                claude.Usage.Windows.Add(new UsageWindow { Label = "Week", Suffix = "Fable", Short = "m", Used = weekOfModel });
+                snap.Providers.Add(claude);
+                var services = (IList)CallTool(new McpServer(() => snap, () => false), "get_limits", "{}")["services"];
+                return ((IList)((Dictionary<string, object>)services[0])["limits"]).OfType<Dictionary<string, object>>().Single(w => Json.Str(w, "name") == "Week Fable");
+            };
+
+            var capped = model(24, 21);
+            Assert(Json.Num(capped, "used_percent") == 21 && Json.Num(capped, "remaining_percent") == 76, "The plan's tighter room was not reported for the model.");
+            Assert(Json.Str(capped, "capped_by") == "Week", "The limit that capped the model's room was not named.");
+
+            var own = model(10, 21);
+            Assert(Json.Num(own, "remaining_percent") == 79 && !own.ContainsKey("capped_by"), "A model with less room than its plan was reported as capped.");
         }
 
         private static Dictionary<string, object> CallTool(McpServer server, string name, string arguments)

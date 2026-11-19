@@ -98,6 +98,8 @@ AI app ──stdio──▶ powershell.exe -File mcp.ps1 ──named pipe──�
 
 All tools except `list_local_models` and `suggest_service` accept an optional `service` (`claude`, `openai`, `copilot`, `openrouter`…).
 
+In `get_limits`, a model's own limit (such as `Week Fable`) sits inside the plan's limit of the same length (`Week`). `remaining_percent` is the room that can actually be used, so when the plan's limit has less room it is that one, and `used_percent` and `remaining_percent` do not add up to 100. The limit then carries `capped_by` with the name of the limit that decided.
+
 `suggest_service` lists services with known room first. A service that offers free models but has no readable limit comes after them, with `remaining_percent: null` and `quota: "unknown"`. Its room is unknown, not 100%. A service whose reading is out of date is marked `stale` and ranked after fresh ones with the same room.
 
 Each result is returned twice: as `structuredContent`, and as the same JSON in a text block for clients that read only text. Times are local ISO 8601 and percentages range from 0 to 100.
