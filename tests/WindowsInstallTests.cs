@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace AIMeter
 {
@@ -15,6 +17,7 @@ namespace AIMeter
         internal static void Register(Action<string, Action> test)
         {
             test("Claude Code, Codex and Antigravity CLI are found where their installers and npm put them", AgentPrograms);
+            test("Antigravity CLI's sign-in is read from Credential Manager, where the CLI keeps it on Windows", AntigravityCredential);
             test("Docker Desktop's distribution is never chosen as the WSL distribution", DockerDistribution);
             test("Codex without its program says so on its card", CodexWithoutProgram);
             test("A service that fails every cycle keeps its card with a notice and is logged once", FailingService);
@@ -156,6 +159,59 @@ namespace AIMeter
             failing.Read = () => { throw new IOException("broken again"); };
             Assert(collector.Collect(false, false).Providers.Single(p => p.Id == "fixture-broken").Name == "Broken", "A failing card lost its name.");
             Assert(entries() == 2, "A new failure after a recovery was not logged.");
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct TestCredential
+        {
+            public uint Flags, Type;
+            public string TargetName, Comment;
+            public long LastWritten;
+            public uint BlobSize;
+            public IntPtr Blob;
+            public uint Persist, AttributeCount;
+            public IntPtr Attributes;
+            public string TargetAlias, UserName;
+        }
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool CredWriteW(ref TestCredential credential, uint flags);
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] private static extern bool CredDeleteW(string target, int type, int flags);
+
+        /// <summary>
+        /// A real entry under a target of the test's own, kept for this logon session only and deleted at the end;
+        /// the user's Antigravity sign-in is never touched.
+        /// </summary>
+        private static void AntigravityCredential()
+        {
+            string target = "aimeter-test:" + Guid.NewGuid().ToString("N");
+            Func<string, DateTime, string> document = (token, expiry) => "{\"token\":{\"access_token\":\"" + token + "\",\"token_type\":\"Bearer\",\"refresh_token\":\"r\"," +
+                "\"expiry\":\"" + new DateTimeOffset(expiry).ToString("yyyy-MM-dd'T'HH:mm:ss'.851940758'zzz") + "\",\"expires_in\":3600},\"auth_method\":\"consumer\",\"id_token\":\"i\"}";
+            var now = DateTime.Now;
+            byte[] secret = Encoding.UTF8.GetBytes(document("ya29.fixture", now.AddHours(1)));
+
+            Assert(WindowsCredentials.Read(target) == null && !WindowsCredentials.Exists(target), "A missing credential was reported as present.");
+            IntPtr blob = Marshal.AllocHGlobal(secret.Length);
+            try
+            {
+                Marshal.Copy(secret, 0, blob, secret.Length);
+                var written = new TestCredential { Type = 1, TargetName = target, BlobSize = (uint)secret.Length, Blob = blob, Persist = 1, UserName = "antigravity" };
+                Assert(CredWriteW(ref written, 0), "The test credential could not be written: error " + Marshal.GetLastWin32Error());
+
+                byte[] read = WindowsCredentials.Read(target);
+                Assert(WindowsCredentials.Exists(target) && read != null && read.SequenceEqual(secret), "The stored secret was not read back as written.");
+                Assert(AntigravityProvider.AccessToken(AntigravityProvider.SignIn(read), now) == "ya29.fixture", "A valid sign-in from Credential Manager gave no token.");
+            }
+            finally
+            {
+                CredDeleteW(target, 1, 0);
+                Marshal.FreeHGlobal(blob);
+            }
+
+            Func<string, Dictionary<string, object>> signIn = text => AntigravityProvider.SignIn(Encoding.UTF8.GetBytes(text));
+            Assert(AntigravityProvider.AccessToken(signIn(document("ya29.old", now.AddMinutes(1))), now) == null, "A token about to expire was used.");
+            Assert(AntigravityProvider.AccessToken(signIn(document("", now.AddHours(1))), now) == null, "An empty token was used.");
+            Assert(AntigravityProvider.SignIn(null) == null && AntigravityProvider.SignIn(new byte[0]) == null && signIn("not json") == null, "A secret that is not a sign-in was accepted.");
+            Assert(AntigravityProvider.AccessToken(signIn("{\"auth_method\":\"consumer\"}"), now) == null, "A document without a token gave one.");
         }
     }
 }

@@ -13,12 +13,19 @@ namespace AIMeter
     /// Google Antigravity (Google AI subscriptions): quotas per model group, each with a 5-hour and a weekly window,
     /// from the internal API Antigravity uses (cloudcode-pa, retrieveUserQuotaSummary). The sign-in is that of
     /// Antigravity CLI on the PC (Windows, or WSL when already running); when it expires the CLI itself renews it ("agy models"), never AI Meter.
+    /// The CLI keeps that sign-in in the operating system's credential store (on Windows, Credential Manager) and
+    /// writes its token file only where no store answers, as in WSL; older versions always wrote the file.
     /// The Gemini app does not expose its limits, so they are not shown here.
     /// </summary>
     internal sealed class AntigravityProvider : Provider
     {
         private static readonly string[] Hosts = { "https://daily-cloudcode-pa.googleapis.com", "https://cloudcode-pa.googleapis.com" };
         private const string TokenFile = @".gemini\antigravity-cli\antigravity-oauth-token";
+        // go-keyring's "service:user" target for service "gemini" and user "antigravity".
+        internal const string CredentialTarget = "gemini:antigravity";
+
+        private enum Place { None, Windows, Wsl }
+
         private readonly Settings S;
         private Usage live;
         private string plan, project;
@@ -32,7 +39,7 @@ namespace AIMeter
         public override bool Enabled(Settings s) { return s.AntigravityEnabled; }
 
         /// <summary>Antigravity CLI signed in on Windows (the WSL sign-in is visible only while WSL is running).</summary>
-        public static bool Detected() { return File.Exists(Path.Combine(Probe.Home, TokenFile)); }
+        public static bool Detected() { return WindowsCredentials.Exists(CredentialTarget) || File.Exists(Path.Combine(Probe.Home, TokenFile)); }
 
         public override void InvalidateNetwork() { fetchedAt = DateTime.MinValue; }
 
@@ -43,9 +50,9 @@ namespace AIMeter
             if (p.AllowNetwork && (DateTime.Now - fetchedAt).TotalMinutes >= interval && NetworkBackoff.Ready("antigravity"))
             {
                 fetchedAt = DateTime.Now;
-                string file;
-                string token = Token(p, out file);
-                if (token == null) needsLogin = file == null || !TryRefresh(p, file, out token);
+                Place place;
+                string token = Token(p, out place);
+                if (token == null) needsLogin = place == Place.None || !TryRefresh(p, place, out token);
                 if (token != null)
                 {
                     var fresh = Fetch(token);
@@ -62,39 +69,56 @@ namespace AIMeter
             return st;
         }
 
-        /// <summary>Antigravity CLI access token, if still valid; file = where the sign-in is stored (even if expired).</summary>
-        private static string Token(Probe p, out string file)
+        /// <summary>Antigravity CLI access token, if still valid; place = where a sign-in is stored (even if expired).</summary>
+        private static string Token(Probe p, out Place place)
         {
-            file = null;
-            foreach (var home in Homes(p))
+            place = Place.None;
+            foreach (var signIn in SignIns(p))
             {
-                string f = Path.Combine(home, TokenFile);
-                var d = Json.Obj(Json.ParseFile(f), "token");
-                if (d == null) continue;
-                file = f;
-                string token = Json.Str(d, "access_token");
-                DateTime? exp = Expiry(Json.Str(d, "expiry"));
-                if (token != null && exp.HasValue && exp.Value > DateTime.Now.AddMinutes(2)) return token;
+                if (Json.Obj(signIn.Value, "token") == null) continue;
+                if (place == Place.None) place = signIn.Key;
+                string token = AccessToken(signIn.Value, DateTime.Now);
+                if (token != null) return token;
             }
             return null;
         }
 
-        private static IEnumerable<string> Homes(Probe p)
+        /// <summary>
+        /// The sign-in documents to try, in order: Credential Manager, which the current CLI uses on Windows, then
+        /// the token file of older versions, which may be stale beside it, then the file in WSL when it is running.
+        /// </summary>
+        private static IEnumerable<KeyValuePair<Place, Dictionary<string, object>>> SignIns(Probe p)
         {
-            yield return Probe.Home;
-            if (p.WslUp) yield return p.WslHome;
+            yield return new KeyValuePair<Place, Dictionary<string, object>>(Place.Windows, SignIn(WindowsCredentials.Read(CredentialTarget)));
+            yield return new KeyValuePair<Place, Dictionary<string, object>>(Place.Windows, Json.ParseFile(Path.Combine(Probe.Home, TokenFile)));
+            if (p.WslUp) yield return new KeyValuePair<Place, Dictionary<string, object>>(Place.Wsl, Json.ParseFile(Path.Combine(p.WslHome, TokenFile)));
+        }
+
+        /// <summary>The sign-in document from a Credential Manager secret: the token file's JSON, in UTF-8. Null when it is not that.</summary>
+        internal static Dictionary<string, object> SignIn(byte[] secret)
+        {
+            return secret == null ? null : Json.Parse(Encoding.UTF8.GetString(secret));
+        }
+
+        /// <summary>The access token of a sign-in document, or null when it has none or it expires within two minutes.</summary>
+        internal static string AccessToken(Dictionary<string, object> signIn, DateTime now)
+        {
+            var d = Json.Obj(signIn, "token");
+            string token = Json.Str(d, "access_token");
+            DateTime? expiry = Expiry(Json.Str(d, "expiry"));
+            return !string.IsNullOrEmpty(token) && expiry.HasValue && expiry.Value > now.AddMinutes(2) ? token : null;
         }
 
         /// <summary>
         /// Expired sign-in: Antigravity CLI renews it with a request that uses no quota (the model list), at most
         /// every 30 minutes. In WSL only if it is already running.
         /// </summary>
-        private bool TryRefresh(Probe p, string file, out string token)
+        private bool TryRefresh(Probe p, Place place, out string token)
         {
             token = null;
             if ((DateTime.Now - refreshedAt).TotalMinutes < 30) return false;
             refreshedAt = DateTime.Now;
-            if (file.StartsWith(@"\\wsl", StringComparison.OrdinalIgnoreCase))
+            if (place == Place.Wsl)
             {
                 if (!p.WslUp) return false;
                 Probe.Run("wsl.exe", "-d " + S.WslDistro + " -- bash -lc \"timeout 60 ~/.local/bin/agy models >/dev/null 2>&1\"", 70000, null);
@@ -105,7 +129,7 @@ namespace AIMeter
                 if (exe == null) return false;
                 Probe.Run(exe, "models", 70000, null);
             }
-            string again;
+            Place again;
             token = Token(p, out again);
             return token != null;
         }
