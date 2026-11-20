@@ -129,9 +129,9 @@ namespace AIMeter
         /// 6. the largest context window;
         /// 7. the output speed measured here, fastest first, then models never timed;
         /// 8. service and model id;
-        /// then, for the same model, the agent that sends fewer tokens per request, the agent in the place the plugin
-        /// runs (Requirements.From), agent id, place and distribution, and the user's own installation before the
-        /// managed copy. Each candidate keeps its Rank, which list_candidates explains.
+        /// then, for the same model, an agent of the user's before the copy AI Meter keeps (ADR 0004: the user's agent
+        /// wins, whichever agent it is), the agent that sends fewer tokens per request, the agent in the place the
+        /// plugin runs (Requirements.From), and agent id, place and distribution. Each candidate keeps its Rank, which list_candidates explains.
         /// </summary>
         private static List<Candidate> Ordered(List<Candidate> candidates, Requirements req, LeaseBook leases, DateTime now)
         {
@@ -145,10 +145,11 @@ namespace AIMeter
                 .ThenByDescending(c => c.Rank.Context)
                 .ThenBy(c => c.Rank.Record.TokensPerSecond.HasValue ? 0 : 1).ThenByDescending(c => c.Rank.Record.TokensPerSecond ?? 0)
                 .ThenBy(c => c.Provider.Id, StringComparer.Ordinal).ThenBy(c => c.Model.Id, StringComparer.Ordinal)
+                .ThenBy(c => c.Access.Managed ? 1 : 0)
                 .ThenBy(c => c.Rank.RequestTokens.HasValue ? 0 : 1).ThenBy(c => c.Rank.RequestTokens ?? 0)
                 .ThenBy(c => c.Rank.SamePlace == false ? 1 : 0)
                 .ThenBy(c => c.Access.Runtime, StringComparer.Ordinal).ThenBy(c => c.Access.Where, StringComparer.Ordinal)
-                .ThenBy(c => c.Access.Distro, StringComparer.Ordinal).ThenBy(c => c.Access.Managed ? 1 : 0).ToList();
+                .ThenBy(c => c.Access.Distro, StringComparer.Ordinal).ToList();
         }
 
         /// <summary>The values Ordered sorts a candidate by. A best-effort candidate's context and reply size may be the agent's.</summary>
@@ -511,7 +512,8 @@ namespace AIMeter
             bool findKeys = Settings.Current != null && Settings.Current.FindKeys;
             bool managedBesideOwn = Settings.Current != null && Settings.Current.ManagedPiBesideOwn;
             // The managed copy's state is part of the inputs: installing it or changing its keys in Settings shows at once.
-            string inputs = Probe.Home + "|" + findKeys + "|" + managedBesideOwn + "|" + ManagedPi.Stamp + "|" + string.Join("|", places.Select(p => p.Distro + "=" + p.Home));
+            string managedServices = Settings.Current == null ? "" : string.Join(",", Settings.Current.ManagedPiServices);
+            string inputs = Probe.Home + "|" + findKeys + "|" + managedBesideOwn + "|" + ManagedPi.Stamp + "|" + managedServices + "|" + string.Join("|", places.Select(p => p.Distro + "=" + p.Home));
             lock (ScanLock)
             {
                 if (lastScan != null && lastScanInputs == inputs && DateTime.UtcNow - lastScanAt < ScanReuse) return lastScan;
@@ -613,6 +615,7 @@ namespace AIMeter
                 access.Program = ManagedPi.ProgramPath;
                 access.Version = ManagedPi.Pinned.Version;
                 access.ConfigFolder = ManagedPi.ConfigFolder;
+                access.Shells = ManagedPi.BoundShells;
                 scan.Access.Add(access);
             }
         }
@@ -739,6 +742,8 @@ namespace AIMeter
         /// <summary>The agent is the copy AI Meter keeps (ADR 0004), not an installation of the user's; ConfigFolder is its own configuration folder.</summary>
         public bool Managed;
         public string ConfigFolder;
+        /// <summary>For the managed copy: the shells it is bound to besides its PowerShell tool (ManagedPi.BoundShells).</summary>
+        public string[] Shells = new string[0];
     }
 
     /// <summary>

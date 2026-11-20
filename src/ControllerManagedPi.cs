@@ -82,20 +82,22 @@ namespace AIMeter
             if (on) next.Add(service);
             Settings.ManagedPiServices = next;
             Settings.Save();
-            if (!ManagedPi.SyncKeys(Settings))
+            if (!ManagedPi.Sync(Settings))
                 MessageBox.Show(L.T("Pi's key file could not be written. Check that no delegated task is running, then try again."), "AI Meter", MessageBoxButton.OK, MessageBoxImage.Warning);
             RefreshSettingsPage();
         }
 
         /// <summary>
-        /// Bring the managed Pi's key file in step with the keys AI Meter has now, for the services already chosen:
-        /// after a key was saved or removed, and at start. In the background, as finding a key can read other apps' files.
+        /// Bring the managed Pi's key file in step with the keys AI Meter has now and the services chosen, and its shell
+        /// with the Git Bash found now: after a key was saved or removed, and at start. In the background, as finding a
+        /// key can read other apps' files.
         /// </summary>
         internal void SyncManagedPiKeys()
         {
             var settings = Settings;
-            if (settings == null || settings.ManagedPiServices.Count == 0 || !ManagedPi.Installed) return;
-            ThreadPool.QueueUserWorkItem(_ => ManagedPi.SyncKeys(settings));
+            // Also with nothing ticked or no copy installed: a key file left by a failed deletion goes then.
+            if (settings == null || !System.IO.Directory.Exists(ManagedPi.Root)) return;
+            ThreadPool.QueueUserWorkItem(_ => ManagedPi.Sync(settings));
         }
     }
 }

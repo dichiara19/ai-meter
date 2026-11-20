@@ -3,7 +3,8 @@
 //   list_candidates -> describe_dispatch -> claim_capacity -> start the agent without a shell, task on stdin
 //   -> read its events -> release_capacity with the outcome.
 // It describes before claiming, so a lease is only taken for a candidate the plugin can actually start. For AI Meter's
-// managed Pi (ADR 0004), shell.mjs chooses the shell its commands run through, recorded as job.shell.
+// managed Pi (ADR 0004), shell.mjs chooses the shell its commands run through, recorded as job.shell, and secrets.mjs
+// keeps its keys out of everything saved from the agent's output.
 //
 // Each job is a folder under the jobs folder (~/.aimeter/jobs, or AI_METER_JOBS): job.json (the state), task.txt,
 // events.jsonl (the agent's output) and stderr.txt. A "cancel" file asks the worker to stop. A read-only task works
@@ -34,8 +35,9 @@ import { fileURLToPath } from "node:url";
 import { canRead, readerFor, shortError, summarise } from "./agents.mjs";
 import { place, ToolError, withMeter } from "./meter.mjs";
 import { checkSignIn, cleanEnvironment, coordinatorOf } from "./plan.mjs";
+import { managedSecrets, mentions, redact } from "./secrets.mjs";
 import { shellFor } from "./shell.mjs";
-import { createSnapshot, createWorktree, describeChanges, removeSnapshot, repositoryOf } from "./workspace.mjs";
+import { createSnapshot, createWorktree, describeChanges, isInsideWsl, removeSnapshot, repositoryOf } from "./workspace.mjs";
 
 const ENDED = new Set(["completed", "failed", "cancelled", "timed_out"]);
 const KEEP_DAYS = 7;
@@ -291,6 +293,11 @@ async function choose(job, signal) {
       // managed goes back to describe_dispatch, which then describes AI Meter's own copy of the agent (ADR 0004).
       const which = { service: c.service, model: c.model, runtime: c.runtime.name, where: c.runtime.where, ...pick(c.runtime, ["distro"]), ...(c.runtime.managed ? { managed: true } : {}) };
       if (refusedPools.has(c.pool)) continue;
+      // AI Meter is asked about the snapshot or worktree, which is on Windows even for a repository in WSL.
+      if (which.managed && isInsideWsl(job.workspace)) {
+        job.skipped.push({ ...which, reason: "the managed Pi works on Windows folders only; this repository is inside WSL" });
+        continue;
+      }
       if (!canRead(which.runtime)) {
         job.skipped.push({ ...which, reason: "this plugin cannot read " + which.runtime + "'s output yet" });
         continue;
@@ -373,6 +380,15 @@ async function runAgent(job, chosen, task, signal) {
 
   const reader = readerFor(plan.runtime, job.id);   // The worktree or snapshot folder is named after the job.
   reader.allowance = chosen.lease.budget?.max_cost || 0;
+  // The managed copy's keys, held here only: each event is redacted before the reader sees it, so that nothing cut
+  // from it later (answer, error, activity) can keep part of a key; the summary is checked again at the end.
+  const secrets = managedSecrets(plan);
+  let redacted = false;
+  const withoutSecrets = (value) => {
+    if (!mentions(value, secrets)) return value;
+    redacted = true;
+    return redact(value, secrets);
+  };
   // A plan agent never gets this process's environment: no API key or base URL can make it bill an API (ADR 0003).
   const clean = plan.environment_policy === "clean";
   // The managed Pi runs commands through a shell the plugin chose, never one Pi finds (shell.mjs, ADR 0004).
@@ -414,7 +430,7 @@ async function runAgent(job, chosen, task, signal) {
     const line = text.trim();
     if (!line) return;
     try {
-      reader.feed(JSON.parse(line));
+      reader.feed(withoutSecrets(JSON.parse(line)));
     } catch {
       // Not an event: kept in events.jsonl only.
     }
@@ -474,8 +490,9 @@ async function runAgent(job, chosen, task, signal) {
   if (stderrBytes > STDERR_LIMIT_BYTES) errors.write(`\n[AI Meter: ${stderrBytes - STDERR_LIMIT_BYTES} more bytes not kept]\n`);
   await Promise.all([new Promise((resolve) => events.end(resolve)), new Promise((resolve) => errors.end(resolve))]);
 
-  const summary = summarise(reader, exitCode, stopped);
-  explainExit(summary, reader, exitCode, stopped, stderrHead.toString("utf8"));
+  const summary = withoutSecrets(summarise(reader, exitCode, stopped));
+  explainExit(summary, reader, exitCode, stopped, withoutSecrets(stderrHead.toString("utf8")));
+  if (redacted) job.warnings = [...new Set([...(job.warnings || []), "managed_key_redacted"])];
   if (summary.answer.length > ANSWER_LIMIT) {
     summary.answer = summary.answer.slice(0, ANSWER_LIMIT);
     summary.answer_truncated = true;

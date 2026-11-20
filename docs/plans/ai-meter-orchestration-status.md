@@ -70,6 +70,16 @@ Three things the PR marked as unverified are still unverified after the release,
   - **Evidence so far** (the ADR's live test, 2026-11-19, Pi 1.5.2 against a local stand-in for the model): arguments and stdin as in WSL; its own configuration folder with no `~/.pi`; file tools work without bash; PowerShell 5.1 works; Pi uses WSL's `bash.exe` when Git Bash is missing; Git fails on a WSL folder through `\\wsl.localhost`; a child command can outlive `taskkill /T /F` (#37).
   - **NOT RUN:** a request to a real model from the Windows build; the Store-signed build starting the managed copy; Store certification of the listing's disclosure ([STORE.md](../STORE.md#optional-download-managed-pi)).
   - **Still to do:** the plugin (0.3.0) that uses `managed`, `commands` and `alternatives`; a daily test by the maintainer; release.
+  - **Adversarial review and live check, 2026-11-20.** Codex reviewed the change adversarially and reported nine findings. What changed:
+    - the shell is bound by AI Meter in the copy's settings (`shellPath`, Git Bash only), and `describe_dispatch` offers `git_bash` only while that file names an existing `bash.exe`;
+    - `PI_OFFLINE=1`: nothing is downloaded during a task;
+    - a service is offered only while ticked, and the key file and `auth.json.new` are deleted when nothing is ticked, when the copy is not installed and at every start;
+    - the stated limit that Pi's tools are not confined to the task's folder, so the agent can read the key file (README, SECURITY.md, MCP.md, ADR 0004);
+    - installation through one file handle held without sharing, with new names for each attempt;
+    - order: any agent of the user's before the copy for the same model; the plugin skips the copy for a repository inside WSL;
+    - the Microsoft Store build has the copy off (`OfferedInStoreBuild` is `false`) until the listing discloses it ([STORE.md](../STORE.md#optional-download-managed-pi)).
+  - **Live check the same day.** AI Meter's own installer downloaded the pinned archive (61,940,631 bytes, digest matched, 137 MB unpacked, 4.3 s). Pi 1.5.2 ran with a scripted local stand-in for the model: read-only refused writes and commands; the PowerShell tool ran Windows PowerShell 5.1 and there was no bash tool; with Git Bash, commands ran in MINGW, not WSL; without a key it exited with code 1 and the reason at the start of stderr; `~/.pi` was not created.
+  - **Still not verified:** a request to a real model from the Windows build; the Store-signed build starting it; grep and find with `PI_OFFLINE=1` and no ripgrep or fd on `PATH` (expected from Pi's source to fail with an error, not run live); the `shellPath` binding live (taken from Pi 1.5.2's `utils/shell.ts`).
 
 - **2026-11-02, best-effort candidates, and a first task on NVIDIA.**
   - **The change.** NVIDIA and Gemini gave no candidates, because their lists state neither tools nor prices. With the maintainer, they were made a category of their own:

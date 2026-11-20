@@ -35,6 +35,16 @@ export function repositoryOf(workspace) {
 }
 
 /**
+ * Whether a path is inside WSL as Windows reaches it: \\wsl.localhost\<distro>\... or \\wsl$\<distro>\..., with either
+ * slash and in any case, also in the \\?\UNC\ form. A pure function of the text, so that it can be tested anywhere.
+ * The managed Pi works on Windows folders only, and the folder AI Meter is asked to describe is the plugin's snapshot or
+ * worktree (under the Windows profile), so the job's own workspace is what says where the repository is.
+ */
+export function isInsideWsl(path) {
+  return /^[\\/]{2}(\?[\\/]UNC[\\/])?wsl(\.localhost|\$)([\\/]|$)/i.test(String(path || ""));
+}
+
+/**
  * Whether a file's name usually means it holds secrets: .env files and their variants (but not .env.example and
  * the like), package-registry and netrc credentials, private keys and certificates.
  */

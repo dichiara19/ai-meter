@@ -34,10 +34,12 @@ namespace AIMeter
         public const string Place = "managed";
 
         /// <summary>
-        /// When false, the Microsoft Store build does not offer the managed copy (ADR 0004 decision 7: the fallback
-        /// should certification refuse the download); GitHub builds always do.
+        /// Whether the Microsoft Store build offers the managed copy; GitHub builds always do. False until the Store
+        /// listing discloses the optional download (ADR 0004 decision 7, docs/STORE.md): a package is submitted
+        /// automatically from a release tag, and must not reach certification ahead of its description. It is also
+        /// the fallback should certification refuse the download.
         /// </summary>
-        private static readonly bool OfferedInStoreBuild = true;
+        private static readonly bool OfferedInStoreBuild = false;
 
         /// <summary>One release of Pi's standalone build: where it is published and what the archive must be.</summary>
         internal sealed class Release
@@ -130,19 +132,31 @@ namespace AIMeter
         /// <summary>Install with the release and the source given, so that tests need no network.</summary>
         internal static void Install(Release release, Func<string, Stream> open, Action<long> progress, Func<bool> cancelled)
         {
-            string archive = Path.Combine(Root, release.Version + ".zip" + PartialSuffix);
-            string unpacked = FolderOf(release) + PartialSuffix;
+            // Names no earlier attempt used, so nothing left behind or put there by another program is ever unpacked or
+            // promoted: the archive file is created new and the staging folder must not exist yet.
+            string attempt = Guid.NewGuid().ToString("N");
+            string archive = Path.Combine(Root, release.Version + "-" + attempt + ".zip" + PartialSuffix);
+            string unpacked = FolderOf(release) + "-" + attempt + PartialSuffix;
             try
             {
                 Directory.CreateDirectory(Root);
-                Download(release, open, archive, progress, cancelled);
-                Unpack(archive, unpacked, cancelled);
+                foreach (var stale in Probe.SafeDirs(Root).Where(d => d.EndsWith(PartialSuffix, StringComparison.Ordinal))) TryDelete(stale);
+                foreach (var stale in Probe.SafeFiles(Root, "*" + PartialSuffix)) TryDeleteFile(stale.FullName);
+
+                // One handle, held without sharing from the first byte written to the last entry unpacked: what is
+                // unpacked is exactly what was hashed.
+                using (var file = new FileStream(archive, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+                {
+                    Download(release, open, file, progress, cancelled);
+                    Unpack(file, unpacked, cancelled);
+                }
                 if (!File.Exists(Path.Combine(unpacked, ProgramName))) throw new InstallException(L.T("The downloaded archive does not contain Pi's program. Nothing was installed."));
 
                 // The complete folder takes its place in one step, so a copy is never seen half unpacked.
                 if (Directory.Exists(FolderOf(release))) Directory.Delete(FolderOf(release), true);
                 Directory.Move(unpacked, FolderOf(release));
                 foreach (var other in Probe.SafeDirs(Root).Where(d => !SamePath(d, FolderOf(release)) && !SamePath(d, ConfigFolder))) TryDelete(other);
+                lock (ConfigLock) BindShell();
             }
             catch (OperationCanceledException) { throw; }
             catch (InstallException) { throw; }
@@ -158,15 +172,14 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Write the archive to a file while hashing it, and keep it only if its SHA-256 is the release's. A source that
-        /// sends more than the release's size is cut off: the file could not match.
+        /// Write the archive to the open file while hashing it, and go on only if its SHA-256 is the release's. A source
+        /// that sends more than the release's size is cut off: the file could not match.
         /// </summary>
-        private static void Download(Release release, Func<string, Stream> open, string archive, Action<long> progress, Func<bool> cancelled)
+        private static void Download(Release release, Func<string, Stream> open, FileStream file, Action<long> progress, Func<bool> cancelled)
         {
             string digest;
             using (var sha = SHA256.Create())
             using (var source = open(release.Url))
-            using (var file = new FileStream(archive, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 var block = new byte[81920];
                 long total = 0;
@@ -188,16 +201,18 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Unpack a verified archive into a new folder. Every entry must land inside that folder, whatever its name
-        /// says, and the whole may not exceed UnpackedLimitBytes: the archive is verified, but a wrong pin should fail
-        /// here rather than write outside or fill the disk.
+        /// Unpack the verified archive, read back through the handle it was written with, into a folder that must not
+        /// exist yet. Every entry must land inside that folder, whatever its name says, and the whole may not exceed
+        /// UnpackedLimitBytes: the archive is verified, but a wrong pin should fail here rather than write outside or
+        /// fill the disk.
         /// </summary>
-        private static void Unpack(string archive, string folder, Func<bool> cancelled)
+        private static void Unpack(FileStream archive, string folder, Func<bool> cancelled)
         {
-            TryDelete(folder);
+            if (Directory.Exists(folder) || File.Exists(folder)) throw new IOException("The staging folder already exists: " + folder);
             Directory.CreateDirectory(folder);
             string root = Path.GetFullPath(folder) + Path.DirectorySeparatorChar;
-            using (var zip = ZipFile.OpenRead(archive))
+            archive.Position = 0;
+            using (var zip = new ZipArchive(archive, ZipArchiveMode.Read, true))
             {
                 if (zip.Entries.Sum(e => e.Length) > UnpackedLimitBytes) throw new InvalidDataException("The archive unpacks to more than expected.");
                 foreach (var entry in zip.Entries)
@@ -232,7 +247,7 @@ namespace AIMeter
         {
             try
             {
-                if (File.Exists(KeyFile)) File.Delete(KeyFile);
+                DeleteKeyFiles();
                 if (settings != null)
                 {
                     settings.ManagedPiServices = new List<string>();
@@ -283,18 +298,26 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Rewrite the copy's key file from the user's choices: one entry for each ticked service that still has a key,
-        /// nothing else. Called when a choice or a key changes, and at start, so a key the user replaced or removed in
-        /// AI Meter does not live on here. Returns false when the file could not be written.
+        /// Bring the copy's configuration in step with the user's choices and this PC: its key file holds one entry for
+        /// each ticked service that still has a key, nothing else, and its settings name the Git Bash found now (see
+        /// BindShell). Called when a choice or a key changes, after an installation and at start, so a key the user
+        /// replaced or removed in AI Meter does not live on here. Without an installed copy, or with nothing ticked, no
+        /// key file is left, nor a half-written one. Returns false when a key file could not be written or deleted: the
+        /// caller tells the user, and the next call tries again.
         /// </summary>
-        public static bool SyncKeys(Settings settings)
+        public static bool Sync(Settings settings)
         {
-            if (settings == null || !Installed) return true;
+            if (settings == null) return true;
             // One writer at a time: Settings calls this on the interface thread, a key change in the background.
-            lock (KeyLock) return WriteKeys(settings.ManagedPiServices ?? new List<string>());
+            lock (ConfigLock)
+            {
+                if (Installed) BindShell();
+                return WriteKeys(Installed ? settings.ManagedPiServices ?? new List<string>() : new List<string>());
+            }
         }
 
-        private static readonly object KeyLock = new object();
+        private static readonly object ConfigLock = new object();
+        private static string PendingKeyFile { get { return KeyFile + ".new"; } }
 
         private static bool WriteKeys(IEnumerable<string> services)
         {
@@ -309,32 +332,124 @@ namespace AIMeter
             {
                 if (entries.Count == 0)
                 {
-                    if (File.Exists(KeyFile)) File.Delete(KeyFile);
+                    DeleteKeyFiles();
                     return true;
                 }
                 string text = Json.Serialize(entries);
-                if (File.Exists(KeyFile) && File.ReadAllText(KeyFile, Encoding.UTF8) == text) return true;
+                if (File.Exists(KeyFile) && File.ReadAllText(KeyFile, Encoding.UTF8) == text)
+                {
+                    if (File.Exists(PendingKeyFile)) File.Delete(PendingKeyFile);
+                    return true;
+                }
                 Directory.CreateDirectory(ConfigFolder);
-                string temporary = KeyFile + ".new";
-                File.WriteAllText(temporary, text, new UTF8Encoding(false));
-                if (File.Exists(KeyFile)) File.Replace(temporary, KeyFile, null);
-                else File.Move(temporary, KeyFile);
+                try
+                {
+                    File.WriteAllText(PendingKeyFile, text, new UTF8Encoding(false));
+                    if (File.Exists(KeyFile)) File.Replace(PendingKeyFile, KeyFile, null);
+                    else File.Move(PendingKeyFile, KeyFile);
+                }
+                finally
+                {
+                    // A replacement that failed half-way must not leave a second copy of the keys.
+                    if (File.Exists(PendingKeyFile)) File.Delete(PendingKeyFile);
+                }
                 return true;
             }
             catch (IOException) { return false; }
             catch (UnauthorizedAccessException) { return false; }
         }
 
+        /// <summary>Delete the key file and a half-written one; throws when either cannot be deleted.</summary>
+        private static void DeleteKeyFiles()
+        {
+            if (File.Exists(PendingKeyFile)) File.Delete(PendingKeyFile);
+            if (File.Exists(KeyFile)) File.Delete(KeyFile);
+        }
+
         /// <summary>
-        /// The key the copy holds for a service, with the provider id it is kept under; null when it holds none. For
-        /// the runtime scan only, which reports an opaque credential id.
+        /// The key the copy may use for a service, with the provider id it is kept under; null when it holds none or
+        /// the user has not ticked the service now: a key that could not be deleted after a choice was withdrawn must
+        /// not keep the service on offer. For the runtime scan only, which reports an opaque credential id.
         /// </summary>
         internal static string KeyFor(ServiceDefinition d, out string provider)
         {
             provider = ProviderOf(d);
-            if (provider == null) return null;
+            var settings = Settings.Current;
+            if (provider == null || settings == null || settings.ManagedPiServices == null || !settings.ManagedPiServices.Contains(d.Id)) return null;
             string key = JPath.Str(JPath.Get(Json.ParseFile(KeyFile), provider + ".key"));
             return string.IsNullOrEmpty(key) ? null : key;
+        }
+
+        // ------------------------------------------------------------ shell
+
+        /// <summary>The name, in agents/pi.json's alternatives and in describe_dispatch, of the shell BindShell binds.</summary>
+        public const string GitBashShell = "git_bash";
+
+        private static string SettingsFile { get { return Path.Combine(ConfigFolder, "settings.json"); } }
+
+        /// <summary>
+        /// Name the Git Bash found on this PC as the copy's shell (Pi's shellPath setting), or name none when there is
+        /// no Git Bash. With its bash tool, Pi otherwise searches for a bash.exe each time it runs a command, and can
+        /// find WSL's launcher; with shellPath set it uses that file only, and fails when the file is gone (Pi 1.5.2,
+        /// utils/shell.ts). The copy's settings file holds nothing else and is AI Meter's to write.
+        /// </summary>
+        private static void BindShell()
+        {
+            string bash = LocateGitBash();
+            try
+            {
+                string text = bash == null ? null : Json.Serialize(new Dictionary<string, object> { { "shellPath", bash } });
+                if (text == null) { if (File.Exists(SettingsFile)) File.Delete(SettingsFile); return; }
+                if (File.Exists(SettingsFile) && File.ReadAllText(SettingsFile, Encoding.UTF8) == text) return;
+                Directory.CreateDirectory(ConfigFolder);
+                File.WriteAllText(SettingsFile, text, new UTF8Encoding(false));
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        /// <summary>How BindShell looks for Git Bash; tests replace it, so that they do not depend on what this PC has.</summary>
+        internal static Func<string> LocateGitBash = () => FindGitBash(Environment.GetEnvironmentVariable, File.Exists);
+
+        /// <summary>
+        /// The shells the copy is bound to now, besides the PowerShell tool it always has: GitBashShell while its
+        /// settings name a bash.exe that exists. Only then may a plugin give it the bash tool.
+        /// </summary>
+        public static string[] BoundShells
+        {
+            get
+            {
+                string bash = Json.Str(Json.ParseFile(SettingsFile), "shellPath");
+                try { return !string.IsNullOrEmpty(bash) && File.Exists(bash) ? new[] { GitBashShell } : new string[0]; }
+                catch (ArgumentException) { return new string[0]; }
+            }
+        }
+
+        /// <summary>
+        /// The bash.exe of Git for Windows, or null: in the usual installation folders, then beside a git.exe on PATH
+        /// (Git puts …\Git\cmd there, and bash.exe is in …\Git\bin). A file under the Windows folder is never
+        /// returned: WSL's bash.exe launcher is there.
+        /// </summary>
+        internal static string FindGitBash(Func<string, string> variable, Func<string, bool> exists)
+        {
+            var places = new List<string>();
+            foreach (var name in new[] { "ProgramFiles", "ProgramW6432", "ProgramFiles(x86)" })
+                if (!string.IsNullOrEmpty(variable(name))) places.Add(Path.Combine(variable(name), @"Git\bin"));
+            if (!string.IsNullOrEmpty(variable("LOCALAPPDATA"))) places.Add(Path.Combine(variable("LOCALAPPDATA"), @"Programs\Git\bin"));
+            foreach (var entry in (variable("PATH") ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string folder = entry.Trim().Trim('"');
+                try { if (folder.Length > 0 && exists(Path.Combine(folder, "git.exe"))) places.Add(Path.GetFullPath(Path.Combine(folder, @"..\bin"))); }
+                catch (ArgumentException) { }   // A malformed PATH entry.
+                catch (NotSupportedException) { }
+            }
+            string windows = (variable("SystemRoot") ?? @"C:\Windows").TrimEnd('\\') + "\\";
+            foreach (var place in places)
+            {
+                string bash = Path.Combine(place, "bash.exe");
+                if (!bash.StartsWith(windows, StringComparison.OrdinalIgnoreCase) && exists(bash)) return bash;
+            }
+            return null;
         }
 
         // ------------------------------------------------------------ files

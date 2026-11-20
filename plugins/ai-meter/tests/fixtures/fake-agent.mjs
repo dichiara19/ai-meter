@@ -22,7 +22,10 @@
 //             and a command that succeeds with long output, each with absolute paths in its folder;
 //   manytools (Pi) makes 45 tool calls before answering;
 //   retried   (Pi) meets a 429, retries as Pi does, then answers normally;
-//   nokey     (Pi) exits with 1 after its session event, the reason on stderr, as Pi does without a key.
+//   nokey     (Pi) exits with 1 after its session event, the reason on stderr, as Pi does without a key;
+//   leak      (Pi) prints auth.json in PI_CODING_AGENT_DIR with a command and quotes every key in its answer, as a
+//             model told to could;
+//   leakerror (Pi) writes auth.json's contents to stderr and exits with 1 before agent_settled.
 // Requests are otherwise priced at zero, as the agents do for free models. A third argument (the managed Pi's shell)
 // is named in Pi's answer: "echo via <shell>: <task>".
 //
@@ -116,9 +119,21 @@ function pi() {
     process.exitCode = 1;
     return;
   }
+  const authFile = join(process.env.PI_CODING_AGENT_DIR || ".", "auth.json");
+  if (behaviour === "leakerror") {
+    process.stderr.write("Could not parse " + readFileSync(authFile, "utf8") + "\n");
+    process.exitCode = 1;
+    return;
+  }
   emit({ type: "agent_start" });
   emit({ type: "turn_start" });
   if (behaviour === "tools") piTools();
+  let answer = behaviour === "list" ? listFolder() : (signIn ? "echo via " + signIn + ": " : "echo: ") + task;
+  if (behaviour === "leak") {
+    const auth = readFileSync(authFile, "utf8");
+    piTool("bash", { command: "cat " + authFile }, auth, false);
+    answer = "The keys are: " + Object.values(JSON.parse(auth)).map((entry) => entry.key).join(" and ") + ".";
+  }
   if (behaviour === "manytools") for (let i = 0; i < 45; i++) piTool("bash", { command: "echo " + i }, "" + i, false);
   if (behaviour === "retried") {
     const body = '429: {"message":"Provider returned error","code":429,"metadata":{"raw":"a:free is temporarily rate-limited upstream. Please retry shortly.","is_byok":false}}';
@@ -134,7 +149,7 @@ function pi() {
     type: "message_end",
     message: {
       role: "assistant",
-      content: failed ? [] : [{ type: "text", text: behaviour === "list" ? listFolder() : (signIn ? "echo via " + signIn + ": " : "echo: ") + task }],
+      content: failed ? [] : [{ type: "text", text: answer }],
       stopReason: failed ? "error" : behaviour === "length" ? "length" : "stop",
       errorMessage: behaviour === "byok" ? byok : failed ? "429 Too Many Requests: free-models-per-min" : undefined,
       usage: { input: 100, output: 7, cacheRead: 20, cacheWrite: 0, totalTokens: 127, cost: { total: cost } },

@@ -25,6 +25,12 @@ namespace AIMeter
             test("Dispatch describes the managed Pi with its own folder, shell and alternatives, on Windows folders only", () => Isolated(DescribesManagedCopy));
             test("The MCP tools show, describe and lease the managed Pi without revealing its keys", () => Isolated(McpShowsManagedCopy));
             test("The managed Pi's strings are translated in every language, with their placeholders", Translations);
+            test("Installing the managed Pi deletes stale partial files and folders and never promotes them", () => Isolated(InstallClearsStalePartials));
+            test("A service unticked gives no access even while its key is still in the file, and no half-written key file outlives a sync or Remove", () => Isolated(KeysAreRevokedAndLeaveNothing));
+            test("Without Git Bash, or once its bash.exe is gone, the managed Pi is offered PowerShell only", () => Isolated(DescribesWithoutGitBash));
+            test("Git Bash is found in Git's folders or beside git.exe on PATH, never under the Windows folder", () => Isolated(FindsGitBash));
+            test("For the same model a user's own agent comes before the managed Pi, even one that sends more tokens", () => Isolated(OwnAgentBeforeManagedCopy));
+            test("The Store build does not offer the managed Pi, even with a copy on disk", () => Isolated(StoreBuildDoesNotOffer));
         }
 
         private static void Translations()
@@ -64,7 +70,8 @@ namespace AIMeter
         /// <summary>
         /// Run a test with the copy's folder under the test folder (not packaged), the repository's definitions of
         /// Services as the only ones, key discovery off and no key variable of those services in this process, so that
-        /// no key of the developer's machine reaches a test. Restores what it changed. A key set in the user's own
+        /// no key of the developer's machine reaches a test. No Git Bash is found unless a test sets one, so results do
+        /// not depend on whether Git is installed on this PC. Restores what it changed. A key set in the user's own
         /// environment cannot be hidden, so the test refuses to run then.
         /// </summary>
         private static void Isolated(Action action)
@@ -78,6 +85,7 @@ namespace AIMeter
             var packaged = Native.PackagedOverride;
             bool findKeys = Settings.Current.FindKeys;
             var services = Settings.Current.ManagedPiServices;
+            var locateGitBash = ManagedPi.LocateGitBash;
             var saved = new Dictionary<string, string>();
             foreach (var id in Services)
                 foreach (var name in ServiceDefinition.Strings(Definitions.Get(id).Auth, "env"))
@@ -92,12 +100,14 @@ namespace AIMeter
                 Native.PackagedOverride = false;
                 Settings.Current.FindKeys = false;
                 Settings.Current.ManagedPiServices = new List<string>();
+                ManagedPi.LocateGitBash = () => null;
                 action();
             }
             finally
             {
                 foreach (var kv in saved) Environment.SetEnvironmentVariable(kv.Key, kv.Value);
                 Native.PackagedOverride = packaged;
+                ManagedPi.LocateGitBash = locateGitBash;
                 Settings.Current.FindKeys = findKeys;
                 Settings.Current.ManagedPiServices = services;
                 foreach (var id in Services)
@@ -241,10 +251,10 @@ namespace AIMeter
 
             // Not installed: nothing is written, whatever is ticked.
             settings.ManagedPiServices = new List<string> { "openrouter" };
-            Assert(ManagedPi.SyncKeys(settings) && !File.Exists(KeyFile) && !Directory.Exists(ManagedPi.Root), "Keys were written for a copy that is not installed.");
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && !Directory.Exists(ManagedPi.Root), "Keys were written for a copy that is not installed.");
 
             Install(Good, ReleaseOf(Good));
-            Assert(ManagedPi.SyncKeys(settings), "The key file could not be written.");
+            Assert(ManagedPi.Sync(settings), "The key file could not be written.");
             Assert(File.ReadAllText(KeyFile) == "{\"openrouter\":{\"type\":\"api_key\",\"key\":\"" + RouterKey + "\"}}",
                 "The key file is not Pi's auth.json for OpenRouter: " + File.ReadAllText(KeyFile));
             string provider;
@@ -254,7 +264,7 @@ namespace AIMeter
 
             // Gemini under Pi's provider google; Experiential Labs never, even when ticked.
             settings.ManagedPiServices = new List<string> { "openrouter", "gemini", "experientiallabs" };
-            Assert(ManagedPi.SyncKeys(settings), "The key file could not be rewritten.");
+            Assert(ManagedPi.Sync(settings), "The key file could not be rewritten.");
             var keys = Json.ParseFile(KeyFile);
             Assert(keys.Keys.OrderBy(k => k, StringComparer.Ordinal).SequenceEqual(new[] { "google", "openrouter" }), "The key file's providers are wrong: " + string.Join(", ", keys.Keys));
             Assert(Json.Str(Json.Obj(keys, "google"), "key") == GeminiKey && Json.Str(Json.Obj(keys, "google"), "type") == "api_key", "Gemini's key is not under google.");
@@ -263,29 +273,29 @@ namespace AIMeter
 
             // Unticking removes the entry, and the file once it is empty.
             settings.ManagedPiServices = new List<string> { "openrouter" };
-            ManagedPi.SyncKeys(settings);
+            ManagedPi.Sync(settings);
             Assert(!File.ReadAllText(KeyFile).Contains(GeminiKey) && File.ReadAllText(KeyFile).Contains(RouterKey), "Unticking Gemini did not remove only its key.");
             settings.ManagedPiServices = new List<string>();
-            Assert(ManagedPi.SyncKeys(settings) && !File.Exists(KeyFile), "Unticking every service left the key file.");
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "Unticking every service left the key file.");
             Assert(ManagedPi.Stamp == "0", "The stamp does not show that the keys are gone.");
 
             // A key removed in AI Meter leaves the copy at the next sync.
             settings.ManagedPiServices = new List<string> { "openrouter" };
-            ManagedPi.SyncKeys(settings);
+            ManagedPi.Sync(settings);
             Assert(File.Exists(KeyFile), "The key was not copied again.");
             ApiKeys.Remove("openrouter");
-            Assert(ManagedPi.SyncKeys(settings) && !File.Exists(KeyFile), "A key removed in AI Meter stayed in the copy.");
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "A key removed in AI Meter stayed in the copy.");
             Assert(!ManagedPi.ServicesWithKey().Any(d => d.Id == "openrouter"), "A service without a key can still be copied.");
 
             // Remove deletes the keys, the program and the choices.
             ApiKeys.Save("openrouter", RouterKey);
             settings.ManagedPiServices = new List<string> { "openrouter", "gemini" };
-            ManagedPi.SyncKeys(settings);
+            ManagedPi.Sync(settings);
             ManagedPi.Remove(settings);
             Assert(!File.Exists(KeyFile) && !File.Exists(ManagedPi.ProgramPath) && !Directory.Exists(ManagedPi.Root), "Remove left files of the copy.");
             Assert(settings.ManagedPiServices != null && settings.ManagedPiServices.Count == 0, "Remove did not forget the ticked services.");
             Assert(!ManagedPi.Installed && ManagedPi.Stamp == "", "The copy still counts as installed after Remove.");
-            Assert(ManagedPi.SyncKeys(settings) && !Directory.Exists(ManagedPi.Root), "A sync after Remove wrote files again.");
+            Assert(ManagedPi.Sync(settings) && !Directory.Exists(ManagedPi.Root), "A sync after Remove wrote files again.");
         }
 
         // ------------------------------------------------------------ scan
@@ -297,7 +307,7 @@ namespace AIMeter
             ApiKeys.Save("openrouter", RouterKey);
             ApiKeys.Save("gemini", GeminiKey);
             Settings.Current.ManagedPiServices = new List<string> { "openrouter", "gemini" };
-            Assert(ManagedPi.SyncKeys(Settings.Current), "The keys could not be copied.");
+            Assert(ManagedPi.Sync(Settings.Current), "The keys could not be copied.");
         }
 
         /// <summary>An empty Windows home under the test folder; files and folders (null content) may be added.</summary>
@@ -418,10 +428,25 @@ namespace AIMeter
             return i < 0 || i + 1 >= arguments.Count ? null : arguments[i + 1];
         }
 
+        private static string ShellSettingsFile { get { return Path.Combine(ManagedPi.ConfigFolder, "settings.json"); } }
+
+        /// <summary>A stand-in for Git for Windows' bash.exe under the test folder; returns its path.</summary>
+        private static string FakeGitBash()
+        {
+            string bash = Path.Combine(Settings.Folder, "git-" + Guid.NewGuid().ToString("N"), "bin", "bash.exe");
+            Directory.CreateDirectory(Path.GetDirectoryName(bash));
+            File.WriteAllText(bash, "not really bash");
+            return bash;
+        }
+
         private static void DescribesManagedCopy()
         {
+            string fakeBash = FakeGitBash();
+            ManagedPi.LocateGitBash = () => fakeBash;
             InstallWithKeys();
+            Assert(Json.Str(Json.ParseFile(ShellSettingsFile), "shellPath") == fakeBash, "The copy's settings do not name the Git Bash found.");
             var router = ManagedAccess(ScanOf(Home(), false), "openrouter");
+            Assert(router.Shells.SequenceEqual(new[] { "git_bash" }), "The access is not bound to Git Bash.");
             string workspace = @"C:\src\project";
 
             var modify = Dispatch.Describe(router, Model, Dispatch.Modify, workspace, "windows", null, router.Version);
@@ -429,6 +454,8 @@ namespace AIMeter
             Assert(modify.Program == ManagedPi.ProgramPath && modify.WorkingDirectory == workspace && modify.Where == "windows", "The managed copy's program or folder is wrong.");
             Assert(modify.Environment["PI_CODING_AGENT_DIR"] == ManagedPi.ConfigFolder && modify.Environment["PI_SKIP_VERSION_CHECK"] == "1" && modify.Environment["PI_TELEMETRY"] == "0",
                 "The managed copy's environment is wrong.");
+            string offline;
+            Assert(modify.Environment.TryGetValue("PI_OFFLINE", out offline) && offline == "1", "The managed copy may download tools while it works (PI_OFFLINE).");
             Assert(After(modify.Arguments, "--tools") == "read,powershell,edit,write" && After(modify.Arguments, "--provider") == "openrouter" && After(modify.Arguments, "--model") == Model,
                 "The managed copy's modify arguments are wrong: " + string.Join(" ", modify.Arguments));
             Assert(modify.Arguments.Contains("--no-context-files") && !modify.Arguments.Any(a => a.Contains("{")), "The managed copy is not isolated, or a placeholder was left.");
@@ -499,6 +526,8 @@ namespace AIMeter
         {
             NetworkBackoff.Clear();
             Settings.Current.WslDistro = "Ubuntu-24.04";
+            string fakeBash = FakeGitBash();
+            ManagedPi.LocateGitBash = () => fakeBash;
             var snap = Fixture();
             string home = Home();
             var server = new McpServer(() => snap, () => false, null, null, () => ScanOf(home, false), new LeaseBook(null));
@@ -552,6 +581,207 @@ namespace AIMeter
             foreach (var answer in answers)
                 Assert(!answer.Contains(RouterKey) && !answer.Contains(GeminiKey) && !answer.Contains(keyFile) && !answer.Contains("api_key"), "An answer reveals a key or the key file.");
             Assert(answers[2].Contains(Json.Serialize(ManagedPi.ConfigFolder).Trim('"')), "The configuration folder should be in the description.");
+        }
+
+        // ------------------------------------------------------------ hardening
+
+        private static void InstallClearsStalePartials()
+        {
+            // Left by an earlier attempt, or put there by another program: neither may be unpacked nor promoted.
+            string staleFolder = Path.Combine(ManagedPi.Root, ManagedPi.Pinned.Version + ".partial");
+            string staleArchive = Path.Combine(ManagedPi.Root, ManagedPi.Pinned.Version + ".zip.partial");
+            Directory.CreateDirectory(staleFolder);
+            File.WriteAllText(Path.Combine(staleFolder, "planted.exe"), "planted");
+            File.WriteAllBytes(staleArchive, Archive("pi.exe", "planted Pi"));
+
+            Install(Good, ReleaseOf(Good));
+            Assert(ManagedPi.Installed && File.ReadAllText(ManagedPi.ProgramPath) == "not really Pi", "The verified archive was not the one installed.");
+            Assert(!Directory.Exists(staleFolder) && !File.Exists(staleArchive), "A stale partial folder or archive was left.");
+            Assert(!File.Exists(Path.Combine(Path.GetDirectoryName(ManagedPi.ProgramPath), "planted.exe")), "A stale partial folder's file reached the installed copy.");
+            Assert(Partials().Count == 0, "A partial file was left: " + string.Join(", ", Partials()));
+        }
+
+        private static string PendingKeyFile { get { return KeyFile + ".new"; } }
+
+        private static void KeysAreRevokedAndLeaveNothing()
+        {
+            var settings = Settings.Current;
+            ApiKeys.Save("openrouter", RouterKey);
+            ApiKeys.Save("gemini", GeminiKey);
+            string routerOnly = "{\"openrouter\":{\"type\":\"api_key\",\"key\":\"" + RouterKey + "\"}}";
+
+            // Not installed: a key file left behind, and a half-written one, go at the next sync.
+            Directory.CreateDirectory(ManagedPi.ConfigFolder);
+            File.WriteAllText(KeyFile, routerOnly);
+            File.WriteAllText(PendingKeyFile, routerOnly);
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && !File.Exists(PendingKeyFile), "A key file was left beside a copy that is not installed.");
+
+            Install(Good, ReleaseOf(Good));
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile) == routerOnly, "OpenRouter's key was not copied.");
+
+            // A half-written file goes when the key file is already up to date, and when it is rewritten.
+            File.WriteAllText(PendingKeyFile, "half");
+            Assert(ManagedPi.Sync(settings) && !File.Exists(PendingKeyFile) && File.ReadAllText(KeyFile) == routerOnly, "An unchanged sync left auth.json.new.");
+            File.WriteAllText(PendingKeyFile, "half");
+            settings.ManagedPiServices = new List<string> { "openrouter", "gemini" };
+            Assert(ManagedPi.Sync(settings) && !File.Exists(PendingKeyFile) && File.ReadAllText(KeyFile).Contains(GeminiKey), "A rewriting sync left auth.json.new.");
+
+            // Unticked, the key still in the file (as when its deletion failed): no access for that service.
+            settings.ManagedPiServices = new List<string> { "gemini" };
+            Assert(File.ReadAllText(KeyFile).Contains(RouterKey), "The test needs OpenRouter's key still in the file.");
+            var managed = ScanOf(Home(), false).Access.Where(a => a.Managed).Select(a => a.Service).ToList();
+            Assert(managed.SequenceEqual(new[] { "gemini" }), "An unticked service kept its access: " + string.Join(", ", managed));
+            string provider;
+            Assert(ManagedPi.KeyFor(Definitions.Get("openrouter"), out provider) == null, "KeyFor gives the key of an unticked service.");
+
+            // Nothing ticked: the key file and a half-written one both go.
+            File.WriteAllText(PendingKeyFile, "half");
+            settings.ManagedPiServices = new List<string>();
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && !File.Exists(PendingKeyFile), "Unticking every service left a key file.");
+
+            // Remove deletes the keys first: when the program is in use the keys are gone, the half-written file too.
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            ManagedPi.Sync(settings);
+            File.WriteAllText(PendingKeyFile, "half");
+            using (new FileStream(ManagedPi.ProgramPath, FileMode.Open, FileAccess.Read, FileShare.None))
+                Fails<ManagedPi.InstallException>(() => ManagedPi.Remove(settings), "the program in use");
+            Assert(!File.Exists(KeyFile) && !File.Exists(PendingKeyFile), "Remove left a key file when the program could not be deleted.");
+            Assert(File.Exists(ManagedPi.ProgramPath), "The test needs the program to have survived.");
+
+            // When the key file itself cannot be deleted, the copy and the choices stay as they were.
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            ManagedPi.Sync(settings);
+            using (new FileStream(KeyFile, FileMode.Open, FileAccess.Read, FileShare.None))
+                Fails<ManagedPi.InstallException>(() => ManagedPi.Remove(settings), "the key file in use");
+            Assert(File.Exists(ManagedPi.ProgramPath) && settings.ManagedPiServices.SequenceEqual(new[] { "openrouter" }), "Remove went on after the key file could not be deleted.");
+            ManagedPi.Remove(settings);
+            Assert(!Directory.Exists(ManagedPi.Root), "Remove left files of the copy.");
+        }
+
+        private static void DescribesWithoutGitBash()
+        {
+            NetworkBackoff.Clear();
+            string workspace = @"C:\src\project";
+            InstallWithKeys();
+            Assert(!File.Exists(ShellSettingsFile) && ManagedPi.BoundShells.Length == 0, "A shell was bound without Git Bash.");
+            var router = ManagedAccess(ScanOf(Home(), false), "openrouter");
+            Assert(router.Shells.Length == 0, "The access has a shell without Git Bash.");
+            var plain = Dispatch.Describe(router, Model, Dispatch.Modify, workspace, "windows", null, router.Version);
+            Assert(plain.Supported && plain.Commands == "powershell" && plain.Alternatives.Count == 0, "The git_bash alternative was offered without Git Bash.");
+
+            var snap = Fixture();
+            string home = Home();
+            var server = new McpServer(() => snap, () => false, null, null, () => ScanOf(home, false), new LeaseBook(null));
+            string raw;
+            var described = Call(server, "describe_dispatch", "{\"service\":\"openrouter\",\"model\":\"" + Model + "\",\"runtime\":\"pi\",\"managed\":true,\"mode\":\"modify\",\"workspace\":\"C:\\\\w\"}", out raw);
+            Assert(Json.Bool(described, "supported") && Json.Str(described, "commands") == "powershell" && !described.ContainsKey("alternatives"),
+                "describe_dispatch offered an alternative without Git Bash: " + raw);
+
+            // Bound, then the bash.exe it names is deleted: no alternative from the next scan on.
+            string fakeBash = FakeGitBash();
+            ManagedPi.LocateGitBash = () => fakeBash;
+            Assert(ManagedPi.Sync(Settings.Current) && ManagedPi.BoundShells.SequenceEqual(new[] { "git_bash" }), "Git Bash was not bound by a sync.");
+            Assert(Dispatch.Describe(ManagedAccess(ScanOf(Home(), false), "openrouter"), Model, Dispatch.Modify, workspace, "windows", null, router.Version).Alternatives.ContainsKey("git_bash"),
+                "The git_bash alternative was not offered once bound.");
+            File.Delete(fakeBash);
+            Assert(ManagedPi.BoundShells.Length == 0, "A bash.exe that is gone still counts as bound.");
+            var gone = ManagedAccess(ScanOf(Home(), false), "openrouter");
+            var after = Dispatch.Describe(gone, Model, Dispatch.Modify, workspace, "windows", null, gone.Version);
+            Assert(gone.Shells.Length == 0 && after.Alternatives.Count == 0 && after.Commands == "powershell", "The git_bash alternative outlived its bash.exe.");
+
+            // Git Bash uninstalled: the next sync unbinds it.
+            ManagedPi.LocateGitBash = () => null;
+            Assert(ManagedPi.Sync(Settings.Current) && !File.Exists(ShellSettingsFile), "The copy's settings still name a Git Bash that is not found.");
+        }
+
+        private static void FindsGitBash()
+        {
+            Func<Dictionary<string, string>, Func<string, string>> variables = values => name => { string v; return values.TryGetValue(name, out v) ? v : null; };
+            Func<string[], Func<string, bool>> files = paths => { var set = new HashSet<string>(paths, StringComparer.OrdinalIgnoreCase); return path => set.Contains(path); };
+
+            string standard = ManagedPi.FindGitBash(variables(new Dictionary<string, string> { { "ProgramFiles", @"C:\Program Files" }, { "SystemRoot", @"C:\Windows" } }),
+                files(new[] { @"C:\Program Files\Git\bin\bash.exe" }));
+            Assert(standard == @"C:\Program Files\Git\bin\bash.exe", "Git Bash in Program Files was not found: " + standard);
+
+            string onPath = ManagedPi.FindGitBash(variables(new Dictionary<string, string> { { "PATH", @"C:\Tools;C:\Tools\Git\cmd" }, { "SystemRoot", @"C:\Windows" } }),
+                files(new[] { @"C:\Tools\Git\cmd\git.exe", @"C:\Tools\Git\bin\bash.exe" }));
+            Assert(onPath == @"C:\Tools\Git\bin\bash.exe", "Git Bash beside git.exe on PATH was not found: " + onPath);
+
+            Assert(ManagedPi.FindGitBash(variables(new Dictionary<string, string> { { "ProgramFiles", @"C:\Program Files" }, { "PATH", @"C:\Tools" } }), files(new string[0])) == null,
+                "A Git Bash was found where there is none.");
+
+            // WSL's launcher: on PATH without git.exe, and never through a git.exe placed in the Windows folder.
+            Assert(ManagedPi.FindGitBash(variables(new Dictionary<string, string> { { "PATH", @"C:\Windows\System32" }, { "SystemRoot", @"C:\Windows" } }),
+                files(new[] { @"C:\Windows\System32\bash.exe" })) == null, "WSL's bash.exe was taken for Git Bash.");
+            foreach (var systemRoot in new[] { @"C:\Windows", null })
+            {
+                var values = new Dictionary<string, string> { { "PATH", @"C:\Windows\System32" } };
+                if (systemRoot != null) values["SystemRoot"] = systemRoot;
+                Assert(ManagedPi.FindGitBash(variables(values), files(new[] { @"C:\Windows\System32\git.exe", @"C:\Windows\bin\bash.exe" })) == null,
+                    "A bash.exe under the Windows folder was found through a git.exe there (SystemRoot " + (systemRoot ?? "unset") + ").");
+            }
+
+            // Malformed PATH entries are skipped, and the search goes on.
+            string malformed = null;
+            Func<string, bool> anyGit = path => path.EndsWith("git.exe", StringComparison.OrdinalIgnoreCase) || string.Equals(path, @"C:\Tools\Git\bin\bash.exe", StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                malformed = ManagedPi.FindGitBash(variables(new Dictionary<string, string> { { "PATH", "C:\\bad|path;C:\\a:b:c;\"\";  ;C:\\x<y>;\"C:\\Tools\\Git\\cmd\"" }, { "SystemRoot", @"C:\Windows" } }), anyGit);
+            }
+            catch (Exception e) { throw new Exception("A malformed PATH entry threw: " + e.GetType().Name + ": " + e.Message); }
+            Assert(malformed == @"C:\Tools\Git\bin\bash.exe", "The search stopped at a malformed PATH entry: " + malformed);
+        }
+
+        private static void OwnAgentBeforeManagedCopy()
+        {
+            NetworkBackoff.Clear();
+            var opencode = Agents.Get("opencode");
+            var pi = Agents.Get("pi");
+            Assert(opencode != null && pi != null && opencode.RequestTokens > pi.RequestTokens,
+                "The case needs OpenCode to send more tokens per request than Pi, as agents/*.json say.");
+
+            var scan = new RuntimeScan();
+            scan.Found.Add(new RuntimePlace { Runtime = "opencode", Where = "windows" });
+            scan.Found.Add(new RuntimePlace { Runtime = "pi", Where = "windows", Managed = true });
+            scan.Access.Add(Candidates.Access("openrouter", "opencode", "windows", RouterKey));
+            var managed = Candidates.Access("openrouter", "pi", "windows", RouterKey);
+            managed.Managed = true;
+            managed.Provider = "openrouter";
+            managed.Program = ManagedPi.ProgramPath;
+            managed.Version = ManagedPi.Pinned.Version;
+            managed.ConfigFolder = ManagedPi.ConfigFolder;
+            scan.Access.Add(managed);
+
+            foreach (var from in new[] { null, "windows" })
+            {
+                var chosen = Candidates.Select(Fixture(), scan, new Requirements { Service = "openrouter", From = from }, DateTime.Now).Chosen.Where(c => c.Model.Id == Model).ToList();
+                Assert(chosen.Count == 2 && chosen[0].Access.Runtime == "opencode" && !chosen[0].Access.Managed && chosen[1].Access.Managed,
+                    "The user's own OpenCode does not come before the managed Pi (from " + (from ?? "nowhere") + "): " + string.Join(", ", chosen.Select(c => c.Access.Runtime + (c.Access.Managed ? "/managed" : ""))));
+            }
+        }
+
+        private static void StoreBuildDoesNotOffer()
+        {
+            // Installed while not packaged, so that the folder lies under the test folder and looks installed.
+            InstallWithKeys();
+            string home = Home();
+            Assert(ManagedPi.Installed && HasManaged(ScanOf(home, false)), "The test needs an installed copy first.");
+            var snap = Fixture();
+            var server = new McpServer(() => snap, () => false, null, null, () => ScanOf(home, false), new LeaseBook(null));
+            try
+            {
+                Native.PackagedOverride = true;
+                Assert(!ManagedPi.Offered, "The Store build offers the managed copy.");
+                Assert(File.Exists(Path.Combine(Settings.Folder, "managed", "pi", ManagedPi.Pinned.Version, "pi.exe")), "The installed-looking folder is gone.");
+                Assert(!ManagedPi.Installed, "The Store build reports a copy on disk as installed.");
+                Assert(!HasManaged(ScanOf(home, false)) && !HasManaged(ScanOf(home, true)), "The Store build's scan offers the managed copy.");
+                string raw;
+                var listed = Call(server, "list_candidates", "{}", out raw);
+                Assert(!Json.Obj(listed, "runtimes").ContainsKey("managed"), "The Store build's list_candidates has runtimes.managed: " + raw);
+                Assert(!Items(listed, "candidates").Any(c => IsManaged(Json.Obj(c, "runtime"))), "The Store build lists a managed candidate.");
+            }
+            finally { Native.PackagedOverride = false; }
         }
     }
 }

@@ -1,9 +1,13 @@
 // The shell a described dispatch runs its commands through (ADR 0004 decision 5). AI Meter's managed Pi comes with
 // arguments that give it the PowerShell tool and no bash (or no shell at all for read_only), and, for modify, a
-// `git_bash` alternative that gives it the bash tool instead. With the bash tool, Pi looks for Git Bash in the usual
-// folders and then for any bash.exe on PATH, where it can find WSL's launcher in System32 and silently run commands
-// inside WSL. So the plugin uses the alternative only when it has found Git for Windows itself, and then puts Git's bin
-// folder first on PATH; otherwise the agent keeps the PowerShell tool. WSL's bash.exe is never chosen.
+// `git_bash` alternative that gives it the bash tool instead. Left to itself, Pi's bash tool looks for Git Bash in the
+// usual folders and then for any bash.exe on PATH, where it can find WSL's launcher in System32 and silently run
+// commands inside WSL. AI Meter therefore binds the managed copy to Git Bash: it writes Pi's shellPath setting into
+// the copy's own settings when it finds Git for Windows, and describes the alternative only while that binding holds
+// (Pi 1.5.2 then uses that bash.exe alone, fails if it is gone, and never searches PATH). So the plugin uses the
+// alternative whenever AI Meter offers it, and otherwise keeps the described PowerShell tool; WSL's bash.exe is never
+// chosen. When the plugin also finds Git for Windows itself, it puts Git's bin folder first on PATH, so that git and
+// the tools Git ships resolve to the same installation as the shell; when it does not, the binding alone suffices.
 //
 // Pure functions of an environment and a file-existence check, so they can be tested on any system. Paths are
 // Windows paths whatever system runs the tests, hence node:path's win32 flavour.
@@ -50,14 +54,16 @@ export function findGitBash(env = process.env, exists = existsSync) {
  * How to start a described dispatch: { name, arguments, environment }. name is the shell its commands run through
  * ("git_bash", "powershell", "none" for no commands, or null when AI Meter does not say), arguments replace
  * plan.arguments, and environment is merged over plan.environment. env is the environment the agent would start with.
- * A dispatch that is not the managed copy is returned as described.
+ * A dispatch that is not the managed copy is returned as described; so is a managed one without the git_bash
+ * alternative, which AI Meter offers only while the copy is bound to Git Bash.
  */
 export function shellFor(plan, env = process.env, exists = existsSync) {
   const described = { name: plan.commands ?? null, arguments: plan.arguments, environment: {} };
   if (!plan.managed) return described;
   const alternative = (plan.alternatives || []).find((a) => a.shell === "git_bash");
-  const bin = alternative ? findGitBash(env, exists) : null;
-  if (!bin) return described;
+  if (!alternative) return described;
+  const bin = findGitBash(env, exists);
+  if (!bin) return { name: "git_bash", arguments: alternative.arguments, environment: {} };
 
   // The PATH key the environment already uses, so that the agent does not get two PATH variables of different case.
   const key = keyOf(env, "PATH") ?? "PATH";

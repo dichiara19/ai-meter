@@ -4,7 +4,7 @@
 // the runtimes found and unsupported, the best-effort candidates (returned only with include_best_effort, counted
 // otherwise), the free-tier candidates (returned only with include_free_tier) and the budget a lease grants, the
 // tools it never answers (`silent`, as a relay that stays up but hangs), and how each fake agent behaves. A describe
-// with managed: true is answered as AI Meter's managed Pi.
+// with managed: true is answered as AI Meter's managed Pi (see managedDispatch for git_bash and pi_config).
 
 import { appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -79,18 +79,26 @@ function planDispatch(args) {
 }
 
 /**
- * The managed Pi (ADR 0004): its own configuration folder, which commands a mode runs (none, or PowerShell), and for
- * modify a git_bash alternative. The fake agent gets the shell as an extra argument and names it in its answer.
+ * The managed Pi (ADR 0004): its own configuration folder (scenario.pi_config, else a made-up Windows path), which
+ * commands a mode runs (none, or PowerShell), and for modify a git_bash alternative, offered as AI Meter offers it only
+ * while the copy is bound to Git Bash: scenario.git_bash false withholds it, as when AI Meter found no Git for Windows.
+ * The fake agent gets the shell as an extra argument and names it in its answer.
  */
 function managedDispatch(args) {
   const behaviour = (scenario.behaviour || {})[args.runtime] || "ok";
   const modify = args.mode === "modify";
+  const bound = scenario.git_bash !== false;
   return {
     managed: true,
     commands: modify ? "powershell" : "none",
     arguments: [agent, args.runtime, behaviour, modify ? "powershell" : "none"],
-    ...(modify ? { alternatives: [{ shell: "git_bash", arguments: [agent, args.runtime, behaviour, "git_bash"] }] } : {}),
-    environment: { FAKE_AGENT_MODE: args.mode, PI_CODING_AGENT_DIR: "C:\\AIMeter\\pi\\config", ...(scenario.env_file ? { FAKE_ENV_FILE: scenario.env_file } : {}) },
+    ...(modify && bound ? { alternatives: [{ shell: "git_bash", arguments: [agent, args.runtime, behaviour, "git_bash"] }] } : {}),
+    environment: {
+      FAKE_AGENT_MODE: args.mode,
+      PI_CODING_AGENT_DIR: scenario.pi_config || "C:\\AIMeter\\pi\\config",
+      PI_OFFLINE: "1",
+      ...(scenario.env_file ? { FAKE_ENV_FILE: scenario.env_file } : {}),
+    },
   };
 }
 

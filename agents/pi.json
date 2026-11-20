@@ -27,13 +27,15 @@
           }
         },
         "commands": { "read_only": "none", "modify": "powershell" },
-        "environment": { "PI_CODING_AGENT_DIR": "{config}", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0" },
+        "environment": { "PI_CODING_AGENT_DIR": "{config}", "PI_OFFLINE": "1", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0" },
         "output": {
           "outcome": "stopReason of the last assistant message (stop, length, error, aborted); the exit code stays 0 on those, and is 1 when Pi cannot make a request at all (no key for the provider): then there is no agent_settled event and the reason is on stderr"
         },
         "notes": [
           "This is the copy of Pi that AI Meter keeps (ADR 0004), with its own configuration folder: it never reads the user's ~/.pi.",
-          "With these arguments Pi runs commands through its PowerShell tool and has no bash tool. The git_bash alternative gives it bash instead: use it only with the bin folder of Git for Windows first on PATH, or Pi may find WSL's bash.exe and run commands inside WSL.",
+          "With these arguments Pi runs commands through its PowerShell tool and has no bash tool. The git_bash alternative gives it bash instead and is offered only while the copy's settings name the bash.exe of Git for Windows (shellPath): Pi then uses that file alone, and never searches for another, such as WSL's.",
+          "PI_OFFLINE keeps Pi from downloading anything while it works: without ripgrep or fd on PATH, its grep and find tools fail with an error rather than fetch them.",
+          "Pi's tools are not confined to the task's folder: like any agent run as the user, it can read the user's files, the copy's own key file among them. Do not delegate a task you would not let read them.",
           "taskkill /T /F ends Pi and its shells, but a command a shell started can outlive them."
         ]
       }

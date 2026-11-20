@@ -187,7 +187,7 @@ Every candidate's pool can start a task now; a pool that cannot is in `excluded`
 7. **Output speed measured here**: output tokens per second of the model's completed tasks over 30 days, tools included. Fastest first, then models never timed.
 8. Service and model id, so the same request always gives the same order.
 
-For the same model, the agent that sends fewer tokens with every request comes first (`request_tokens` in [agent definitions](#agent-definitions): Pi about 4,600, OpenCode about 9,600, against the same free quota); then, with `from`, the agent in the caller's place, which starts without the `wsl.exe` hop; then agent id, place and distribution; then the user's own installation before the managed copy.
+For the same model, an agent of the user's comes before the copy AI Meter keeps ([Managed Pi](#managed-pi)), whichever agent it is (Pi, OpenCode…); then the agent that sends fewer tokens with every request (`request_tokens` in [agent definitions](#agent-definitions): Pi about 4,600, OpenCode about 9,600, against the same free quota); then, with `from`, the agent in the caller's place, which starts without the `wsl.exe` hop; then agent id, place and distribution.
 
 The same snapshot, request, leases, preferences and known sizes give the same order.
 
@@ -347,14 +347,14 @@ The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code 
 - **`output`** says how to tell the end, the outcome (Pi's exit code stays 0 on errors), the requests, the tokens, the rate limits and `cost`: where the agent reports each request's price (Pi: `usage.cost.total` of assistant messages; OpenCode: `step_finish.part.cost`). Both agents price requests from their own model list, so a value above zero means a paid request and the plugin should stop; zero does not prove the request was free, as an agent cannot see a BYOK fallback billed by the provider.
 - **`warnings`** repeats the candidate's warnings, such as `openrouter_byok_fallback`.
 - **`commands`** says what the agent runs commands with when started with these `arguments`: `none`, `bash` or `powershell`. It is present only when the agent's definition says so (today, the managed Pi).
-- **The managed Pi.** `managed` is an optional boolean: the candidate's `runtime.managed`, which picks the copy AI Meter keeps or the user's own installation when both are set up. Left out, the user's own is described first. For the managed copy the answer has `managed: true`, `commands` and, in `modify` mode, `alternatives`:
+- **The managed Pi.** `managed` is an optional boolean: the candidate's `runtime.managed`, which picks the copy AI Meter keeps or the user's own installation when both are set up. Left out, the user's own is described first. For the managed copy the answer has `managed: true`, `commands` and, in `modify` mode, `alternatives` when it is bound to a Git Bash:
 
   ```json
   {
     "supported": true, "runtime": "pi", "where": "windows", "managed": true, "version": "1.5.2", "version_verified": true,
     "mode": "modify", "program": "C:\\Users\\<you>\\AppData\\Roaming\\AIMeter\\managed\\pi\\1.5.2\\pi.exe",
     "arguments": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--tools", "read,powershell,edit,write", "--provider", "<provider>", "--model", "<model>"],
-    "environment": { "PI_CODING_AGENT_DIR": "C:\\Users\\<you>\\AppData\\Roaming\\AIMeter\\managed\\pi\\config", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0" },
+    "environment": { "PI_CODING_AGENT_DIR": "C:\\Users\\<you>\\AppData\\Roaming\\AIMeter\\managed\\pi\\config", "PI_OFFLINE": "1", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0" },
     "commands": "powershell",
     "alternatives": [
       { "shell": "git_bash", "arguments": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--tools", "read,bash,edit,write", "--provider", "<provider>", "--model", "<model>"] }
@@ -362,7 +362,7 @@ The [AI Meter delegation plugin](../plugins/ai-meter/README.md) for Claude Code 
   }
   ```
 
-  In `read_only` mode `commands` is `none` and there are no `alternatives`: that task needs no shell. The rules for choosing the shell are in [Managed Pi](#managed-pi).
+  In `read_only` mode `commands` is `none` and there are no `alternatives`: that task needs no shell. In `modify` mode `alternatives` holds `git_bash` only while the copy is bound to a Git Bash (its settings name a `bash.exe` that exists); without it the list is empty and the copy has the PowerShell tool only. The rules for choosing the shell are in [Managed Pi](#managed-pi).
 - **`stop`** says how to stop the agent: `taskkill /T /F` on Windows, which also ends an agent started in WSL.
 
 **Leases.**
@@ -383,13 +383,15 @@ On Windows, a user with no agent of their own can let AI Meter keep a copy of Pi
 **What it is.** Pi's official standalone build for Windows (MIT licence, [earendil-works/pi](https://github.com/earendil-works/pi)), one pinned release: 1.5.2, `pi-windows-x64.zip`, 59 MB, about 131 MB unpacked. It is the x64 build; on Windows on ARM it runs under emulation.
 
 **Who installs it.** Only the user, with the button in Settings › AI apps › Delegated tasks, which also removes it. No MCP tool installs, updates or removes anything, and none returns a key. A coordinator that finds the copy missing tells the user where to set it up (`runtimes.managed.set_up_in`) and does not try to.
-- AI Meter downloads the pinned release from `github.com` (GitHub redirects to its release storage host), checks it against a SHA-256 kept in its own sources and discards any other file. A newer Pi is adopted only by a new AI Meter version, after its dispatch is verified.
+- AI Meter downloads the pinned release from `github.com` (GitHub redirects to its release storage host), checks it against a SHA-256 kept in its own sources and discards any other file. The archive is hashed and unpacked through one file handle held without sharing, with a new file and a new staging folder for each attempt; leftovers of earlier attempts are deleted and never promoted. A newer Pi is adopted only by a new AI Meter version, after its dispatch is verified.
 - It is unpacked to `managed\pi\<version>` in AI Meter's shared folder: `%APPDATA%\AIMeter` for the GitHub build, `%USERPROFILE%\.aimeter` for the Microsoft Store build, because a packaged app's AppData is private to the package. It is outside `PATH`, and nothing else on the PC is changed.
 
 **Its own configuration and keys.**
 - The copy runs with its own folder, `managed\pi\config`, passed as `PI_CODING_AGENT_DIR` (the `{config}` placeholder of its definition). It never reads or writes the user's `~/.pi`.
 - For each service the user ticks in Settings, AI Meter copies that service's key into `config\auth.json`. Only services Pi has a built-in provider for can be ticked (the `providers` list of the definition). The file is plain text, as in any Pi installation, where AI Meter's own key store is encrypted for the Windows user. Unticking the service, removing the key in AI Meter or removing the copy deletes it from there.
 - No MCP tool returns a key. `describe_dispatch` gives the path of the configuration folder, which is not a secret.
+- A service is offered through the copy only while it is ticked in Settings: a key still in the file after a failed deletion gives no access. The key file, and a half-written `auth.json.new`, are deleted when nothing is ticked, when the copy is not installed, and at every start of AI Meter; removing the copy deletes the key files first.
+- **The agent can read the key file.** Pi's tools are not confined to the task's folder. Like any coding agent run as the user, the copy can read the user's files, including its own plain-text key file, so a model that is told to, or tricked into it, can see the keys copied there (all of them, not only the key of the service the task runs on). The plugin removes any of those keys from the answers it returns to the coordinator, but the model's service has then already received it. Copy only keys of services whose free-tier exposure you accept, and do not delegate tasks on content you do not trust. The same holds for the user's own Pi and its `~/.pi`.
 
 **Listing it.** In `list_candidates` the copy is a runtime of its own, on candidates and in `runtimes.found`:
 
@@ -410,19 +412,21 @@ On Windows, a user with no agent of their own can let AI Meter keep a copy of Pi
 `services` are those it holds a key for. These keys are the user's explicit choice, so they count with *Use API keys already on the PC* turned off too.
 
 **When it is offered.**
-- The user's own agent wins, service by service: the copy is not offered for a service that a usable Pi of the user's on Windows can already call with its own key, unless the user chose otherwise in Settings (setting `ManagedPiBesideOwn`). Today no Pi of the user's on Windows is verified, so the copy is offered whenever it is installed. When both are offered, each is named, and for the same model the user's own comes first.
-- Windows folders only. A coordinator in WSL (`from: "wsl"`) is not offered it, and a `workspace` under `\\wsl.localhost\` or `\\wsl$\` answers `supported: false`: a folder in WSL keeps using the agents installed there.
+- The user's own agent wins, by two rules. The copy is not offered for a service that a usable Pi of the user's on Windows can already call with its own key, unless the user chose otherwise in Settings (setting `ManagedPiBesideOwn`). Today no Pi of the user's on Windows is verified, so the copy is offered whenever it is installed. And when both the copy and another agent of the user's (OpenCode, say) can run the same model, the user's agent comes first, ahead of the fewer-tokens rule of the order under `list_candidates`. Each is named.
+- Windows folders only. A coordinator in WSL (`from: "wsl"`) is not offered it, and a `workspace` under `\\wsl.localhost\` or `\\wsl$\` answers `supported: false`: a folder in WSL keeps using the agents installed there. The plugin also skips the copy when the job's repository is inside WSL, since `describe_dispatch` only sees the plugin's working copy.
 - Never for a subscription plan, which needs the vendor's own CLI and sign-in.
 - Not for free-tier models (Cloudflare Workers AI) in this phase: AI Meter cannot read the standalone build's own price list, so they are excluded as `agent_price_unknown`.
-- The Microsoft Store build offers it unless certification refuses the listing's disclosure ([STORE.md](STORE.md)); the Store build then keeps "use the agent you have".
+- The Microsoft Store build does not offer it for now (`OfferedInStoreBuild` is `false`): it will, in a later release, once the Store listing discloses the download ([STORE.md](STORE.md#optional-download-managed-pi)). Until then it keeps "use the agent you have".
 
-**Choosing the shell.** The plugin starts the copy with a shell it has chosen, never with one Pi finds.
+**Choosing the shell.** Pi resolves its shell each time it runs a command, so AI Meter binds it in the copy's own settings instead of leaving it to the plugin.
+- When AI Meter finds Git for Windows (at installation, at start, and whenever keys or choices change), it writes Pi's `shellPath` setting into `config\settings.json`; when there is none, it removes the setting. With `shellPath` set, Pi 1.5.2 uses that file alone and fails if it is gone: it never searches `PATH`, so never WSL's `bash.exe` launcher. This comes from Pi's source (`utils/shell.ts`); it has not been run live.
 - The `arguments` of `describe_dispatch` need no preparation: in `modify` mode they give Pi its PowerShell tool and no bash (`commands: "powershell"`); in `read_only` mode Pi gets only reading tools (`commands: "none"`).
-- `alternatives` lists the arguments for `git_bash` (`modify` only). A plugin uses them only after putting the `bin` folder of Git for Windows first on `PATH` for that process. Otherwise Pi may find WSL's `bash.exe` and run commands inside WSL.
+- `alternatives` lists the arguments for `git_bash` (`modify` only), and only while the copy's settings name a `bash.exe` that exists. The plugin uses the alternative only when it is offered and decides nothing by its own search. Without it the copy has the PowerShell tool only.
 
-**Outcome and exit code.** As for Pi in WSL, with one difference: the standalone Windows build exits with 1 when it cannot make a request at all (no key for the provider). There is then no `agent_settled` event and the reason is on stderr. Errors during a run still end with exit code 0 and a `stopReason`. The copy starts with `PI_SKIP_VERSION_CHECK=1` and `PI_TELEMETRY=0`; once it runs a task it contacts the model's service like any agent.
+**Outcome and exit code.** As for Pi in WSL, with one difference: the standalone Windows build exits with 1 when it cannot make a request at all (no key for the provider). There is then no `agent_settled` event and the reason is on stderr. Errors during a run still end with exit code 0 and a `stopReason`. The copy starts with `PI_OFFLINE=1`, `PI_SKIP_VERSION_CHECK=1` and `PI_TELEMETRY=0`; once it runs a task it contacts the model's service like any agent. `PI_OFFLINE=1` keeps it from downloading anything during a task: Pi 1.5.2 would otherwise fetch ripgrep or fd from GitHub when its grep and find tools need them and they are not on `PATH`; with it those tools fail with an error instead (expected from Pi's source, not run live).
 
 **Limits.**
+- Pi's tools are not confined to the task's folder, and the agent can read the copy's key file: see *Its own configuration and keys* above.
 - A request to a real model from the Windows build, and the Store-signed build starting it, were not verified when this was written; the live test used a local stand-in for the model.
 - Stopping a task with `taskkill /T /F` ends Pi and its shells, but a command a shell started can outlive them (issue [#37](https://github.com/dichiara19/ai-meter/issues/37)).
 - It is the x64 build only.
@@ -485,7 +489,7 @@ The `managed` place ([Managed Pi](#managed-pi); `agents/pi.json` is the only bui
 | `versions` | The exact release AI Meter downloads, such as `["1.5.2"]` |
 | `providers` | The provider ids the standalone build has built in. A service can have its key copied into the copy only if one of its aliases (`auth.ids`) is listed |
 | `arguments` | The argument list per mode, safe without preparation. For Pi in `modify`, it gives the PowerShell tool and no bash |
-| `alternatives` | Argument lists by shell name, then mode (`git_bash.modify`), that a plugin may use instead once it has prepared what that shell needs. `describe_dispatch` returns them as `[{ "shell", "arguments" }]` |
+| `alternatives` | Argument lists by shell name, then mode (`git_bash.modify`), that a plugin may use instead. `describe_dispatch` returns them as `[{ "shell", "arguments" }]`. For the managed copy only a shell it is bound to is returned (`git_bash`, while its settings name an existing `bash.exe`) |
 | `commands` | Per mode, what the agent runs commands with when started with `arguments`: `none`, `bash` or `powershell` |
 | `environment` | As for other places; `{config}` stands for the copy's own configuration folder, as in `"PI_CODING_AGENT_DIR": "{config}"` |
 | `output`, `notes` | `output` replaces the shared `dispatch.output` by key (Pi's exit code is 1 when it cannot make a request at all); `notes` come after the shared `dispatch.notes` |

@@ -71,9 +71,11 @@ namespace AIMeter
             plan.Notes.AddRange(place.Notes);
             string commands;
             if (place.Commands.TryGetValue(plan.Mode, out commands)) plan.Commands = commands;
-            // Argument lists for another shell, which a plugin may use instead once it has prepared what the shell needs.
+            // Argument lists for another shell, which a plugin may use instead. For the managed copy only a shell it is
+            // bound to is offered: its bash tool must never be left to search for a bash.exe (ADR 0004 decision 5).
             foreach (var alternative in place.Alternatives.OrderBy(a => a.Key, StringComparer.Ordinal))
             {
+                if (access.Managed && !access.Shells.Contains(alternative.Key)) continue;
                 List<string> other;
                 if (alternative.Value.TryGetValue(plan.Mode, out other)) plan.Alternatives[alternative.Key] = other.Select(a => Fill(a, values)).ToList();
             }

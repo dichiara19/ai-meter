@@ -54,7 +54,7 @@ The CLI recreates the submission from the last published one, so the listing, sc
 
 The Store installs updates by itself, and Store policy does not allow an app to update itself any other way. The packaged app therefore never contacts GitHub for updates and never downloads an update of itself (`UpdateCheck.Find` returns before any request when `Native.IsPackaged`, and a regression test holds it to that).
 
-The one download the packaged app can make is the optional managed Pi ([below](#optional-download-managed-pi)), which is not an update of AI Meter and happens only when the user presses its button in Settings.
+The packaged app makes no download at all today. The optional managed Pi ([below](#optional-download-managed-pi)) is switched off in the Store build (`OfferedInStoreBuild` is `false`) until the listing discloses it; once on, it will be the one download the packaged app can make, which is not an update of AI Meter and happens only when the user presses its button in Settings.
 
 Instead, with **Settings → About → Check for updates** on, once a day it asks the Store, through Windows' `StoreContext.GetAppAndOptionalStorePackageUpdatesAsync`, whether an update is waiting, and if so shows *An update is waiting in the Microsoft Store* with a button that opens the Store's downloads page. This uses the Windows metadata already referenced by the MSIX build (`Windows.Services.winmd`), with no new dependency. It only answers for a copy installed from the Store; a sideloaded package reports nothing. It has not been verified on a Store install yet: check it when the next version reaches the Store.
 
@@ -80,10 +80,8 @@ Tip: publish the first submission with **Visibility → Private audience** to in
 
 The package declares one language, `en-us`, so Partner Center asks for one listing, in English (policy 10.7 requires a listing for every language a package declares). The app still follows the Windows display language, or the one chosen in Settings → General, in English, Italian, Spanish, French, German and Portuguese: its strings are compiled into the executable and do not depend on the package's languages.
 
-**Description.** Policy 10.2.4 requires the dependency to be disclosed at the start, and the optional download of the managed Pi ([below](#optional-download-managed-pi)) is disclosed in the first lines too:
+**Description.** Policy 10.2.4 requires the dependency to be disclosed at the start. The listing below is the current one; the managed Pi's disclosure is not part of it yet ([below](#optional-download-managed-pi)).
 
-> Optional download: if you ask for it in Settings, AI Meter downloads Pi, a third-party open-source coding agent (MIT licence, about 59 MB, from GitHub), so that delegated tasks can run on Windows without installing an agent yourself. Nothing is downloaded unless you press that button, and you can remove it there.
->
 > AI Meter shows the usage of AI tools you already have: it needs at least one of Claude Code, Codex (ChatGPT), GitHub Copilot, Cursor, Antigravity CLI or a local model server such as Ollama or LM Studio, installed and signed in on this PC, or an API key of a supported service. It reads the data those tools save on your PC and is not affiliated with Anthropic, OpenAI, GitHub, Microsoft, Cursor or Google.
 >
 > A small pill inside the Windows taskbar shows how much of your AI limits is left: 5-hour and weekly limits, a forecast of when you will run out at the current pace, and a notification before you hit the wall that tells you which service still has room. Click it for every service, the coding agents that are running and the local models in video memory, on Windows and in WSL.
@@ -92,16 +90,24 @@ The package declares one language, `en-us`, so Partner Center asks for one listi
 > • A local history of quota cycles, daily activity, models and tools.
 > • Claude, ChatGPT / Codex, GitHub Copilot, Google Antigravity, Cursor, OpenRouter, Vercel AI Gateway, DeepSeek, Kimi and more; a new service is a small definition file.
 > • Your AI apps can ask it, through MCP, how much room your limits have.
-> • Private: no telemetry and no account; the only network requests go to each service's own usage endpoint, and, only if you ask for it, the download of Pi. Open source under Apache 2.0.
+> • Private: no telemetry and no account; the only network requests go to each service's own usage endpoint. Open source under Apache 2.0.
 > • Six languages: English, Italian, Spanish, French, German and Portuguese.
 
 ### Optional download: managed Pi
 
-From Settings › AI apps › Delegated tasks, the user can have the app download Pi ([ADR 0004](adr/0004-managed-pi-for-delegation.md), [docs/MCP.md](MCP.md#managed-pi)): one pinned release of a third-party open-source program (MIT, `pi-windows-x64.zip`, 59 MB, about 131 MB unpacked) from `github.com`, checked against a SHA-256 kept in AI Meter's sources. It is unpacked to `%USERPROFILE%\.aimeter\managed\pi`, outside the package and outside `PATH`, because a packaged app's AppData is private to the package. The user's keys reach it only for the services the user ticks.
+From Settings › AI apps › Delegated tasks, the user can have the app download Pi ([ADR 0004](adr/0004-managed-pi-for-delegation.md), [docs/MCP.md](MCP.md#managed-pi)): one pinned release of a third-party open-source program (MIT, `pi-windows-x64.zip`, 59 MB, about 131 MB unpacked) from `github.com`, checked against a SHA-256 kept in AI Meter's sources. It is the only download there ever is: Pi itself runs with `PI_OFFLINE=1` and fetches nothing while it works. It would be unpacked to `%USERPROFILE%\.aimeter\managed\pi`, outside the package and outside `PATH`, because a packaged app's AppData is private to the package. The user's keys reach it only for the services the user ticks.
 
-The proposed disclosure is the first paragraph of the description above, in English. The clauses it is meant to satisfy are Store Policies 7.20: 10.2.2, 10.2.3, 10.2.4 and 10.1.5. That is this project's reading of the policy, not a certification result. Re-read those clauses before each submission, and say in the submission's notes for certification where the button is (Settings › AI apps › Delegated tasks).
+**The Store build does not offer it yet.** `OfferedInStoreBuild` in `src/ManagedPi.cs` is `false`: the build shows no download button and offers no managed copy. The release workflow submits the package automatically from a stable tag, while the listing text is edited by hand in Partner Center, so the package must not reach certification ahead of its disclosure. To enable it:
 
-**If certification refuses it:** set `OfferedInStoreBuild` to `false` in `src/ManagedPi.cs`. The Store build then offers no download, shows no button and keeps "use the agent you have"; the GitHub builds are unchanged. Remove the disclosure paragraph from the description in the same submission.
+1. Update the listing description in Partner Center with the disclosure paragraph below, change the *Private* bullet to end "... usage endpoint and, only if you ask for it, the download of Pi.", and add certification notes saying where the button is (Settings › AI apps › Delegated tasks).
+2. Only in the release after that, set `OfferedInStoreBuild` to `true`.
+3. If certification refuses it, set `OfferedInStoreBuild` back to `false` and remove the disclosure paragraph from the description in the same submission. The GitHub builds are unchanged and the Store build keeps "use the agent you have".
+
+Disclosure paragraph, to add at the start of the description when the feature is enabled in the Store build (not part of the current listing):
+
+> Optional download: if you ask for it in Settings, AI Meter downloads Pi, a third-party open-source coding agent (MIT licence, about 59 MB, from GitHub), so that delegated tasks can run on Windows without installing an agent yourself. Nothing is downloaded unless you press that button, and you can remove it there.
+
+The clauses it is meant to satisfy are Store Policies 7.20: 10.2.2, 10.2.3, 10.2.4 and 10.1.5. That is this project's reading of the policy, not a certification result. Re-read those clauses before each submission.
 
 **Short description:** AI limits in your taskbar, and a local history of what you use, for the AI tools already on your PC.
 
@@ -153,4 +159,4 @@ Without the `STORE_*` values the registered package has the placeholder identity
 - AI apps start AI Meter through the execution alias `%LOCALAPPDATA%\Microsoft\WindowsApps\AIMeter.exe` (`Program.LaunchCommand`), which survives Store updates. The relay script is `%USERPROFILE%\.aimeter\mcp.ps1`, since other apps cannot read a package's private folders. Disconnect AI apps in Settings → AI apps before uninstalling, or their `ai-meter` entries point at a missing alias.
 - The package declares only English as its language ([Store listing](#store-listing)); the interface languages are unchanged.
 - No GitHub update check: the Store updates the package, and Settings → About only shows whether the Store has an update waiting.
-- The managed Pi, if the user installs it, lives in `%USERPROFILE%\.aimeter\managed\pi` for the same reason as the relay script: other programs cannot read a package's private folders. Removing the app does not remove it; the *Remove* button in Settings does, together with the keys copied into it.
+- The managed Pi, once the Store build offers it and the user installs it, lives in `%USERPROFILE%\.aimeter\managed\pi` for the same reason as the relay script: other programs cannot read a package's private folders. Removing the app does not remove it; the *Remove* button in Settings does, together with the keys copied into it.

@@ -45,7 +45,7 @@ The release becomes **Latest**. Within a day, zip and script users with the upda
 
 ## When the Store gets a submission
 
-Only stable tags reach the Microsoft Store. Once the Store job is configured (see [STORE.md](STORE.md#automatic-submission)) a stable tag publishes the GitHub release first, then submits `AIMeter.msix` to Partner Center for certification. Without that configuration, download the **AIMeter-msix** artifact of the stable tag's run and upload it by hand. Never upload the MSIX from a pre-release run: its package version is the same `X.Y.Z.0` as the stable release, and the Store rejects a version it has already received.
+Only stable tags reach the Microsoft Store. Once the Store job is configured (see [STORE.md](STORE.md#automatic-submission)) a stable tag publishes the GitHub release first, then submits `AIMeter.msix` to Partner Center for certification. Without that configuration, download the **AIMeter-msix** artifact of the stable tag's run and upload it by hand. Before the first stable release that turns on `OfferedInStoreBuild` (managed Pi), update the Store listing and the certification notes, as [STORE.md](STORE.md#optional-download-managed-pi) says. Never upload the MSIX from a pre-release run: its package version is the same `X.Y.Z.0` as the stable release, and the Store rejects a version it has already received.
 
 ## If something goes wrong
 

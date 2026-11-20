@@ -43,10 +43,12 @@ A request to a real model from the Windows build was not part of that test.
 5. **A fixed shell, and tasks that say what they can do.**
    - The plugin starts the managed copy with a shell it has chosen, never with one Pi finds: Git Bash when installed, otherwise the PowerShell tool. WSL's `bash.exe` is never used.
    - The dispatch description states whether commands can be run. A read-only task needs no shell.
+   - *Amended 2026-11-20:* AI Meter binds the shell in the copy's own settings (Pi's `shellPath`, set to the Git Bash it finds and removed when there is none), and the plugin uses the `git_bash` alternative only when `describe_dispatch` offers it, because Pi resolves its shell each time it runs a command.
 6. **The plugin still runs the agent** (ADR 0002 decision 1). AI Meter describes the dispatch and keeps the leases; it starts no task.
 7. **Store and privacy.**
    - The Store listing discloses the optional download at the start of its description, and the download happens only on the user's request (Store Policies 7.20: 10.2.2, 10.2.3, 10.2.4, 10.1.5).
    - If certification refuses it, the managed copy stays in the GitHub builds, and the Store build keeps "use the agent you have".
+   - *Amended 2026-11-20:* the Store build ships with the copy turned off until the listing discloses it (docs/STORE.md has the procedure).
    - The README's list of network destinations gains GitHub's release hosts, for this download only. The sentence that the Store version never contacts GitHub changes accordingly.
 
 ## Consequences
@@ -55,6 +57,7 @@ A request to a real model from the Windows build was not part of that test.
 - AI Meter takes on a third-party program's versions: each adopted Pi release needs its dispatch verified, and a security fix in Pi reaches users only with an AI Meter release.
 - A key the user chose now also lies in a plain-text file under AI Meter's data folder.
 - 59 MB are downloaded and 131 MB kept, only for those who ask.
+- Pi's tools are not confined to the task's folder: like any coding agent run as the user (the user's own Pi and its `~/.pi` included), the copy can read the user's files, including its own plain-text key file, so a model that is told to, or tricked into it, can see the keys copied there, all of them and not only that of the service the task runs on. The plugin removes keys from the answers it returns, but the model's service has then already received it. Copy only keys of services whose free-tier exposure you accept, and do not delegate tasks on content you do not trust.
 - Tasks that must run commands still depend on Git Bash or PowerShell, and stopping a task can leave a child process until #37 is done.
 - Users with only Windows and a subscription plan gain nothing: Claude Code and Codex on Windows are still unverified.
 
