@@ -40,6 +40,8 @@ namespace AIMeter
             test("With sample data the managed Pi is not offered and Sync leaves its key file as it is", () => Isolated(DemoLeavesKeysAlone));
             test("Remove reports choices it could not save, after the keys and the copy are gone", () => Isolated(RemoveReportsUnsavedChoices));
             test("A key change is announced before the key file is touched, and a change left half-way keeps the count odd until finished", () => Isolated(RevisionSurvivesFailures));
+            test("Remove keeps only the key file's count, raised past any odd value, and a new copy continues from it", () => Isolated(RemoveKeepsOnlyTheCount));
+            test("A saved key that cannot be read counts as none, and Sync goes on without it", () => Isolated(UnreadableKeyCountsAsNone));
         }
 
         private static void Translations()
@@ -300,11 +302,29 @@ namespace AIMeter
             ApiKeys.Save("openrouter", RouterKey);
             settings.ManagedPiServices = new List<string> { "openrouter", "gemini" };
             ManagedPi.Sync(settings);
+            long before = Revision();
             ManagedPi.Remove(settings);
-            Assert(!File.Exists(KeyFile) && !File.Exists(ManagedPi.ProgramPath) && !Directory.Exists(ManagedPi.Root), "Remove left files of the copy.");
+            AssertRemoved(before, "Remove");
             Assert(settings.ManagedPiServices != null && settings.ManagedPiServices.Count == 0, "Remove did not forget the ticked services.");
             Assert(!ManagedPi.Installed && ManagedPi.Stamp == "", "The copy still counts as installed after Remove.");
-            Assert(ManagedPi.Sync(settings) && !Directory.Exists(ManagedPi.Root), "A sync after Remove wrote files again.");
+            long removed = Revision();
+            Assert(ManagedPi.Sync(settings), "A sync after Remove failed.");
+            AssertRemoved(before, "a sync after Remove");
+            Assert(Revision() == removed, "A sync after Remove moved the count.");
+        }
+
+        /// <summary>
+        /// After Remove only config\keys-revision is left under the copy's root, holding an even count above the one
+        /// before: a plugin must never see the count go back.
+        /// </summary>
+        private static void AssertRemoved(long before, string what)
+        {
+            Assert(!ManagedPi.Installed && !File.Exists(KeyFile) && !File.Exists(PendingKeyFile), "The copy or its keys outlived " + what + ".");
+            var left = Directory.Exists(ManagedPi.Root) ? Directory.GetFileSystemEntries(ManagedPi.Root, "*", SearchOption.AllDirectories).ToList() : new List<string>();
+            Assert(left.Count == 2 && left.Contains(ManagedPi.ConfigFolder) && left.Contains(RevisionFile),
+                "After " + what + " more than the count was left: " + string.Join(", ", left));
+            long after = Revision();
+            Assert(after % 2 == 0 && after > before, "After " + what + " the count is not even and above " + before + ": " + after);
         }
 
         // ------------------------------------------------------------ scan
@@ -669,15 +689,17 @@ namespace AIMeter
                 Fails<ManagedPi.InstallException>(() => ManagedPi.Remove(settings), "the program in use");
             Assert(!File.Exists(KeyFile) && !File.Exists(PendingKeyFile), "Remove left a key file when the program could not be deleted.");
             Assert(File.Exists(ManagedPi.ProgramPath), "The test needs the program to have survived.");
+            Assert(Revision() % 2 == 1, "A Remove that stopped half-way did not leave the count odd: " + Revision());
 
             // When the key file itself cannot be deleted, the copy and the choices stay as they were.
             settings.ManagedPiServices = new List<string> { "openrouter" };
-            ManagedPi.Sync(settings);
+            Assert(ManagedPi.Sync(settings) && Revision() % 2 == 0, "The key was not copied again after a failed Remove: " + Revision());
             using (new FileStream(KeyFile, FileMode.Open, FileAccess.Read, FileShare.None))
                 Fails<ManagedPi.InstallException>(() => ManagedPi.Remove(settings), "the key file in use");
             Assert(File.Exists(ManagedPi.ProgramPath) && settings.ManagedPiServices.SequenceEqual(new[] { "openrouter" }), "Remove went on after the key file could not be deleted.");
+            long before = Revision();
             ManagedPi.Remove(settings);
-            Assert(!Directory.Exists(ManagedPi.Root), "Remove left files of the copy.");
+            AssertRemoved(before, "Remove");
         }
 
         private static void DescribesWithoutGitBash()
@@ -864,11 +886,15 @@ namespace AIMeter
         {
             var settings = Settings.Current;
             ApiKeys.Save("openrouter", RouterKey);
+            long removed = 0;
             for (int round = 0; round < 5; round++)
             {
+                // A new copy continues the count Remove left: it never goes back.
                 Install(Good, ReleaseOf(Good));
                 settings.ManagedPiServices = new List<string> { "openrouter" };
                 Assert(ManagedPi.Sync(settings) && File.Exists(KeyFile), "The key was not copied in round " + round + ".");
+                Assert(Revision() == removed + 2, "The count did not continue from " + removed + " in round " + round + ": " + Revision());
+                long before = Revision();
 
                 Exception failure = null;
                 var syncing = new System.Threading.Thread(() =>
@@ -880,9 +906,11 @@ namespace AIMeter
                 ManagedPi.Remove(settings);
                 syncing.Join();
                 Assert(failure == null, "A sync beside Remove threw: " + (failure == null ? "" : failure.Message));
-                Assert(!File.Exists(KeyFile) && !File.Exists(PendingKeyFile) && !Directory.Exists(ManagedPi.Root), "A key file or the copy outlived Remove in round " + round + ".");
+                AssertRemoved(before, "Remove in round " + round);
                 Assert(settings.ManagedPiServices.Count == 0 && !ManagedPi.Installed, "Remove did not clear the choices or the copy in round " + round + ".");
-                Assert(ManagedPi.Sync(settings) && !Directory.Exists(ManagedPi.Root), "A sync after Remove wrote files again in round " + round + ".");
+                removed = Revision();
+                Assert(ManagedPi.Sync(settings) && Revision() == removed, "A sync after Remove moved the count in round " + round + ".");
+                AssertRemoved(before, "a sync after Remove in round " + round);
             }
         }
 
@@ -1020,16 +1048,95 @@ namespace AIMeter
                 Assert(!ManagedPi.Sync(settings), "A sync succeeded although the key file could not be replaced.");
             Assert(Revision() == 5, "A failed change did not leave the count odd: " + Revision());
             Assert(File.ReadAllText(KeyFile) == copied && !File.Exists(PendingKeyFile), "A failed change altered the key file or left auth.json.new.");
-            Assert(ManagedPi.Sync(settings) && !File.ReadAllText(KeyFile).Contains(GeminiKey) && Revision() == 6, "The next sync did not complete the change: " + Revision());
 
-            // (c) A count left odd with the key file already right is closed by a sync that changes nothing else.
+            // A change that follows an unfinished one, with other contents (every service unticked meanwhile), gets a
+            // fresh odd number: 5, then 7 announced and 8 closed.
+            settings.ManagedPiServices = new List<string>();
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && Revision() == 8, "A change after an unfinished one did not get a fresh odd number: " + Revision());
+
+            // An unfinished change whose contents the file already has (the key put back meanwhile) closes at the next even.
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            Assert(ManagedPi.Sync(settings) && Revision() == 10, "The key was not copied again: " + Revision());
             copied = File.ReadAllText(KeyFile);
-            File.WriteAllText(RevisionFile, "7");
-            Assert(ManagedPi.Sync(settings) && Revision() == 8 && File.ReadAllText(KeyFile) == copied, "An odd count was not closed: " + Revision());
-            Assert(ManagedPi.Sync(settings) && Revision() == 8, "A closed count moved again: " + Revision());
+            ApiKeys.Save("openrouter", RouterKey + "-rotated");
+            using (new FileStream(KeyFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+                Assert(!ManagedPi.Sync(settings), "A sync succeeded although the key file could not be replaced.");
+            Assert(Revision() == 11 && File.ReadAllText(KeyFile) == copied, "A failed rotation did not leave the count odd and the file as it was: " + Revision());
+            ApiKeys.Save("openrouter", RouterKey);
+            Assert(ManagedPi.Sync(settings) && Revision() == 12 && File.ReadAllText(KeyFile) == copied, "An unfinished change the file already matches did not close at the next even: " + Revision());
+
+            // (c) A count left odd by hand with the key file already right is closed by a sync that changes nothing else.
+            File.WriteAllText(RevisionFile, "13");
+            Assert(ManagedPi.Sync(settings) && Revision() == 14 && File.ReadAllText(KeyFile) == copied, "An odd count was not closed: " + Revision());
+            Assert(ManagedPi.Sync(settings) && Revision() == 14, "A closed count moved again: " + Revision());
 
             // Last, so that the rest of the protocol is checked even while this fails.
             Assert(leftBehind.Count == 0, "keys-revision.new was left behind by a failed announcement (sharing " + string.Join(", ", leftBehind) + ").");
+        }
+
+        private static void RemoveKeepsOnlyTheCount()
+        {
+            var settings = Settings.Current;
+            string fakeBash = FakeGitBash();
+            ManagedPi.LocateGitBash = () => fakeBash;
+            InstallWithKeys();
+            Assert(File.Exists(ShellSettingsFile), "The test needs the copy's settings file.");
+            File.WriteAllText(PendingKeyFile, "half");
+            File.WriteAllText(Path.Combine(ManagedPi.Root, "stray.txt"), "x");
+            Directory.CreateDirectory(Path.Combine(ManagedPi.Root, "other"));
+            File.WriteAllText(Path.Combine(ManagedPi.Root, @"other\stray.txt"), "x");
+            File.WriteAllText(Path.Combine(ManagedPi.ConfigFolder, "stray.txt"), "x");
+            Directory.CreateDirectory(Path.Combine(ManagedPi.ConfigFolder, "sessions"));
+            File.WriteAllText(Path.Combine(ManagedPi.ConfigFolder, @"sessions\task.jsonl"), "x");
+
+            // A count left odd goes to the next odd number first, then to the even one after it.
+            File.WriteAllText(RevisionFile, "5");
+            ManagedPi.Remove(settings);
+            AssertRemoved(5, "Remove");
+            Assert(Revision() == 8, "Remove from an odd count did not end at the even number after the next odd one: " + Revision());
+
+            Install(Good, ReleaseOf(Good));
+            ApiKeys.Save("openrouter", RouterKey);
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            Assert(ManagedPi.Sync(settings) && File.Exists(KeyFile) && Revision() == 10, "A new copy did not continue the count: " + Revision());
+        }
+
+        private static void UnreadableKeyCountsAsNone()
+        {
+            var settings = Settings.Current;
+            Install(Good, ReleaseOf(Good));
+            ApiKeys.Save("openrouter", RouterKey);
+            ApiKeys.Save("gemini", GeminiKey);
+            settings.ManagedPiServices = new List<string> { "openrouter", "gemini" };
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey), "The keys were not copied.");
+
+            string saved = Path.Combine(Settings.Folder, "keys", "openrouter.bin");
+            Assert(File.Exists(saved), "The saved key is not where the test expects it: " + saved);
+            var deny = new System.Security.AccessControl.FileSystemAccessRule(System.Security.Principal.WindowsIdentity.GetCurrent().User,
+                System.Security.AccessControl.FileSystemRights.ReadData, System.Security.AccessControl.AccessControlType.Deny);
+            var security = File.GetAccessControl(saved);
+            security.AddAccessRule(deny);
+            File.SetAccessControl(saved, security);
+            try
+            {
+                bool denied = false;
+                try { File.ReadAllBytes(saved); }
+                catch (UnauthorizedAccessException) { denied = true; }
+                Assert(denied, "The deny-read rule did not take effect, so the test cannot check an unreadable key.");
+                Assert(ApiKeys.Has("openrouter") && ApiKeys.Get("openrouter") == null, "A saved key that cannot be read was not returned as none.");
+                bool synced = false;
+                try { synced = ManagedPi.Sync(settings); }
+                catch (Exception e) { throw new Exception("Sync threw on an unreadable saved key: " + e.GetType().Name + ": " + e.Message); }
+                Assert(synced && !File.ReadAllText(KeyFile).Contains(RouterKey) && File.ReadAllText(KeyFile).Contains(GeminiKey),
+                    "Sync did not drop the unreadable key and keep the others.");
+                Assert(!OffersManaged("openrouter") && OffersManaged("gemini"), "An unreadable key still gives access, or hid another service.");
+            }
+            finally
+            {
+                security = File.GetAccessControl(saved);
+                security.RemoveAccessRule(deny);
+                File.SetAccessControl(saved, security);
+            }
         }
 
         private static void DemoLeavesKeysAlone()
@@ -1060,9 +1167,10 @@ namespace AIMeter
             File.WriteAllText(PendingKeyFile, "half");
             string file = Path.Combine(Settings.Folder, "settings.json");
             Assert(settings.Save(), "The settings could not be saved before the test.");
+            long before = Revision();
             using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None))
                 Fails<ManagedPi.InstallException>(() => ManagedPi.Remove(settings), "settings that could not be saved");
-            Assert(!File.Exists(KeyFile) && !File.Exists(PendingKeyFile) && !Directory.Exists(ManagedPi.Root), "Remove left the keys or the copy when the settings could not be saved.");
+            AssertRemoved(before, "a Remove whose settings could not be saved");
             Assert(settings.ManagedPiServices.Count == 0 && !ManagedPi.Installed, "Remove did not clear the choices in memory when the settings could not be saved.");
         }
     }

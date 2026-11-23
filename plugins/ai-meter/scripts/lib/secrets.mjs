@@ -33,7 +33,9 @@
 //   - A key added and withdrawn during the task is two changes: r1 = r0 + 4, or odd if the second has not finished.
 //   - A change announced but not finished leaves r1 odd. A failed count write leaves the file untouched (the announce
 //     comes first), so it is either no change at all, or an unfinished one, shown as odd.
-//   - A smaller count means the copy's folder was removed (the count reads as missing, 0), perhaps installed again.
+//   - Removing the copy is a change like any other: AI Meter raises the count and keeps that one file, so a later
+//     installation never returns to a count a task has seen. A smaller count should therefore not happen; if the file
+//     was deleted by hand it reads as 0, and the output is withheld all the same.
 // Anything but r1 = r0 or r0 + 2 is therefore withheld: odd, a larger jump, a smaller number, or a count unreadable.
 //
 // events.jsonl and stderr.txt in the job's folder keep the agent's raw output, key included if it printed one. They

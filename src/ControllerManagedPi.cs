@@ -33,7 +33,8 @@ namespace AIMeter
             // Replacing an older release keeps the user's choices. A new installation starts with nothing ticked: choices
             // left in the settings by a copy removed earlier are cleared on disk before anything is downloaded, and
             // when that cannot be saved nothing is installed, or a restart would copy those keys again unasked.
-            if (ManagedPi.OtherVersionInstalled == null && Settings.ManagedPiServices.Count > 0)
+            // Saved every time, also when the list is already empty in memory: a removal may not have saved it.
+            if (ManagedPi.OtherVersionInstalled == null)
             {
                 Settings.ManagedPiServices = new List<string>();
                 if (!Settings.Save())

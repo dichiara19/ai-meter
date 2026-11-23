@@ -21,6 +21,7 @@ namespace AIMeter
             }
             catch (CryptographicException) { return null; }
             catch (IOException) { return null; }
+            catch (System.UnauthorizedAccessException) { return null; }   // A file that can be seen but not read.
         }
 
         public static void Save(string id, string key)

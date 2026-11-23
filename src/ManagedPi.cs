@@ -239,6 +239,9 @@ namespace AIMeter
 
         /// <summary>
         /// Remove the copy with its configuration and the keys copied into it, and forget which services were ticked.
+        /// The count of the key file's changes is the one file kept, raised like for any other change: a task that is
+        /// ending while Pi is removed, or that outlives a removal and a new installation, then sees that the keys
+        /// changed and never trusts a count it had seen before.
         /// Throws InstallException when a file is in use (a task still running). The keys go first and nothing else is
         /// touched until they are gone: when the program cannot be deleted, the keys already are; when the key file
         /// itself cannot, the copy and the choices stay as they were, for the user to try again.
@@ -252,13 +255,21 @@ namespace AIMeter
                 bool choicesSaved = true;
                 lock (ConfigLock)
                 {
+                    if (Directory.Exists(ConfigFolder)) AnnounceChange();
                     DeleteKeyFiles();
                     if (settings != null)
                     {
                         settings.ManagedPiServices = new List<string>();
                         choicesSaved = settings.Save();
                     }
-                    if (Directory.Exists(Root)) Directory.Delete(Root, true);
+                    foreach (var folder in Probe.SafeDirs(Root).Where(d => !SamePath(d, ConfigFolder))) Directory.Delete(folder, true);
+                    foreach (var file in Probe.SafeFiles(Root, "*")) file.Delete();
+                    if (Directory.Exists(ConfigFolder))
+                    {
+                        foreach (var folder in Probe.SafeDirs(ConfigFolder)) Directory.Delete(folder, true);
+                        foreach (var file in Probe.SafeFiles(ConfigFolder, "*").Where(f => !SamePath(f.FullName, RevisionFile))) file.Delete();
+                        WriteRevision(Revision() + 1);
+                    }
                 }
                 // The copy and its keys are gone, but the old choices are still on disk: say so. A later installation
                 // starts with nothing ticked in any case (Controller.InstallManagedPi).
@@ -345,15 +356,16 @@ namespace AIMeter
 
         private static bool WriteKeys(IEnumerable<string> services)
         {
-            var entries = new Dictionary<string, object>();
-            foreach (var id in services)
-            {
-                var d = Definitions.Get(id);
-                string provider = ProviderOf(d), key = provider == null ? null : PlainKey(d);
-                if (key != null) entries[provider] = new Dictionary<string, object> { { "type", "api_key" }, { "key", key } };
-            }
             try
             {
+                // Inside the error boundary: reading a saved key can fail like any other file.
+                var entries = new Dictionary<string, object>();
+                foreach (var id in services)
+                {
+                    var d = Definitions.Get(id);
+                    string provider = ProviderOf(d), key = provider == null ? null : PlainKey(d);
+                    if (key != null) entries[provider] = new Dictionary<string, object> { { "type", "api_key" }, { "key", key } };
+                }
                 string text = entries.Count == 0 ? null : Json.Serialize(entries);
                 bool unchanged = text == null ? !File.Exists(KeyFile) : File.Exists(KeyFile) && File.ReadAllText(KeyFile, Encoding.UTF8) == text;
                 if (unchanged)
@@ -363,8 +375,7 @@ namespace AIMeter
                     if (Revision() % 2 != 0) WriteRevision(Revision() + 1);
                     return true;
                 }
-                // The change is announced before the key file is touched and closed after it: see Revision.
-                if (Revision() % 2 == 0) WriteRevision(Revision() + 1);
+                AnnounceChange();
                 if (text == null) DeleteKeyFiles();
                 else
                 {
@@ -404,6 +415,17 @@ namespace AIMeter
             long revision = 0;
             if (File.Exists(RevisionFile)) long.TryParse(File.ReadAllText(RevisionFile, Encoding.UTF8).Trim(), out revision);
             return Math.Max(0, revision);
+        }
+
+        /// <summary>
+        /// Raise the count to an odd number no task has seen, before the key file is touched. A count already odd is
+        /// a change that did not finish: this one is another change, so it gets the next odd number, or the two would
+        /// be counted as one.
+        /// </summary>
+        private static void AnnounceChange()
+        {
+            long revision = Revision();
+            WriteRevision(revision % 2 == 0 ? revision + 1 : revision + 2);
         }
 
         /// <summary>Write the count through a temporary file, so that a reader never sees it half written.</summary>
