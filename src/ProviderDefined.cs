@@ -212,10 +212,13 @@ namespace AIMeter
         /// next to the key a coding agent keeps (or one of those variables exported in the same home). Each is reduced to
         /// the slot's "pattern", so a value saved with the rest of the address it was copied from still works. Null when absent.
         /// </summary>
-        private string SlotValue(string slot)
+        private string SlotValue(string slot) { return SlotValueOf(D, slot); }
+
+        /// <summary>SlotValue for any definition: also what the managed Pi copies beside a key (ManagedPi).</summary>
+        internal static string SlotValueOf(ServiceDefinition d, string slot)
         {
-            var spec = Json.Obj(Json.Obj(D.Raw, "keys"), slot);
-            string saved = ServiceDefinition.SlotText(spec, ApiKeys.Get(D.Id + "." + slot));
+            var spec = Json.Obj(Json.Obj(d.Raw, "keys"), slot);
+            string saved = ServiceDefinition.SlotText(spec, ApiKeys.Get(d.Id + "." + slot));
             if (saved != null || spec == null) return saved;
             var env = ServiceDefinition.Strings(spec, "env");
             foreach (var name in env)
@@ -223,7 +226,7 @@ namespace AIMeter
                 string v = ServiceDefinition.SlotText(spec, ServiceDefinition.Env(name));
                 if (v != null) return v;
             }
-            return D.UsesKey ? ServiceDefinition.SlotText(spec, KeyFinder.Beside(KeyFinder.Find(D), Json.Str(spec, "beside"), env)) : null;
+            return d.UsesKey ? ServiceDefinition.SlotText(spec, KeyFinder.Beside(KeyFinder.Find(d), Json.Str(spec, "beside"), env)) : null;
         }
 
         /// <summary>The {key:slot} names in a request's URL, headers and body, in order and without repeats.</summary>

@@ -156,7 +156,11 @@ namespace AIMeter
                 if (Directory.Exists(FolderOf(release))) Directory.Delete(FolderOf(release), true);
                 Directory.Move(unpacked, FolderOf(release));
                 foreach (var other in Probe.SafeDirs(Root).Where(d => !SamePath(d, FolderOf(release)) && !SamePath(d, ConfigFolder))) TryDelete(other);
-                lock (ConfigLock) BindShell();
+                lock (ConfigLock)
+                {
+                    BindShell();
+                    WriteModelLists();
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch (InstallException) { throw; }
@@ -294,10 +298,40 @@ namespace AIMeter
             return ServiceDefinition.Strings(d.Auth, "ids").DefaultIfEmpty(d.Id).FirstOrDefault(id => place.Providers.Contains(id, StringComparer.Ordinal));
         }
 
-        /// <summary>The services whose key can be copied: those Pi has a provider for and AI Meter reads with a key it has now.</summary>
+        /// <summary>
+        /// The services whose key can be copied: those Pi has a provider for and AI Meter reads with a key it has now,
+        /// together with whatever else the service needs beside its key.
+        /// </summary>
         public static List<ServiceDefinition> ServicesWithKey()
         {
-            return Definitions.All.Where(d => ProviderOf(d) != null && PlainKey(d) != null).ToList();
+            return Definitions.All.Where(d => ProviderOf(d) != null && KeyEntry(d) != null).ToList();
+        }
+
+        /// <summary>
+        /// A service's entry in the copy's key file: its key and, for a service that needs more than a key, those
+        /// values under "env", by the variable name Pi reads them from (Pi 1.5.2, docs/providers.md: Cloudflare's
+        /// account id as CLOUDFLARE_ACCOUNT_ID). The values are the ones AI Meter reads the service with; their
+        /// variable is the first of the names the service's definition gives the value ("keys", "env"). Null when the
+        /// key or one of those values is missing or is not a plain value, as Pi could not call the service then.
+        /// </summary>
+        private static Dictionary<string, object> KeyEntry(ServiceDefinition d)
+        {
+            string key = PlainKey(d);
+            if (key == null) return null;
+            var entry = new Dictionary<string, object> { { "type", "api_key" }, { "key", key } };
+            var beside = new Dictionary<string, object>();
+            var slots = Json.Obj(d.Raw, "keys");
+            if (slots != null)
+                foreach (var slot in slots.Keys.OrderBy(k => k, StringComparer.Ordinal))
+                {
+                    string variable = ServiceDefinition.Strings(Json.Obj(slots, slot), "env").FirstOrDefault();
+                    if (variable == null) continue;
+                    string value = DefinedProvider.SlotValueOf(d, slot);
+                    if (!IsPlain(value, 1)) return null;
+                    beside[variable] = value;
+                }
+            if (beside.Count > 0) entry["env"] = beside;
+            return entry;
         }
 
         /// <summary>
@@ -327,8 +361,14 @@ namespace AIMeter
         private static string PlainKey(ServiceDefinition d)
         {
             string key = SourceKey(d);
-            if (key == null || key.Length < 8 || key[0] == '!') return null;
-            return key.Any(c => c == '$' || char.IsWhiteSpace(c) || char.IsControl(c)) ? null : key;
+            return IsPlain(key, 8) ? key : null;
+        }
+
+        /// <summary>Whether Pi would take a value as it is written: see PlainKey.</summary>
+        private static bool IsPlain(string value, int minimumLength)
+        {
+            if (value == null || value.Length < minimumLength || value[0] == '!') return false;
+            return !value.Any(c => c == '$' || char.IsWhiteSpace(c) || char.IsControl(c));
         }
 
         /// <summary>
@@ -346,7 +386,11 @@ namespace AIMeter
             // One writer at a time: Settings calls this on the interface thread, a key change in the background.
             lock (ConfigLock)
             {
-                if (Installed) BindShell();
+                if (Installed)
+                {
+                    BindShell();
+                    WriteModelLists();
+                }
                 return WriteKeys(Installed ? settings.ManagedPiServices ?? new List<string>() : new List<string>());
             }
         }
@@ -359,12 +403,19 @@ namespace AIMeter
             try
             {
                 // Inside the error boundary: reading a saved key can fail like any other file.
+                // A ticked service keeps the entry it has while AI Meter finds no key for it at all: a key that was
+                // discovered in another app is out of sight whenever that app's files are (WSL not running, the first
+                // moments after a start), and that is not the user taking it back. A key found and different replaces
+                // it, one found and not plain removes it, and removing the key in AI Meter unticks the service.
+                var held = Json.ParseFile(KeyFile);
                 var entries = new Dictionary<string, object>();
                 foreach (var id in services)
                 {
                     var d = Definitions.Get(id);
-                    string provider = ProviderOf(d), key = provider == null ? null : PlainKey(d);
-                    if (key != null) entries[provider] = new Dictionary<string, object> { { "type", "api_key" }, { "key", key } };
+                    string provider = ProviderOf(d);
+                    if (provider == null) continue;
+                    object entry = SourceKey(d) == null && held != null && held.ContainsKey(provider) ? held[provider] : KeyEntry(d);
+                    if (entry != null) entries[provider] = entry;
                 }
                 string text = entries.Count == 0 ? null : Json.Serialize(entries);
                 bool unchanged = text == null ? !File.Exists(KeyFile) : File.Exists(KeyFile) && File.ReadAllText(KeyFile, Encoding.UTF8) == text;
@@ -454,9 +505,10 @@ namespace AIMeter
 
         /// <summary>
         /// The key the copy may use for a service, with the provider id it is kept under; null when it holds none, the
-        /// user has not ticked the service now, or the key in the file is no longer the one AI Meter has: a key that
-        /// could not be deleted after a choice was withdrawn, or replaced after the user changed or removed it, must not
-        /// keep the service on offer. For the runtime scan only, which reports an opaque credential id.
+        /// user has not ticked the service now, or AI Meter has a key for the service and it is not this one: a key
+        /// that could not be deleted after a choice was withdrawn, or replaced after the user changed it, must not keep
+        /// the service on offer. While AI Meter finds no key at all (see WriteKeys) the copy's own stands. For the
+        /// runtime scan only, which reports an opaque credential id.
         /// </summary>
         internal static string KeyFor(ServiceDefinition d, out string provider)
         {
@@ -464,7 +516,72 @@ namespace AIMeter
             var settings = Settings.Current;
             if (provider == null || settings == null || settings.ManagedPiServices == null || !settings.ManagedPiServices.Contains(d.Id)) return null;
             string key = JPath.Str(JPath.Get(Json.ParseFile(KeyFile), provider + ".key"));
-            return string.IsNullOrEmpty(key) || key != PlainKey(d) ? null : key;
+            if (string.IsNullOrEmpty(key)) return null;
+            return SourceKey(d) != null && key != PlainKey(d) ? null : key;
+        }
+
+        // ------------------------------------------------------------ model lists
+
+        /// <summary>The format of the copy's model lists, as AgentModels names it.</summary>
+        public const string ModelsFormat = "pi";
+
+        private static string ModelsFolder { get { return Path.Combine(Root, "models", Pinned.Version); } }
+
+        /// <summary>
+        /// Pi's own model list for a provider, as the pinned release has it; null when there is none. The standalone
+        /// build keeps these lists inside its program, where AI Meter cannot read them, so AI Meter carries the same
+        /// files (agents\pi-models, taken from the pi-ai package of the pinned release, MIT) and writes them beside the
+        /// copy. Delegation needs them for what a service's own list does not say: whether a model can call tools
+        /// (NVIDIA) and what Pi prices a request at, which is how a free tier's budget is kept (Cloudflare).
+        /// </summary>
+        public static string ModelsFile(string provider)
+        {
+            if (string.IsNullOrEmpty(provider)) return null;
+            try
+            {
+                string file = Path.Combine(ModelsFolder, provider + ".json");
+                return File.Exists(file) ? file : null;
+            }
+            catch (ArgumentException) { return null; }
+        }
+
+        /// <summary>Write the lists of the providers the copy has, where they are missing or differ; failures are tried again at the next sync.</summary>
+        private static void WriteModelLists()
+        {
+            var kind = Agents.Get(RuntimeId);
+            var place = kind == null ? null : kind.PlaceFor(Place);
+            if (place == null) return;
+            try
+            {
+                foreach (var provider in place.Providers)
+                {
+                    string text = ModelListOf(provider);
+                    if (text == null) continue;
+                    string file = Path.Combine(ModelsFolder, provider + ".json");
+                    if (File.Exists(file) && new FileInfo(file).Length == Encoding.UTF8.GetByteCount(text)) continue;
+                    Directory.CreateDirectory(ModelsFolder);
+                    File.WriteAllText(file, text, new UTF8Encoding(false));
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (ArgumentException) { }
+        }
+
+        /// <summary>A provider's list as AI Meter carries it: embedded in the program, or in agents\pi-models when running from source.</summary>
+        private static string ModelListOf(string provider)
+        {
+            using (var stream = typeof(ManagedPi).Assembly.GetManifestResourceStream("pimodels." + provider + ".json"))
+                if (stream != null)
+                    using (var reader = new StreamReader(stream, Encoding.UTF8)) return reader.ReadToEnd();
+            try
+            {
+                string file = Path.Combine(Program.Home, "agents", "pi-models", provider + ".json");
+                return File.Exists(file) ? File.ReadAllText(file, Encoding.UTF8) : null;
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+            catch (ArgumentException) { return null; }
         }
 
         // ------------------------------------------------------------ shell

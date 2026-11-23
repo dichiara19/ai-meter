@@ -21,3 +21,8 @@ Store are trademarks of Microsoft Corporation. Cursor, OpenRouter, Vercel,
 Experiential Labs, DeepSeek, Kimi, Ollama, LM Studio and other names are
 trademarks of their respective owners.
 AI Meter is not affiliated with, endorsed or sponsored by any of them.
+
+The files in agents/pi-models are the model lists of Pi 1.5.2 (the pi-ai package
+of https://github.com/earendil-works/pi, MIT licence, copyright its authors),
+included unchanged so that AI Meter can read what the standalone build of Pi
+keeps inside its program.

@@ -10,6 +10,8 @@ New-Item -ItemType Directory -Force (Join-Path $Destination 'src'), (Join-Path $
 Copy-Item (Join-Path $root 'src\*.cs') (Join-Path $Destination 'src') -Force
 Copy-Item (Join-Path $root 'providers\*') (Join-Path $Destination 'providers') -Include *.json, *.png -Force
 Copy-Item (Join-Path $root 'agents\*.json') (Join-Path $Destination 'agents') -Force
+New-Item -ItemType Directory -Force (Join-Path $Destination 'agents\pi-models') | Out-Null
+Copy-Item (Join-Path $root 'agents\pi-models\*.json') (Join-Path $Destination 'agents\pi-models') -Force
 # The app icon and the official logos bundled for built-in services whose app may be missing.
 Copy-Item (@('app.ico', 'antigravity.png', 'openai.png', 'openai-dark.png', 'copilot.png', 'copilot-dark.png') | ForEach-Object { Join-Path $root "assets\$_" }) (Join-Path $Destination 'assets') -Force
 Copy-Item (Join-Path $root 'AIMeter.ps1') $Destination -Force

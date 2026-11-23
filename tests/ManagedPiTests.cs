@@ -41,11 +41,14 @@ namespace AIMeter
             test("Remove reports choices it could not save, after the keys and the copy are gone", () => Isolated(RemoveReportsUnsavedChoices));
             test("A key change is announced before the key file is touched, and a change left half-way keeps the count odd until finished", () => Isolated(RevisionSurvivesFailures));
             test("Remove keeps only the key file's count, raised past any odd value, and a new copy continues from it", () => Isolated(RemoveKeepsOnlyTheCount));
-            test("A saved key that cannot be read counts as none, and Sync goes on without it", () => Isolated(UnreadableKeyCountsAsNone));
+            test("A saved key that cannot be read counts as none, and the copy keeps the entry it has", () => Isolated(UnreadableKeyCountsAsNone));
             test("The managed Pi starts without skills and prompt templates in every argument list; Pi in WSL keeps the shared ones", () => Isolated(ManagedArgumentsSkipSkills));
             test("An unknown environment policy is refused, never read as inheritance; known ones pass through", () => Isolated(UnknownEnvironmentPolicyIsRefused));
             test("Ticked services saved by another AI Meter are read once, and never this process's own or a failed save", () => Isolated(ServicesSavedElsewhere));
             test("The managed Pi lives in the local shared folder: the test folder, or the profile's .aimeter in the Store build", () => Isolated(LocalSharedFolder));
+            test("The managed Pi gets Pi's own model lists beside it, rewritten when missing or changed, and its accesses name them", () => Isolated(ManagedModelLists));
+            test("Cloudflare reaches the managed Pi with its account id, and its free tier is offered through the copy with consent", () => Isolated(CloudflareThroughCopy));
+            test("An NVIDIA model whose tool support the service does not state is a best-effort candidate through the copy", () => Isolated(NvidiaBestEffortThroughCopy));
         }
 
         private static void Translations()
@@ -80,7 +83,7 @@ namespace AIMeter
         private const string LabsKey = "explabs-managedtest-0123456789abcdef";
 
         /// <summary>The service definitions these tests use, read from the repository as the only ones loaded.</summary>
-        private static readonly string[] Services = { "openrouter", "gemini", "experientiallabs" };
+        private static readonly string[] Services = { "openrouter", "gemini", "experientiallabs", "cloudflare-workers-ai", "nvidia" };
 
         /// <summary>
         /// Run a test with the copy's folder under the test folder (not packaged), the repository's definitions of
@@ -103,7 +106,7 @@ namespace AIMeter
             var locateGitBash = ManagedPi.LocateGitBash;
             var saved = new Dictionary<string, string>();
             foreach (var id in Services)
-                foreach (var name in ServiceDefinition.Strings(Definitions.Get(id).Auth, "env"))
+                foreach (var name in KeyVariables(Definitions.Get(id)))
                 {
                     Assert(Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User) == null,
                         name + " is set in the user's environment; these tests need it unset to stay deterministic.");
@@ -127,11 +130,27 @@ namespace AIMeter
                 Settings.Current.ManagedPiServices = services;
                 foreach (var id in Services)
                 {
+                    foreach (var slot in Slots(Definitions.Get(id))) ApiKeys.Remove(id + "." + slot);
                     ApiKeys.Remove(id);
                     File.Delete(Path.Combine(Definitions.UserFolder, id + ".json"));
                 }
                 cached.SetValue(null, null);
             }
+        }
+
+        /// <summary>A service's values beside its key (its definition's "keys"), such as Cloudflare's account id.</summary>
+        private static IEnumerable<string> Slots(ServiceDefinition d)
+        {
+            var slots = d == null ? null : Json.Obj(d.Raw, "keys");
+            return slots == null ? new string[0] : slots.Keys.ToArray();
+        }
+
+        /// <summary>The variables a service's key and the values beside it are read from.</summary>
+        private static IEnumerable<string> KeyVariables(ServiceDefinition d)
+        {
+            var names = ServiceDefinition.Strings(d.Auth, "env").ToList();
+            foreach (var slot in Slots(d)) names.AddRange(ServiceDefinition.Strings(Json.Obj(Json.Obj(d.Raw, "keys"), slot), "env"));
+            return names.Distinct();
         }
 
         // ------------------------------------------------------------ archives
@@ -294,13 +313,25 @@ namespace AIMeter
             Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "Unticking every service left the key file.");
             Assert(ManagedPi.Stamp == "0", "The stamp does not show that the keys are gone.");
 
-            // A key removed in AI Meter leaves the copy at the next sync.
+            // No key found at all (a discovered key out of sight, or the first moments after a start) is not the user
+            // taking it back: the copy keeps its entry, the count stays and the service stays on offer. Removing the
+            // key in AI Meter unticks the service instead (Controller.RemoveApiKey, not covered here).
             settings.ManagedPiServices = new List<string> { "openrouter" };
             ManagedPi.Sync(settings);
             Assert(File.Exists(KeyFile), "The key was not copied again.");
+            string held = File.ReadAllText(KeyFile);
+            long count = Revision();
             ApiKeys.Remove("openrouter");
-            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "A key removed in AI Meter stayed in the copy.");
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile) == held && Revision() == count, "A key AI Meter cannot find now was withdrawn from the copy.");
+            Assert(ManagedPi.KeyFor(router, out provider) == RouterKey && OffersManaged("openrouter"), "The copy's own key was refused while AI Meter finds none.");
             Assert(!ManagedPi.ServicesWithKey().Any(d => d.Id == "openrouter"), "A service without a key can still be copied.");
+
+            // Ticked with no key found and no entry yet: nothing is written.
+            settings.ManagedPiServices = new List<string>();
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "Unticking did not remove the kept entry.");
+            count = Revision();
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && Revision() == count, "A ticked service with no key wrote an entry.");
 
             // Remove deletes the keys, the program and the choices.
             ApiKeys.Save("openrouter", RouterKey);
@@ -875,7 +906,8 @@ namespace AIMeter
             ApiKeys.Save("openrouter", "12345678");
             Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains("\"12345678\"") && OffersManaged("openrouter"), "A plain key of eight characters was refused.");
 
-            // Changed or removed in AI Meter while the file could not be rewritten: the file's key gives no access.
+            // Changed in AI Meter while the file could not be rewritten: the file's key gives no access. Not found at all:
+            // the copy's own key stands.
             ApiKeys.Save("openrouter", RouterKey);
             Assert(ManagedPi.Sync(settings) && OffersManaged("openrouter"), "The key was not copied again.");
             ApiKeys.Save("openrouter", RouterKey + "-rotated");
@@ -883,7 +915,10 @@ namespace AIMeter
                 "A key replaced in AI Meter still gives access through the file.");
             Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey + "-rotated") && OffersManaged("openrouter"), "The rotated key was not copied.");
             ApiKeys.Remove("openrouter");
-            Assert(File.Exists(KeyFile) && !OffersManaged("openrouter") && ManagedPi.KeyFor(router, out provider) == null, "A key removed in AI Meter still gives access through the file.");
+            Assert(OffersManaged("openrouter") && ManagedPi.KeyFor(router, out provider) == RouterKey + "-rotated", "The copy's own key was refused while AI Meter finds none.");
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey + "-rotated"), "A sync withdrew a key AI Meter cannot find now.");
+            ApiKeys.Save("openrouter", "!echo found-again-but-not-plain");
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && !OffersManaged("openrouter"), "A key found again but not plain did not remove the entry.");
         }
 
         private static void RemoveAndSyncTakeTurns()
@@ -1131,9 +1166,10 @@ namespace AIMeter
                 bool synced = false;
                 try { synced = ManagedPi.Sync(settings); }
                 catch (Exception e) { throw new Exception("Sync threw on an unreadable saved key: " + e.GetType().Name + ": " + e.Message); }
-                Assert(synced && !File.ReadAllText(KeyFile).Contains(RouterKey) && File.ReadAllText(KeyFile).Contains(GeminiKey),
-                    "Sync did not drop the unreadable key and keep the others.");
-                Assert(!OffersManaged("openrouter") && OffersManaged("gemini"), "An unreadable key still gives access, or hid another service.");
+                // Like a key out of sight, an unreadable one is not the user taking it back: the copy's entry stands.
+                Assert(synced && File.ReadAllText(KeyFile).Contains(RouterKey) && File.ReadAllText(KeyFile).Contains(GeminiKey),
+                    "Sync withdrew a key AI Meter could not read, or another service's.");
+                Assert(OffersManaged("openrouter") && OffersManaged("gemini"), "The copy's own key was refused while the saved one could not be read.");
             }
             finally
             {
@@ -1295,6 +1331,145 @@ namespace AIMeter
                 Assert(ManagedPi.Root.StartsWith(store + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "The Store build's copy is not under the profile's .aimeter: " + ManagedPi.Root);
             }
             finally { Native.PackagedOverride = false; }
+        }
+
+        /// <summary>The providers of the managed place, as agents/pi.json lists them.</summary>
+        private static readonly string[] PiProviders = { "cloudflare-workers-ai", "deepseek", "google", "moonshotai", "nvidia", "openrouter", "vercel-ai-gateway" };
+
+        private static string RepositoryModelList(string provider)
+        {
+            string repository = Environment.GetEnvironmentVariable("AIMETER_REPOSITORY") ?? Environment.CurrentDirectory;
+            return File.ReadAllText(Path.Combine(repository, "agents", "pi-models", provider + ".json"));
+        }
+
+        private static string ModelListPath(string provider) { return Path.Combine(ManagedPi.Root, "models", ManagedPi.Pinned.Version, provider + ".json"); }
+
+        private static void ManagedModelLists()
+        {
+            Assert(Agents.Get("pi").PlaceFor(ManagedPi.Place).Providers.OrderBy(p => p, StringComparer.Ordinal).SequenceEqual(PiProviders),
+                "The managed place's providers are not the ones these tests expect.");
+            Assert(ManagedPi.ModelsFile("nvidia") == null, "A model list was named before the copy was installed.");
+
+            // Written right after the installation, one per provider, as AI Meter carries them.
+            Install(Good, ReleaseOf(Good));
+            foreach (var provider in PiProviders)
+            {
+                Assert(ManagedPi.ModelsFile(provider) == ModelListPath(provider), "The model list for " + provider + " is not where expected: " + (ManagedPi.ModelsFile(provider) ?? "null"));
+                Assert(File.ReadAllText(ModelListPath(provider)) == RepositoryModelList(provider), "The model list for " + provider + " is not Pi's own.");
+            }
+            Assert(ManagedPi.ModelsFile("experientiallabs") == null && ManagedPi.ModelsFile(null) == null && ManagedPi.ModelsFile("") == null,
+                "A model list was named for a provider the copy has none for.");
+
+            // A list deleted, or changed in length, is written again at the next sync.
+            File.Delete(ModelListPath("nvidia"));
+            File.WriteAllText(ModelListPath("google"), "{}");
+            Assert(ManagedPi.ModelsFile("nvidia") == null, "A deleted list is still named.");
+            Assert(ManagedPi.Sync(Settings.Current), "The sync failed.");
+            Assert(File.ReadAllText(ModelListPath("nvidia")) == RepositoryModelList("nvidia") && File.ReadAllText(ModelListPath("google")) == RepositoryModelList("google"),
+                "A missing or changed model list was not written again.");
+
+            // The managed accesses name their provider's list, in Pi's format.
+            ApiKeys.Save("openrouter", RouterKey);
+            ApiKeys.Save("gemini", GeminiKey);
+            Settings.Current.ManagedPiServices = new List<string> { "openrouter", "gemini" };
+            Assert(ManagedPi.Sync(Settings.Current), "The keys could not be copied.");
+            var scan = ScanOf(Home(), false);
+            var router = ManagedAccess(scan, "openrouter");
+            var gemini = ManagedAccess(scan, "gemini");
+            Assert(router.ModelsFile == ModelListPath("openrouter") && gemini.ModelsFile == ModelListPath("google") && router.ModelsFormat == "pi" && gemini.ModelsFormat == "pi",
+                "The managed accesses do not name Pi's lists: " + router.ModelsFile + ", " + gemini.ModelsFile);
+
+            // Remove takes them away; a sync without a copy writes none.
+            long before = Revision();
+            ManagedPi.Remove(Settings.Current);
+            AssertRemoved(before, "Remove");
+            Assert(ManagedPi.Sync(Settings.Current) && ManagedPi.ModelsFile("nvidia") == null && !Directory.Exists(Path.Combine(ManagedPi.Root, "models")),
+                "Model lists were written for a copy that is not installed.");
+        }
+
+        private const string CloudflareService = "cloudflare-workers-ai";
+        private const string CloudflareKey = "cf-token-0123456789abcdef";
+        private const string CloudflareAccount = "0123456789abcdef0123456789abcdef";
+        /// <summary>A chat model in Pi 1.5.2's list for Cloudflare, at a price.</summary>
+        private const string CloudflareModel = "@cf/deepseek-ai/deepseek-v4-flash-0731";
+
+        /// <summary>Cloudflare's free tier with one model, as tests/FreeTierTests.cs builds it.</summary>
+        private static Snapshot CloudflareFixture()
+        {
+            var tier = new FreeStatus { Status = "confirmed_free", Kind = Candidates.FreeTier, Source = "documented" };
+            var catalogue = new Catalogue
+            {
+                ReadAt = DateTime.Now, Pool = "cloudflare-workers-ai:neurons",
+                Models = new List<FreeModel> { new FreeModel { Id = CloudflareModel, Name = "DeepSeek V4 Flash", Context = 131072, MaxOutput = 16384, Tools = true, Free = tier } },
+                Allowance = new Allowance { Metric = "neurons_per_day", Unit = "neurons", UsdPerUnit = 0.000011, Reserve = 1000 },
+            };
+            catalogue.Rates.Add(new RateLimit
+            {
+                Metric = "neurons_per_day", Limit = 10000, Used = 2500, Remaining = 7500, Scope = "account",
+                Source = "provider_reported", ResetsAt = DateTime.UtcNow.Date.AddDays(1).ToLocalTime(), ResetZone = "UTC",
+            });
+            var snap = new Snapshot();
+            snap.Providers.Add(new ProviderState { Id = CloudflareService, Name = "Cloudflare Workers AI", Catalogue = catalogue });
+            return snap;
+        }
+
+        private static void CloudflareThroughCopy()
+        {
+            NetworkBackoff.Clear();
+            var settings = Settings.Current;
+            Install(Good, ReleaseOf(Good));
+            ApiKeys.Save(CloudflareService, CloudflareKey);
+            settings.ManagedPiServices = new List<string> { CloudflareService };
+
+            // Without the account id Pi could not call it: no entry.
+            Assert(!ManagedPi.ServicesWithKey().Any(d => d.Id == CloudflareService), "Cloudflare can be copied without its account id.");
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "Cloudflare's key was copied without its account id.");
+
+            ApiKeys.Save(CloudflareService + ".account", CloudflareAccount);
+            Assert(ManagedPi.ServicesWithKey().Any(d => d.Id == CloudflareService), "Cloudflare cannot be copied with its key and account id.");
+            Assert(ManagedPi.Sync(settings), "The key file could not be written.");
+            string expected = "{\"cloudflare-workers-ai\":{\"type\":\"api_key\",\"key\":\"" + CloudflareKey + "\",\"env\":{\"CLOUDFLARE_ACCOUNT_ID\":\"" + CloudflareAccount + "\"}}}";
+            Assert(File.ReadAllText(KeyFile) == expected, "Cloudflare's entry does not carry its account id: " + File.ReadAllText(KeyFile));
+
+            var scan = ScanOf(Home(), false);
+            var access = ManagedAccess(scan, CloudflareService);
+            Assert(access.Provider == CloudflareService && access.ModelsFile == ModelListPath(CloudflareService), "Cloudflare's managed access lacks its provider or model list.");
+            Assert(AgentModels.Find(access, CloudflareModel) != null && AgentModels.Find(access, CloudflareModel).Priced, "Pi's list does not price the test model.");
+
+            var chosen = Candidates.Select(CloudflareFixture(), scan, new Requirements { Tools = true, FreeTier = true }, DateTime.Now).Chosen;
+            Assert(chosen.Count == 1 && chosen[0].Model.Id == CloudflareModel && chosen[0].Access.Managed && chosen[0].Room.CanStart,
+                "The free tier was not offered through the copy with consent: " + string.Join(", ", chosen.Select(c => c.Model.Id + "@" + c.Access.Runtime)));
+            var refused = Candidates.Select(CloudflareFixture(), scan, new Requirements { Tools = true }, DateTime.Now);
+            Assert(refused.Chosen.Count == 0 && refused.Excluded.Single(e => e.Service == CloudflareService).Reason == "free_tier_not_allowed",
+                "The free tier was offered through the copy without consent.");
+        }
+
+        /// <summary>A model at no cost in Pi 1.5.2's list for NVIDIA.</summary>
+        private const string NvidiaModel = "deepseek-ai/deepseek-v4.1-flash";
+
+        private static void NvidiaBestEffortThroughCopy()
+        {
+            NetworkBackoff.Clear();
+            Install(Good, ReleaseOf(Good));
+            ApiKeys.Save("nvidia", "nvapi-0123456789abcdef");
+            Settings.Current.ManagedPiServices = new List<string> { "nvidia" };
+            Assert(ManagedPi.Sync(Settings.Current), "NVIDIA's key could not be copied.");
+            var scan = ScanOf(Home(), false);
+            var access = ManagedAccess(scan, "nvidia");
+            var listed = AgentModels.Find(access, NvidiaModel);
+            Assert(listed != null && !listed.Priced && listed.Tools == true, "Pi's list does not have the test model at no cost with tools.");
+
+            var snap = new Snapshot();
+            var catalogue = new Catalogue { ReadAt = DateTime.Now, Pool = "nvidia:account", Models = new List<FreeModel>
+                { new FreeModel { Id = NvidiaModel, Name = NvidiaModel, FeaturesUnknown = true, Free = new FreeStatus { Status = "unknown", Note = "no prices" } } } };
+            snap.Providers.Add(new ProviderState { Id = "nvidia", Name = "NVIDIA", Catalogue = catalogue });
+
+            var asked = Candidates.Select(snap, scan, new Requirements { Tools = true, BestEffort = true }, DateTime.Now);
+            var best = asked.BestEffort.SingleOrDefault();
+            Assert(best != null && best.Model.Id == NvidiaModel && best.Access.Managed && best.Unverified.Contains("tools"),
+                "The NVIDIA model is not a best-effort candidate through the copy: " + string.Join(", ", asked.BestEffort.Select(c => c.Model.Id + "@" + c.Access.Runtime)));
+            var plain = Candidates.Select(snap, scan, new Requirements { Tools = true }, DateTime.Now);
+            Assert(plain.BestEffort.Count == 0 && plain.BestEffortAvailable == 1, "Without consent the best-effort model was listed, or not counted.");
         }
 
         private static void DemoLeavesKeysAlone()

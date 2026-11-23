@@ -16,7 +16,7 @@
       "wsl": { "versions": ["1.x"] },
       "managed": {
         "versions": ["1.5.2"],
-        "providers": ["deepseek", "google", "moonshotai", "nvidia", "openrouter", "vercel-ai-gateway"],
+        "providers": ["cloudflare-workers-ai", "deepseek", "google", "moonshotai", "nvidia", "openrouter", "vercel-ai-gateway"],
         "arguments": {
           "read_only": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--no-skills", "--no-prompt-templates", "--tools", "read,grep,find,ls", "--provider", "{provider}", "--model", "{model}"],
           "modify": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--no-skills", "--no-prompt-templates", "--tools", "read,powershell,edit,write", "--provider", "{provider}", "--model", "{model}"]

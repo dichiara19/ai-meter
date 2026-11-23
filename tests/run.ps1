@@ -21,6 +21,12 @@ try {
         Copy-Item -LiteralPath $_.FullName $copy
         [void]$parameters.EmbeddedResources.Add($copy)
     }
+    # Pi's own model lists for the managed copy, likewise.
+    Get-ChildItem (Join-Path $root 'agents/pi-models/*.json') | ForEach-Object {
+        $copy = Join-Path $resources "pimodels.$($_.Name)"
+        Copy-Item -LiteralPath $_.FullName $copy
+        [void]$parameters.EmbeddedResources.Add($copy)
+    }
     Add-Type -Path $source -CompilerParameters $parameters
 }
 finally { Remove-Item -LiteralPath $resources -Recurse -Force }

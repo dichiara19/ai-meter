@@ -616,6 +616,8 @@ namespace AIMeter
                 access.Version = ManagedPi.Pinned.Version;
                 access.ConfigFolder = ManagedPi.ConfigFolder;
                 access.Shells = ManagedPi.BoundShells;
+                access.ModelsFile = ManagedPi.ModelsFile(provider);
+                access.ModelsFormat = ManagedPi.ModelsFormat;
                 scan.Access.Add(access);
             }
         }

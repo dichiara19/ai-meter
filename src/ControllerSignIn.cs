@@ -74,7 +74,8 @@ namespace AIMeter
         public void RemoveApiKey(ServiceDefinition d)
         {
             ApiKeys.Remove(d.Id);
-            SyncManagedPiKeys();
+            // Taking the key away from AI Meter takes it away from the managed Pi too.
+            if (Settings.ManagedPiServices.Contains(d.Id)) SetManagedPiService(d.Id, false);
             RefreshNow();
         }
 

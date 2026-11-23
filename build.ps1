@@ -112,6 +112,8 @@ function Invoke-Csc([string]$out, [string[]]$extra = @()) {
     $res += @(Get-ChildItem (Join-Path $root 'providers\*') -Include *.json, *.png | ForEach-Object { "/resource:$($_.FullName),providers.$($_.Name)" })
     # Coding agent definitions, likewise (read from the agents folder when running from source).
     $res += @(Get-ChildItem (Join-Path $root 'agents\*.json') | ForEach-Object { "/resource:$($_.FullName),agents.$($_.Name)" })
+    # Pi's own model lists for the release the managed copy is pinned to (agents\pi-models; see src\ManagedPi.cs).
+    $res += @(Get-ChildItem (Join-Path $root 'agents\pi-models\*.json') | ForEach-Object { "/resource:$($_.FullName),pimodels.$($_.Name)" })
     $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
     & "$fw\csc.exe" /nologo /target:winexe /optimize+ /platform:anycpu /langversion:5 `
         "/out:$out" "/win32icon:$(Join-Path $root 'assets\app.ico')" "/win32manifest:$(Join-Path $bin 'app.manifest')" `

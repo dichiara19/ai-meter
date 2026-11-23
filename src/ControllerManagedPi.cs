@@ -109,9 +109,10 @@ namespace AIMeter
 
         /// <summary>
         /// Bring the managed Pi's key file in step with the keys AI Meter has now and the services chosen, and its shell
-        /// with the Git Bash found now: after a key was saved or removed, at start, and after every reading of the
-        /// services, so that a key the user changed in another app, where AI Meter only finds it, does not stay behind
-        /// here. In the background, as finding a key can read other apps' files; one run at a time.
+        /// with the Git Bash found now: after a key was saved, and after every reading of the services (the first one
+        /// soon after the start, when AI Meter knows whether WSL runs), so that a key the user changed in another app,
+        /// where AI Meter only finds it, does not stay behind here. In the background, as finding a key can read other
+        /// apps' files; one run at a time.
         /// </summary>
         internal void SyncManagedPiKeys()
         {
