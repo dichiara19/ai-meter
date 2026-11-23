@@ -18,12 +18,12 @@
         "versions": ["1.5.2"],
         "providers": ["deepseek", "google", "moonshotai", "nvidia", "openrouter", "vercel-ai-gateway"],
         "arguments": {
-          "read_only": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--tools", "read,grep,find,ls", "--provider", "{provider}", "--model", "{model}"],
-          "modify": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--tools", "read,powershell,edit,write", "--provider", "{provider}", "--model", "{model}"]
+          "read_only": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--no-skills", "--no-prompt-templates", "--tools", "read,grep,find,ls", "--provider", "{provider}", "--model", "{model}"],
+          "modify": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--no-skills", "--no-prompt-templates", "--tools", "read,powershell,edit,write", "--provider", "{provider}", "--model", "{model}"]
         },
         "alternatives": {
           "git_bash": {
-            "modify": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--tools", "read,bash,edit,write", "--provider", "{provider}", "--model", "{model}"]
+            "modify": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--no-skills", "--no-prompt-templates", "--tools", "read,bash,edit,write", "--provider", "{provider}", "--model", "{model}"]
           }
         },
         "commands": { "read_only": "none", "modify": "powershell" },
@@ -33,7 +33,7 @@
           "outcome": "stopReason of the last assistant message (stop, length, error, aborted); the exit code stays 0 on those, and is 1 when Pi cannot make a request at all (no key for the provider): then there is no agent_settled event and the reason is on stderr"
         },
         "notes": [
-          "This is the copy of Pi that AI Meter keeps (ADR 0004), with its own configuration folder: it never reads the user's ~/.pi.",
+          "This is the copy of Pi that AI Meter keeps (ADR 0004), with its own configuration folder: it never reads the user's ~/.pi, and it starts without skills and prompt templates, which Pi would otherwise also take from ~/.agents and name to the model.",
           "With these arguments Pi runs commands through its PowerShell tool and has no bash tool. The git_bash alternative gives it bash instead and is offered only while the copy's settings name the bash.exe of Git for Windows (shellPath): Pi then uses that file alone, and never searches for another, such as WSL's.",
           "PI_OFFLINE keeps Pi from downloading anything while it works: without ripgrep or fd on PATH, its grep and find tools fail with an error rather than fetch them.",
           "Pi's tools are not confined to the task's folder: like any agent run as the user, it can read the user's files, the copy's own key file among them. Do not delegate a task you would not let read them.",

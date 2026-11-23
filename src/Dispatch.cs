@@ -80,8 +80,11 @@ namespace AIMeter
                 if (alternative.Value.TryGetValue(plan.Mode, out other)) plan.Alternatives[alternative.Key] = other.Select(a => Fill(a, values)).ToList();
             }
             // A plan agent starts from an empty environment, so no API key or base URL can make it bill the API (ADR 0003).
-            plan.CleanEnvironment = access.Plan || kind.Dispatch.CleanEnvironment;
-            plan.EnvironmentPolicy = plan.CleanEnvironment ? "clean" : place.EnvironmentPolicy;
+            // A policy this version does not know is refused, never read as "inherit everything".
+            string unknownPolicy = new[] { kind.Dispatch.EnvironmentPolicy, place.EnvironmentPolicy }.FirstOrDefault(p => p != null && p != "clean" && p != "no_credentials");
+            if (unknownPolicy != null) return plan.Refuse(access.Runtime + "'s definition asks for an environment policy this version of AI Meter does not know: " + unknownPolicy);
+            plan.CleanEnvironment = access.Plan || kind.Dispatch.CleanEnvironment || place.EnvironmentPolicy == "clean";
+            plan.EnvironmentPolicy = plan.CleanEnvironment ? "clean" : place.EnvironmentPolicy ?? kind.Dispatch.EnvironmentPolicy;
             if (access.Plan && kind.Plan == null) return plan.Refuse(kind.Name + " has no plan in its definition");
             // The program's arguments for one run of the agent with these arguments, in a folder (inside WSL only).
             Func<string, List<string>, List<string>> wrap;

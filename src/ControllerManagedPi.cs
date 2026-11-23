@@ -135,6 +135,9 @@ namespace AIMeter
         /// </summary>
         private void SyncManagedPiKeysWithRetries(Settings settings)
         {
+            // Another AI Meter of the same user (a second Windows session) may have changed the choices: its are newer.
+            var elsewhere = Settings.ManagedPiServicesSavedElsewhere();
+            if (elsewhere != null) settings.ManagedPiServices = elsewhere;
             foreach (int seconds in SyncRetrySeconds)
             {
                 if (seconds > 0) Thread.Sleep(seconds * 1000);

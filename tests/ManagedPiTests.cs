@@ -42,6 +42,10 @@ namespace AIMeter
             test("A key change is announced before the key file is touched, and a change left half-way keeps the count odd until finished", () => Isolated(RevisionSurvivesFailures));
             test("Remove keeps only the key file's count, raised past any odd value, and a new copy continues from it", () => Isolated(RemoveKeepsOnlyTheCount));
             test("A saved key that cannot be read counts as none, and Sync goes on without it", () => Isolated(UnreadableKeyCountsAsNone));
+            test("The managed Pi starts without skills and prompt templates in every argument list; Pi in WSL keeps the shared ones", () => Isolated(ManagedArgumentsSkipSkills));
+            test("An unknown environment policy is refused, never read as inheritance; known ones pass through", () => Isolated(UnknownEnvironmentPolicyIsRefused));
+            test("Ticked services saved by another AI Meter are read once, and never this process's own or a failed save", () => Isolated(ServicesSavedElsewhere));
+            test("The managed Pi lives in the local shared folder: the test folder, or the profile's .aimeter in the Store build", () => Isolated(LocalSharedFolder));
         }
 
         private static void Translations()
@@ -1137,6 +1141,160 @@ namespace AIMeter
                 security.RemoveAccessRule(deny);
                 File.SetAccessControl(saved, security);
             }
+        }
+
+        private static void ManagedArgumentsSkipSkills()
+        {
+            string fakeBash = FakeGitBash();
+            ManagedPi.LocateGitBash = () => fakeBash;
+            InstallWithKeys();
+            var router = ManagedAccess(ScanOf(Home(), false), "openrouter");
+            var readOnly = Dispatch.Describe(router, Model, Dispatch.ReadOnly, @"C:\w", "windows", null, router.Version);
+            var modify = Dispatch.Describe(router, Model, Dispatch.Modify, @"C:\w", "windows", null, router.Version);
+            Assert(readOnly.Supported && modify.Supported && modify.Alternatives.ContainsKey("git_bash"), "The managed copy was not described with its alternative.");
+            var lists = new Dictionary<string, List<string>> { { "read_only", readOnly.Arguments }, { "modify", modify.Arguments }, { "git_bash", modify.Alternatives["git_bash"] } };
+            foreach (var list in lists)
+                Assert(list.Value.Contains("--no-skills") && list.Value.Contains("--no-prompt-templates"),
+                    "The managed copy's " + list.Key + " arguments load skills or prompt templates: " + string.Join(" ", list.Value));
+
+            var wsl = Candidates.Access("openrouter", "pi", "wsl", RouterKey);
+            wsl.Provider = "openrouter";
+            wsl.Program = "/home/me/.npm-global/bin/pi";
+            foreach (var mode in new[] { Dispatch.ReadOnly, Dispatch.Modify })
+            {
+                var inWsl = Dispatch.Describe(wsl, Model, mode, "/home/me/project", "wsl", "Ubuntu-24.04", "1.4.0");
+                Assert(inWsl.Supported && !inWsl.Arguments.Contains("--no-skills") && !inWsl.Arguments.Contains("--no-prompt-templates"),
+                    "Pi in WSL was given the managed copy's arguments: " + string.Join(" ", inWsl.Arguments));
+            }
+        }
+
+        /// <summary>A definition of an agent on Windows, with an environment policy at the dispatch level, the place's, or neither.</summary>
+        private static string PolicyAgent(string id, string dispatchPolicy, string placePolicy)
+        {
+            return "{ \"id\": \"" + id + "\", \"name\": \"Policy " + id + "\", \"programs\": { \"windows\": [\"" + id + "\"] }, \"folders\": [\"." + id + "\"], " +
+                "\"dispatch\": { " + (dispatchPolicy == null ? "" : "\"environment_policy\": \"" + dispatchPolicy + "\", ") +
+                "\"places\": { \"windows\": { \"versions\": [\"1.x\"]" + (placePolicy == null ? "" : ", \"environment_policy\": \"" + placePolicy + "\"") + " } }, " +
+                "\"arguments\": { \"read_only\": [\"--model\", \"{model}\"], \"modify\": [\"--model\", \"{model}\"] } } }";
+        }
+
+        private static RuntimeAccess PolicyAccess(string id)
+        {
+            var access = Candidates.Access("openrouter", id, "windows", RouterKey);
+            access.Provider = "openrouter";
+            access.Program = @"C:\tools\" + id + ".exe";
+            return access;
+        }
+
+        private static void UnknownEnvironmentPolicyIsRefused()
+        {
+            NetworkBackoff.Clear();
+            string folder = Agents.UserFolder;
+            Directory.CreateDirectory(folder);
+            var agents = new Dictionary<string, string>
+            {
+                { "policyplace", PolicyAgent("policyplace", null, "no_credentails") },
+                { "policydispatch", PolicyAgent("policydispatch", "no_credentails", null) },
+                { "policyclean", PolicyAgent("policyclean", null, "clean") },
+                { "policykept", PolicyAgent("policykept", "no_credentials", null) },
+            };
+            try
+            {
+                foreach (var a in agents) File.WriteAllText(Path.Combine(folder, a.Key + ".json"), a.Value);
+                Agents.Reload();
+                foreach (var a in agents) Assert(Agents.Get(a.Key) != null, "The test definition " + a.Key + " did not load.");
+
+                foreach (var id in new[] { "policyplace", "policydispatch" })
+                {
+                    var refused = Dispatch.Describe(PolicyAccess(id), Model, Dispatch.ReadOnly, @"C:\w", "windows", null, "1.0.0");
+                    Assert(!refused.Supported && refused.Reason != null && refused.Reason.Contains("no_credentails"),
+                        "A misspelt environment policy (" + id + ") was not refused by name: " + (refused.Supported ? "supported, policy " + (refused.EnvironmentPolicy ?? "null") : refused.Reason));
+                }
+                var clean = Dispatch.Describe(PolicyAccess("policyclean"), Model, Dispatch.ReadOnly, @"C:\w", "windows", null, "1.0.0");
+                Assert(clean.Supported && clean.CleanEnvironment && clean.EnvironmentPolicy == "clean", "A place's clean policy was not applied: " + (clean.Reason ?? clean.EnvironmentPolicy));
+                var kept = Dispatch.Describe(PolicyAccess("policykept"), Model, Dispatch.ReadOnly, @"C:\w", "windows", null, "1.0.0");
+                Assert(kept.Supported && !kept.CleanEnvironment && kept.EnvironmentPolicy == "no_credentials", "A dispatch-level no_credentials policy was not passed through: " + (kept.Reason ?? kept.EnvironmentPolicy ?? "null"));
+
+                // Over MCP the refusal is an unsupported description, as for any other.
+                var scan = new RuntimeScan();
+                scan.Found.Add(new RuntimePlace { Runtime = "policyplace", Where = "windows" });
+                scan.Access.Add(PolicyAccess("policyplace"));
+                var snap = Fixture();
+                var server = new McpServer(() => snap, () => false, null, null, () => scan, new LeaseBook(null));
+                string raw;
+                var described = Call(server, "describe_dispatch", "{\"service\":\"openrouter\",\"model\":\"" + Model + "\",\"runtime\":\"policyplace\",\"workspace\":\"C:\\\\w\"}", out raw);
+                Assert(described.ContainsKey("supported") && !Json.Bool(described, "supported") && Json.Str(described, "reason").Contains("no_credentails"),
+                    "describe_dispatch did not refuse a misspelt environment policy: " + raw);
+            }
+            finally
+            {
+                foreach (var a in agents) File.Delete(Path.Combine(folder, a.Key + ".json"));
+                Agents.Reload();
+            }
+        }
+
+        private static void ServicesSavedElsewhere()
+        {
+            string file = Path.Combine(Settings.Folder, "settings.json");
+            string previous = File.Exists(file) ? File.ReadAllText(file) : null;
+            try
+            {
+                Assert(Settings.Current.Save() && Settings.ManagedPiServicesSavedElsewhere() == null, "This process's own save was taken for a change made elsewhere.");
+                Settings.Load();
+                Assert(Settings.ManagedPiServicesSavedElsewhere() == null, "This process's own reading was taken for a change made elsewhere.");
+
+                // Another AI Meter writes the file: read once, then not again.
+                Action<string> writeElsewhere = text =>
+                {
+                    DateTime noted = File.GetLastWriteTimeUtc(file);
+                    File.WriteAllText(file, text, new UTF8Encoding(false));
+                    File.SetLastWriteTimeUtc(file, noted.AddMinutes(1));
+                };
+                writeElsewhere("{\"FirstRunDone\":true,\"ManagedPiServices\":[\"gemini\",\"openrouter\"]}");
+                var elsewhere = Settings.ManagedPiServicesSavedElsewhere();
+                Assert(elsewhere != null && elsewhere.SequenceEqual(new[] { "gemini", "openrouter" }), "The services saved elsewhere were not read: " + (elsewhere == null ? "null" : string.Join(", ", elsewhere)));
+                Assert(Settings.ManagedPiServicesSavedElsewhere() == null, "The same change was read twice.");
+
+                // A save of this process that failed leaves its stale file alone, not a change made elsewhere.
+                Assert(Settings.Current.Save(), "The settings could not be saved.");
+                using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None))
+                    Assert(!Settings.Current.Save(), "A save over a held file reported success.");
+                Assert(Settings.ManagedPiServicesSavedElsewhere() == null, "A failed save was taken for a change made elsewhere.");
+
+                // An unreadable file gives nothing, and the change is read once the file is free.
+                writeElsewhere("{\"FirstRunDone\":true,\"ManagedPiServices\":[\"gemini\"]}");
+                using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None))
+                    Assert(Settings.ManagedPiServicesSavedElsewhere() == null, "An unreadable settings file gave services.");
+                elsewhere = Settings.ManagedPiServicesSavedElsewhere();
+                Assert(elsewhere != null && elsewhere.SequenceEqual(new[] { "gemini" }), "A change was lost because the file was held for a moment.");
+
+                // A file that is not valid gives nothing, and does not throw.
+                writeElsewhere("{\"FirstRunDone\":true,\"ManagedPiServices\":[");
+                List<string> invalid;
+                try { invalid = Settings.ManagedPiServicesSavedElsewhere(); }
+                catch (Exception e) { throw new Exception("An invalid settings file made ManagedPiServicesSavedElsewhere throw: " + e.GetType().Name + ": " + e.Message); }
+                Assert(invalid == null, "An invalid settings file gave services: " + (invalid == null ? "" : string.Join(", ", invalid)));
+            }
+            finally
+            {
+                if (previous == null) File.Delete(file); else File.WriteAllText(file, previous, new UTF8Encoding(false));
+                File.Delete(file + ".bad");
+                File.Delete(file + ".tmp");
+                Settings.Load();   // Notes the restored file's time and clears any untouched-file state.
+            }
+        }
+
+        private static void LocalSharedFolder()
+        {
+            Assert(Settings.LocalSharedFolder == Settings.Folder, "Under tests the local shared folder is not the test folder: " + Settings.LocalSharedFolder);
+            Assert(ManagedPi.Root.StartsWith(Settings.LocalSharedFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "The copy is not under the local shared folder.");
+            try
+            {
+                Native.PackagedOverride = true;
+                string store = Path.Combine(Probe.Home, ".aimeter");
+                Assert(Settings.LocalSharedFolder == store, "The Store build's local shared folder is not the profile's .aimeter: " + Settings.LocalSharedFolder);
+                Assert(ManagedPi.Root.StartsWith(store + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "The Store build's copy is not under the profile's .aimeter: " + ManagedPi.Root);
+            }
+            finally { Native.PackagedOverride = false; }
         }
 
         private static void DemoLeavesKeysAlone()

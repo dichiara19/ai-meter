@@ -187,6 +187,25 @@ namespace AIMeter
         public static string SharedFolder { get { return Native.IsPackaged ? Path.Combine(Probe.Home, ".aimeter") : Folder; } }
 
         /// <summary>
+        /// The folder for files that other programs must read or start and that must stay on this PC: the managed Pi,
+        /// whose key file is plain text. Folder is in the roaming part of the profile, which a domain account can copy
+        /// to a server and to other PCs; this one is in the local part. The Store build uses the user's profile, as
+        /// for SharedFolder.
+        /// </summary>
+        public static string LocalSharedFolder
+        {
+            get
+            {
+                if (Native.IsPackaged) return Path.Combine(Probe.Home, ".aimeter");
+#if AIMETER_TEST
+                return Folder;
+#else
+                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AIMeter");
+#endif
+            }
+        }
+
+        /// <summary>
         /// The data folder as File Explorer can show it. In the Store build, files that AI Meter creates in AppData land
         /// in the package's private copy of AppData (write virtualisation): AI Meter sees them in Folder, Explorer only
         /// there. Files that existed before, from another build of AI Meter, stay in Folder and are changed in place.
@@ -222,6 +241,7 @@ namespace AIMeter
             keepFileUntouched = false;
             if (!File.Exists(FilePath)) return new Settings();
             string text = ReadWithRetries(FilePath);
+            NoteFileTime();
             if (text == null)
             {
                 keepFileUntouched = true;
@@ -292,11 +312,46 @@ namespace AIMeter
                 File.WriteAllText(tmp, Json.Serialize(this), new UTF8Encoding(false));
                 if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
                 else File.Move(tmp, FilePath);
+                NoteFileTime();
                 return true;
             }
             catch (IOException ex) { Program.LogError("settings-save", ex); }
             catch (UnauthorizedAccessException ex) { Program.LogError("settings-save", ex); }
             return false;
+        }
+
+        /// <summary>When this process last read or wrote settings.json, as the file's own time; see ManagedPiServicesSavedElsewhere.</summary>
+        private static DateTime fileWrittenAt;
+
+        private static void NoteFileTime()
+        {
+            try { fileWrittenAt = File.GetLastWriteTimeUtc(FilePath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        /// <summary>
+        /// The managed Pi's ticked services as another AI Meter of the same user saved them since this one last read
+        /// or wrote settings.json; null when no one else wrote the file, or it cannot be read. Two sessions of one
+        /// Windows account can each run AI Meter, and both keep the same key file in step: without this, the one that
+        /// did not see a key withdrawn would copy it back from the choices it still has in memory. A save of this
+        /// process that failed leaves the file's time as it was, so its own stale file is never taken for a change
+        /// made elsewhere.
+        /// </summary>
+        internal static System.Collections.Generic.List<string> ManagedPiServicesSavedElsewhere()
+        {
+            try
+            {
+                if (keepFileUntouched || !File.Exists(FilePath)) return null;
+                DateTime written = File.GetLastWriteTimeUtc(FilePath);
+                if (written == fileWrittenAt) return null;
+                var stored = Json.Parse(File.ReadAllText(FilePath, Encoding.UTF8));
+                if (stored == null) return null;
+                fileWrittenAt = written;
+                return new System.Collections.Generic.List<string>(ServiceDefinition.Strings(stored, "ManagedPiServices"));
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
         }
 
         /// <summary>Windows' default WSL distribution, unless it is Docker Desktop's; "" without one.</summary>

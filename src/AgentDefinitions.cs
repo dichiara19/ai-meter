@@ -192,6 +192,8 @@ namespace AIMeter
         /// plan agents, so that no API key, base URL or session variable of the coordinator reaches them (ADR 0003).
         /// </summary>
         public bool CleanEnvironment;
+        /// <summary>The definition's "environment_policy" as written; Dispatch refuses a value it does not know.</summary>
+        public string EnvironmentPolicy;
 
         public static AgentDispatch FromJson(Dictionary<string, object> d)
         {
@@ -200,6 +202,7 @@ namespace AIMeter
                 Arguments = ArgumentsFrom(Json.Obj(d, "arguments")) ?? new Dictionary<string, List<string>>(),
                 Environment = Json.Obj(d, "environment") ?? new Dictionary<string, object>(),
                 CleanEnvironment = Json.Str(d, "environment_policy") == "clean",
+                EnvironmentPolicy = Json.Str(d, "environment_policy"),
             };
             var places = Json.Obj(d, "places");
             foreach (var where in new[] { "windows", "wsl", ManagedPi.Place })
@@ -213,7 +216,7 @@ namespace AIMeter
                     Arguments = ArgumentsFrom(Json.Obj(p, "arguments")),
                     Environment = Json.Obj(p, "environment"),
                     Providers = ServiceDefinition.Strings(p, "providers").ToArray(),
-                    EnvironmentPolicy = Json.Str(p, "environment_policy") == "no_credentials" ? "no_credentials" : null,
+                    EnvironmentPolicy = Json.Str(p, "environment_policy"),
                 };
                 place.Notes.AddRange(ServiceDefinition.Strings(p, "notes"));
                 AddStrings(place.Output, Json.Obj(p, "output"));
@@ -269,8 +272,10 @@ namespace AIMeter
         /// </summary>
         public readonly Dictionary<string, Dictionary<string, List<string>>> Alternatives = new Dictionary<string, Dictionary<string, List<string>>>();
         /// <summary>
-        /// "no_credentials" when the agent must not inherit the variables of the plugin's environment that hold keys,
-        /// tokens or service addresses (the managed copy: it has its own key file); null to inherit them all.
+        /// The place's "environment_policy" as written: "no_credentials" when the agent must not inherit the variables
+        /// of the plugin's environment that hold keys, tokens or service addresses (the managed copy: it has its own
+        /// key file), "clean" for an empty environment, null to inherit them all. Any other value is kept as it is,
+        /// and Dispatch refuses it: a misspelt policy must not turn into full inheritance.
         /// </summary>
         public string EnvironmentPolicy;
         /// <summary>For a managed copy: the provider ids its build has built in, so a key alone is enough to call them.</summary>

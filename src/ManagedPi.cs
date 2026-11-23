@@ -14,7 +14,7 @@ namespace AIMeter
     /// official standalone build for Windows, one pinned release, for tasks on Windows folders where the user has no
     /// Pi of their own.
     ///
-    /// Layout, under the folder other programs can read (Settings.SharedFolder), outside PATH:
+    /// Layout, under the folder other programs can read and that stays on this PC (Settings.LocalSharedFolder), outside PATH:
     ///   managed\pi\{version}\pi.exe   the unpacked release, moved into place only when complete;
     ///   managed\pi\config\            the copy's own configuration (PI_CODING_AGENT_DIR), so it never reads or writes
     ///                                 the user's ~/.pi; auth.json there holds the keys the user chose to copy.
@@ -78,7 +78,7 @@ namespace AIMeter
 
         public static bool Offered { get { return !Program.Demo && (OfferedInStoreBuild || !Native.IsPackaged); } }
 
-        public static string Root { get { return Path.Combine(Settings.SharedFolder, "managed", "pi"); } }
+        public static string Root { get { return Path.Combine(Settings.LocalSharedFolder, "managed", "pi"); } }
         public static string ConfigFolder { get { return Path.Combine(Root, "config"); } }
         public static string ProgramPath { get { return ProgramIn(Pinned); } }
         private static string KeyFile { get { return Path.Combine(ConfigFolder, "auth.json"); } }
