@@ -36,6 +36,9 @@ namespace AIMeter
             test("Saving the settings reports whether the file was written", () => Isolated(SavingSettingsReportsFailure));
             test("The managed Pi refuses WSL folders in their extended form and inherits no credentials", () => Isolated(ExtendedWslPathsAndEnvironmentPolicy));
             test("Installing over an older release brings back the keys of the services already ticked", () => Isolated(InstallOverOlderReleaseRestoresKeys));
+            test("The key file's revision goes up by one at each change of the file and stays when a sync changes nothing", () => Isolated(KeyRevisionCountsChanges));
+            test("With sample data the managed Pi is not offered and Sync leaves its key file as it is", () => Isolated(DemoLeavesKeysAlone));
+            test("Remove reports choices it could not save, after the keys and the copy are gone", () => Isolated(RemoveReportsUnsavedChoices));
         }
 
         private static void Translations()
@@ -570,9 +573,21 @@ namespace AIMeter
                 "describe_dispatch lacks the copy's shell or configuration folder.");
             var alternative = Items(described, "alternatives").Single();
             Assert(Json.Str(alternative, "shell") == "git_bash" && ((IList)alternative["arguments"]).Cast<string>().Contains("read,bash,edit,write"), "describe_dispatch lacks the git_bash alternative.");
+            // Only with managed: true: a plugin that does not know the copy never gets it.
             var implicitly = Call(server, "describe_dispatch", candidateArgs + "}", out raw);
             answers.Add(raw);
-            Assert(Json.Bool(implicitly, "managed") && Json.Str(implicitly, "commands") == "none", "Without managed, the only Pi here was not described read-only.");
+            Assert(Json.Str(implicitly, "error") != null && Json.Str(implicitly, "error").Contains("No usable Pi is set up here") && !implicitly.ContainsKey("program"),
+                "Without managed, describe_dispatch described the copy: " + raw);
+            var unclaimed = Call(server, "claim_capacity", candidateArgs + ",\"client\":\"claude-code\"}", out raw);
+            answers.Add(raw);
+            Assert(Json.Str(unclaimed, "error") != null && Json.Str(unclaimed, "error").Contains("No usable Pi is set up here") && Json.Str(unclaimed, "lease_id") == null,
+                "Without managed, claim_capacity leased the copy: " + raw);
+            var tools = Items(Json.Obj(Json.Parse(server.Handle("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}")), "result"), "tools");
+            foreach (var name in new[] { "describe_dispatch", "claim_capacity" })
+            {
+                var properties = Json.Obj(Json.Obj(tools.Single(t => Json.Str(t, "name") == name), "inputSchema"), "properties");
+                Assert(properties != null && properties.ContainsKey("managed"), name + "'s schema does not list managed.");
+            }
             var refused = Call(server, "describe_dispatch", candidateArgs + ",\"managed\":true,\"workspace\":\"\\\\\\\\wsl.localhost\\\\Ubuntu\\\\home\\\\me\"}", out raw);
             Assert(refused.ContainsKey("supported") && !Json.Bool(refused, "supported") && Json.Str(refused, "reason").Contains("Windows folders only"), "A workspace inside WSL was described: " + raw);
             var notMine = Call(server, "describe_dispatch", candidateArgs + ",\"managed\":false}", out raw);
@@ -814,7 +829,7 @@ namespace AIMeter
             Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey) && OffersManaged("openrouter"), "A plain key was not copied.");
 
             // Pi would run a value starting with "!" as a command, and may read others from the environment.
-            var notPlain = new[] { "!echo sk-or-v1-0123456789", "$OPENROUTER_API_KEY", "sk-or v1-0123456789", "sk-or\tv1-0123456789", "sk-or\nv1-0123456789",
+            var notPlain = new[] { "!echo sk-or-v1-0123456789", "$OPENROUTER_API_KEY", "prefix-${LABEL}-suffix", "abc$$def12", "sk-or-v1-0123456789$", "sk-or v1-0123456789", "sk-or\tv1-0123456789", "sk-or\nv1-0123456789",
                 "sk-or\u0001v1-0123456789", "sk-or\u00a0v1-0123456789", "1234567" };
             foreach (var bad in notPlain)
             {
@@ -939,6 +954,67 @@ namespace AIMeter
             Install(Good, ReleaseOf(Good));
             Assert(!Directory.Exists(older) && ManagedPi.OtherVersionInstalled == null, "The older release was left.");
             Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey) && OffersManaged("openrouter"), "The ticked service's key did not come back after the installation.");
+        }
+
+        /// <summary>The number in config\keys-revision; 0 when the file is missing.</summary>
+        private static long Revision()
+        {
+            string file = Path.Combine(ManagedPi.ConfigFolder, "keys-revision");
+            return File.Exists(file) ? long.Parse(File.ReadAllText(file).Trim(), System.Globalization.CultureInfo.InvariantCulture) : 0;
+        }
+
+        private static void KeyRevisionCountsChanges()
+        {
+            var settings = Settings.Current;
+            Install(Good, ReleaseOf(Good));
+            ApiKeys.Save("openrouter", RouterKey);
+            Assert(Revision() == 0, "A copy without keys has a revision.");
+            Assert(ManagedPi.Sync(settings) && Revision() == 0, "A sync with nothing ticked and no key file moved the revision.");
+
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            Assert(ManagedPi.Sync(settings) && File.Exists(KeyFile) && Revision() == 1, "Writing the key file did not count one change: " + Revision());
+            Assert(ManagedPi.Sync(settings) && Revision() == 1, "A sync that changed nothing moved the revision: " + Revision());
+
+            ApiKeys.Save("openrouter", RouterKey + "-rotated");
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey + "-rotated") && Revision() == 2, "Rewriting the key file did not count one change: " + Revision());
+
+            settings.ManagedPiServices = new List<string>();
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && Revision() == 3, "Deleting the key file did not count one change: " + Revision());
+            Assert(ManagedPi.Sync(settings) && Revision() == 3, "A sync with the key file already gone moved the revision: " + Revision());
+        }
+
+        private static void DemoLeavesKeysAlone()
+        {
+            var settings = Settings.Current;
+            InstallWithKeys();
+            byte[] before = File.ReadAllBytes(KeyFile);
+            long revision = Revision();
+            bool demo = Program.Demo;
+            try
+            {
+                Program.Demo = true;
+                Assert(!ManagedPi.Offered && !ManagedPi.Installed, "With sample data the managed copy is offered or installed.");
+                settings.ManagedPiServices = new List<string> { "openrouter" };
+                ApiKeys.Save("openrouter", RouterKey + "-rotated");
+                Assert(ManagedPi.Sync(settings), "Sync failed with sample data.");
+                Assert(File.ReadAllBytes(KeyFile).SequenceEqual(before) && Revision() == revision, "With sample data Sync changed the copy's key file.");
+                settings.ManagedPiServices = new List<string>();
+                Assert(ManagedPi.Sync(settings) && File.ReadAllBytes(KeyFile).SequenceEqual(before), "With sample data Sync deleted the copy's key file.");
+            }
+            finally { Program.Demo = demo; }
+        }
+
+        private static void RemoveReportsUnsavedChoices()
+        {
+            var settings = Settings.Current;
+            InstallWithKeys();
+            File.WriteAllText(PendingKeyFile, "half");
+            string file = Path.Combine(Settings.Folder, "settings.json");
+            Assert(settings.Save(), "The settings could not be saved before the test.");
+            using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None))
+                Fails<ManagedPi.InstallException>(() => ManagedPi.Remove(settings), "settings that could not be saved");
+            Assert(!File.Exists(KeyFile) && !File.Exists(PendingKeyFile) && !Directory.Exists(ManagedPi.Root), "Remove left the keys or the copy when the settings could not be saved.");
+            Assert(settings.ManagedPiServices.Count == 0 && !ManagedPi.Installed, "Remove did not clear the choices in memory when the settings could not be saved.");
         }
     }
 }

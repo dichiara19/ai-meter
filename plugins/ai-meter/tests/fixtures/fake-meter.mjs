@@ -27,6 +27,7 @@ const tools = {
   }),
   describe_dispatch: (args) => {
     if (readings-- > 0) return { error: "AI Meter is still reading the first data; try again in a few seconds." };
+    if (onlyManaged(args)) return { error: NO_OWN_PI };
     const error = (scenario.errors || {})[args.runtime + "@" + args.where];
     if (error) return { error };
     if ((scenario.unsupported || []).includes(args.runtime + "@" + args.where)) return { supported: false, reason: "not verified here", runtime: args.runtime, where: args.where };
@@ -50,6 +51,7 @@ const tools = {
     };
   },
   claim_capacity: (args) => {
+    if (onlyManaged(args)) return { error: NO_OWN_PI };
     const onPlan = PLAN_AGENTS.includes(args.runtime);
     const pool = args.service + (onPlan ? ":plan" : ":free");
     if ((scenario.refuse || []).includes(pool)) return { refused: true, pool, headroom: { blocking: { reason: onPlan ? "plan_reserve" : "leased" } } };
@@ -61,6 +63,18 @@ const tools = {
   release_capacity: (args) => ({ lease_id: args.lease_id, released: true }),
   get_limits: (args) => ({ services: [{ service: args.service, read_at: "2026-11-02T14:00:00+01:00", limits: [{ name: "Session 5 h", kind: "5h", remaining_percent: 55, resets_at: "2026-11-02T15:00:00+01:00" }] }] }),
 };
+
+/**
+ * As the server does, a call without managed: true means the user's own agent: one that matches only a managed
+ * candidate (claim_capacity names no place, so any place matches) gets the server's error instead of the managed copy.
+ */
+const NO_OWN_PI = "No usable Pi is set up here for this service; AI Meter's managed Pi is used only when managed: true is passed.";
+function onlyManaged(args) {
+  if (args.managed === true) return false;
+  const same = (c) => c.service === args.service && c.model === args.model && c.runtime.name === args.runtime && (!args.where || c.runtime.where === args.where);
+  const all = [...(scenario.candidates || []), ...(scenario.free_tier || []), ...(scenario.best_effort || [])];
+  return all.some((c) => same(c) && c.runtime.managed) && !all.some((c) => same(c) && !c.runtime.managed);
+}
 
 // Plan agents (ADR 0003): AI Meter describes them with a clean environment, a sign-in check and the plan's billing.
 const PLAN_AGENTS = ["claude", "codex"];

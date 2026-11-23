@@ -191,7 +191,7 @@ namespace AIMeter
                          { "runtime", Property("string", "The candidate's runtime, such as pi or opencode.") },
                          { "where", Enum("The candidate's place.", "windows", "wsl") },
                          { "distro", Property("string", "The candidate's WSL distribution, when it has one.") },
-                         { "managed", Property("boolean", "The candidate's runtime.managed, when it has it: true for the copy of Pi that AI Meter keeps, false for the user's own installation. Omitted: the user's own first.") },
+                         { "managed", Property("boolean", "The candidate's runtime.managed, when it has it: true for the copy of Pi that AI Meter keeps, which is described only when asked for so; false or omitted for the user's own installation.") },
                          { "mode", Enum("read_only (default): the agent can read but not change files. modify: it can change files; run it in a new Git worktree.", Dispatch.ReadOnly, Dispatch.Modify) },
                          { "workspace", Property("string", "The folder the task works in, as seen from where the plugin runs. A placeholder when omitted.") },
                          { "from", Enum("Where the plugin that starts the agent runs (default windows).", "windows", "wsl") },
@@ -206,6 +206,7 @@ namespace AIMeter
                          { "service", Property("string", "The candidate's service.") },
                          { "model", Property("string", "The candidate's model id.") },
                          { "runtime", Property("string", "The candidate's runtime.") },
+                         { "managed", Property("boolean", "The candidate's runtime.managed, when it has it: true for the copy of Pi that AI Meter keeps. Required for it, as in describe_dispatch.") },
                          { "ttl_seconds", Property("integer", "How long the lease lasts without renewal: default 1800, at most 7200.") },
                          { "client", Property("string", "A label for whoever claims, such as claude-code or codex.") },
                          { "coordinator", Property("string", "For a plan candidate: the service the coordinator runs on. Required for plans; the plan's windows are checked again.") },
@@ -724,15 +725,16 @@ namespace AIMeter
             if (free == null) return error("This model is not in the service's current model list; call list_candidates first.");
             if (agent.Dispatch == null) return error(agent.Name + " is not supported for delegation yet: no way to start it has been verified.");
             string where = Json.Str(args, "where"), distro = Json.Str(args, "distro");
-            // Without "managed", the user's own installation is described first, then the copy AI Meter keeps.
-            bool? managed = args.ContainsKey("managed") ? Json.Bool(args, "managed") : (bool?)null;
+            // The copy AI Meter keeps is described and leased only when asked for by name: a plugin that does not know
+            // it (and so would start it without its environment policy and key redaction) never gets it.
+            bool managed = Json.Bool(args, "managed");
             var scan = runtimes();
-            Func<string, string, bool, bool> here = (w, d, m) => (where == null || w == where) && (distro == null || d == distro) && (managed == null || m == managed);
+            Func<string, string, bool, bool> here = (w, d, m) => (where == null || w == where) && (distro == null || d == distro) && m == managed;
             if (!scan.Found.Any(f => f.Runtime == runtime && here(f.Where, f.Distro, f.Managed)))
                 return error("No usable " + agent.Name + " is set up here" + (where == "wsl" ? " in WSL" : where == "windows" ? " on Windows" : "") +
                              " (WSL counts only while it runs); list_candidates gives the runtimes found, and runtimes.unsupported why others cannot be used.");
             var access = scan.Access.Where(a => !a.Plan && a.Service == service && a.Runtime == runtime && here(a.Where, a.Distro, a.Managed))
-                .OrderBy(a => a.Managed ? 1 : 0).ThenBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).FirstOrDefault();
+                .OrderBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).FirstOrDefault();
             // The managed copy's keys were copied by the user's choice, so they are known with key discovery off too.
             if (access == null && scan.KeyDiscoveryOff) return error("Key discovery is off in AI Meter's settings, so it cannot tell which keys " + agent.Name + " holds.");
             if (access == null) return error(agent.Name + " has no key of its own for " + service + " here; call list_candidates first.");

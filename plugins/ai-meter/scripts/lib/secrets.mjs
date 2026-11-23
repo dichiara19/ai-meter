@@ -8,12 +8,13 @@
 //
 // This means the plugin reads the managed copy's key file, which it otherwise never touches (ADR 0004 keeps the keys
 // with AI Meter). It reads it only to remove the keys from what it returns: once before the agent starts and once after
-// it ends, so that a key added or rotated meanwhile is covered too. The keys are held in memory for the job only: never
-// written to job.json, to a log or to an error message, and never sent anywhere.
+// it ends, so that a key added or rotated meanwhile is covered too, each time with the file's revision counter, which
+// says whether a key could have come and gone between the two readings. The keys are held in memory for the job only:
+// never written to job.json, to a log or to an error message, and never sent anywhere.
 //
-// It fails closed. A missing file means the copy has no keys; a file that exists but cannot be read or parsed stops
-// the candidate before the agent starts, and if the reading after the agent fails, its answer and activity are
-// withheld (jobs.mjs). Matching is exact: a key the agent split, encoded or changed is not recognised. Values shorter
+// It fails closed. A missing file means the copy has no keys; a file or revision that exists but cannot be read or
+// parsed stops the candidate before the agent starts, and if the reading after the agent fails, or the revision moved
+// by more than one, everything the agent produced is withheld (jobs.mjs). Matching is exact: a key the agent split, encoded or changed is not recognised. Values shorter
 // than MINIMUM_SECRET_CHARACTERS are ignored, so that a stray short value cannot blank out ordinary text.
 //
 // events.jsonl and stderr.txt in the job's folder keep the agent's raw output, key included if it printed one. They
@@ -48,6 +49,40 @@ export function managedSecrets(plan, read = readFileSync) {
   if (!auth || typeof auth !== "object" || Array.isArray(auth)) throw new Error("the managed Pi's key file is not in the expected form, so its keys could not be kept out of the report");
   const keys = Object.values(auth).map((entry) => entry?.key).filter((key) => typeof key === "string" && key.length >= MINIMUM_SECRET_CHARACTERS);
   return union(keys);
+}
+
+/**
+ * The managed copy's key-file revision: AI Meter increases the number in <PI_CODING_AGENT_DIR>/keys-revision by one at
+ * every change of auth.json, its deletion included; a missing file counts as 0. 0 for a plan that is not managed.
+ * Throws when the file exists but cannot be read or does not hold a non-negative integer.
+ */
+export function keysRevision(plan, read = readFileSync) {
+  if (!plan?.managed) return 0;
+  const folder = plan.environment?.PI_CODING_AGENT_DIR;
+  if (!folder) throw new Error("AI Meter did not name the managed Pi's configuration folder, so its keys could not be kept out of the report");
+  let text;
+  try {
+    text = String(read(join(folder, "keys-revision"), "utf8")).trim();
+  } catch (error) {
+    if (error?.code === "ENOENT") return 0;
+    throw new Error("the managed Pi's key revision could not be read, so a change of its keys could not be ruled out");
+  }
+  if (!/^\d+$/.test(text)) throw new Error("the managed Pi's key revision is not a number, so a change of its keys could not be ruled out");
+  return Number(text);
+}
+
+/**
+ * Why the keys read before and after a task do not cover every key the agent could have seen, or null when they do.
+ * The two readings are the key file and its revision, read in that order around the task: revision then keys before,
+ * keys then revision after. With at most one change between the two revisions, each state of the file the agent could
+ * meet is one of the two readings, so their union covers it. Any other count means a key may have come and gone
+ * unseen: more than one change, or a count that went down, as when the managed copy was removed with its folder (the
+ * revision then reads as missing, 0) and perhaps installed again.
+ */
+export function keysChangedUnseen(before, after) {
+  if (after - before > 1) return "the managed Pi's keys changed more than once during the task, so a key may have come and gone unseen";
+  if (after < before) return "the managed Pi's key revision went back during the task, so a change of its keys could not be ruled out";
+  return null;
 }
 
 /** Every secret of these lists once, longest first, so that a key that contains another is replaced whole. */

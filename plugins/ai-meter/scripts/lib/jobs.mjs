@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 import { canRead, readerFor, shortError, summarise } from "./agents.mjs";
 import { place, ToolError, withMeter } from "./meter.mjs";
 import { checkSignIn, cleanEnvironment, coordinatorOf, environmentFor, knowsPolicy } from "./plan.mjs";
-import { managedSecrets, mentions, redact, union } from "./secrets.mjs";
+import { keysChangedUnseen, keysRevision, managedSecrets, mentions, redact, union } from "./secrets.mjs";
 import { shellFor } from "./shell.mjs";
 import { createSnapshot, createWorktree, describeChanges, isInsideWsl, removeSnapshot, repositoryOf, workspaceInsideWsl } from "./workspace.mjs";
 
@@ -232,7 +232,9 @@ export async function runJob(id) {
 
   const deadline = Date.now() + job.timeout_seconds * 1000;
   const control = new AbortController();
-  const guard = { secrets: [], redacted: false };   // The managed copy's keys, once a managed candidate is chosen.
+  // The managed copy's keys and their revision once a managed candidate is chosen, and, once the agent has ended,
+  // withheld: why its output could not be checked for keys. Every later save, this function's included, goes by it.
+  const guard = { secrets: [], revision: 0, redacted: false, withheld: null };
   const watch = setInterval(() => {
     if (existsSync(join(folderOf(id), "cancel"))) control.abort(new Stopped("cancelled"));
     else if (Date.now() > deadline) control.abort(new Stopped("timed_out"));
@@ -243,6 +245,7 @@ export async function runJob(id) {
     const chosen = await choose(job, control.signal);
     if (!chosen) return;
     guard.secrets = chosen.secrets;
+    guard.revision = chosen.revision;
     await runAgent(job, chosen, task, control.signal, guard);
   } catch (error) {
     const why = control.signal.aborted ? control.signal.reason.why : null;
@@ -257,6 +260,8 @@ export async function runJob(id) {
     }
     job.status = why || "failed";
     job.error = why === "cancelled" ? null : why === "timed_out" ? "Timed out before the agent started." : error.message;
+    // After a failed key check, an error raised later could quote what the agent left behind: it is withheld too.
+    if (guard.withheld) job.error = withheldError(guard.withheld);
     job.ended_at = new Date().toISOString();
     save(job, guard);
   } finally {
@@ -349,8 +354,11 @@ async function choose(job, signal) {
       }
       // The managed copy's keys, read before anything is claimed: if they cannot be known, the answer could not be
       // kept free of them, so the candidate is not started (secrets.mjs).
+      // The revision is read before the keys and, after the agent, after them (keysChangedUnseen says why).
       let secrets = [];
+      let revision = 0;
       try {
+        revision = keysRevision(plan);
         secrets = managedSecrets(plan);
       } catch (error) {
         job.skipped.push({ ...which, reason: error.message });
@@ -369,7 +377,10 @@ async function choose(job, signal) {
           continue;
         }
       }
-      const lease = await meter.call("claim_capacity", { service: c.service, model: c.model, runtime: c.runtime.name, client: job.client, ttl_seconds: job.timeout_seconds + 120, ...coordinator });
+      // managed: true names the managed copy in the claim too: AI Meter takes a call without it for the user's own agent.
+      const lease = await meter.call("claim_capacity", {
+        service: c.service, model: c.model, runtime: c.runtime.name, ...(which.managed ? { managed: true } : {}), client: job.client, ttl_seconds: job.timeout_seconds + 120, ...coordinator,
+      });
       if (lease.refused) {
         refusedPools.add(c.pool);
         job.skipped.push({ ...which, reason: "pool " + c.pool + " has no room: " + (lease.headroom?.blocking?.reason || "full") });
@@ -389,7 +400,7 @@ async function choose(job, signal) {
       const warnings = [...new Set([...(c.warnings || []), ...(plan.warnings || [])])];
       if (warnings.length) job.warnings = warnings;
       save(job, { secrets, redacted: false });
-      return { candidate: c, plan, lease, secrets };
+      return { candidate: c, plan, lease, secrets, revision };
     }
 
     job.status = "failed";
@@ -524,13 +535,16 @@ async function runAgent(job, chosen, task, signal, guard) {
   if (stderrBytes > STDERR_LIMIT_BYTES) errors.write(`\n[AI Meter: ${stderrBytes - STDERR_LIMIT_BYTES} more bytes not kept]\n`);
   await Promise.all([new Promise((resolve) => events.end(resolve)), new Promise((resolve) => errors.end(resolve))]);
 
-  // The key file again, now that the agent has ended: a key added or rotated meanwhile is redacted too. If it cannot be
-  // read, what the agent produced is withheld rather than returned with a key the plugin could not know.
-  let keysUnknown = null;
+  // The final key check comes first, before anything the agent produced is attached to the job: the key file again
+  // (a key added or rotated meanwhile is redacted too), then its revision. If either cannot be read, or the keys changed
+  // more than once, only withheld content is ever attached, and Git is not asked to describe the agent's changes; the
+  // guard then holds the reason for every later save, the worker's error path included.
   try {
-    guard.secrets = union(guard.secrets, managedSecrets(plan));
+    const later = managedSecrets(plan);
+    guard.withheld = keysChangedUnseen(guard.revision, keysRevision(plan));
+    guard.secrets = union(guard.secrets, later);
   } catch (error) {
-    keysUnknown = error.message;
+    guard.withheld = error.message;
   }
   const summary = withoutSecrets(summarise(reader, exitCode, stopped));
   explainExit(summary, reader, exitCode, stopped, withoutSecrets(stderrHead.toString("utf8")));
@@ -538,10 +552,15 @@ async function runAgent(job, chosen, task, signal, guard) {
     summary.answer = summary.answer.slice(0, ANSWER_LIMIT);
     summary.answer_truncated = true;
   }
-  job.summary = summary;
   job.exit_code = exitCode;
-  if (job.worktree) job.worktree = describeChanges(job.worktree);
-  if (keysUnknown) withhold(job);
+  if (guard.withheld) {
+    job.summary = withheldSummary(summary);
+    if (job.worktree) job.worktree = { ...job.worktree, withheld: true };
+    job.warnings = [...new Set([...(job.warnings || []), "managed_key_check_failed"])];
+  } else {
+    job.summary = summary;
+    if (job.worktree) job.worktree = describeChanges(job.worktree);
+  }
   try {
     await release(job.lease_id, {
       outcome: summary.outcome,
@@ -558,7 +577,7 @@ async function runAgent(job, chosen, task, signal, guard) {
   if (job.candidate?.billing === "included_in_plan") job.plan_after = summary.plan_after || (await planWindowsNow(job.candidate.service));
   job.status = summary.outcome;
   if (summary.outcome !== "completed") job.error = summary.error;
-  if (keysUnknown) job.error = WITHHELD + " (" + keysUnknown + ")";
+  if (guard.withheld) job.error = withheldError(guard.withheld);
   job.ended_at = new Date().toISOString();
   save(job, guard);
 
@@ -571,23 +590,18 @@ async function runAgent(job, chosen, task, signal, guard) {
   }
 }
 
-const WITHHELD = "The agent's answer, activity and changes are withheld: the managed Pi's keys could not be read again after it ended, so they could not be removed";
+const WITHHELD = "The agent's answer, activity and changes are withheld: the managed Pi's keys could not be checked after it ended, so they could not be removed";
+
+/** job.error for a job whose output is withheld, with the reason (never quoting the key file). */
+const withheldError = (reason) => WITHHELD + " (" + reason + ")";
 
 /**
- * Withhold everything the agent produced that could quote a key the plugin no longer knows: the answer, the activity,
- * the agent's error, and a worktree's commit subjects, file names and diff size. Counters stay, so that the lease is
- * released with them, and the worktree keeps its path and the commands to review and discard it.
+ * A summary without anything the agent produced that could quote a key the plugin does not know: the answer, the
+ * activity and the agent's error are replaced or left out. Counters stay, so that the lease is released with them.
  */
-function withhold(job) {
-  const { activity, ...summary } = job.summary;
-  job.summary = { ...summary, answer: WITHHELD + ".", error: summary.error === null ? null : WITHHELD + "." };
-  delete job.summary.answer_truncated;
-  delete job.summary.recovered_errors;
-  if (job.worktree) {
-    const { commits, files, diff_stat, ...worktree } = job.worktree;
-    job.worktree = { ...worktree, withheld: true };
-  }
-  job.warnings = [...new Set([...(job.warnings || []), "managed_key_check_failed"])];
+function withheldSummary(summary) {
+  const { activity, answer_truncated, recovered_errors, ...rest } = summary;
+  return { ...rest, answer: WITHHELD + ".", error: rest.error === null ? null : WITHHELD + "." };
 }
 
 /**

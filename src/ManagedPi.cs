@@ -249,16 +249,20 @@ namespace AIMeter
             {
                 // Under the lock Sync writes with: a sync already under way ends first, and one that comes after
                 // finds no choices and no copy, so it cannot bring a key back.
+                bool choicesSaved = true;
                 lock (ConfigLock)
                 {
                     DeleteKeyFiles();
                     if (settings != null)
                     {
                         settings.ManagedPiServices = new List<string>();
-                        settings.Save();
+                        choicesSaved = settings.Save();
                     }
                     if (Directory.Exists(Root)) Directory.Delete(Root, true);
                 }
+                // The copy and its keys are gone, but the old choices are still on disk: say so. A later installation
+                // starts with nothing ticked in any case (Controller.InstallManagedPi).
+                if (!choicesSaved) throw new InstallException(L.T("This choice could not be saved, so it will not last past a restart. Check AI Meter's settings file, then change it again."));
             }
             catch (IOException ex) { throw new InstallException(L.T("Pi could not be removed: one of its files is in use. Wait for delegated tasks to end, then try again."), ex); }
             catch (UnauthorizedAccessException ex) { throw new InstallException(L.T("Pi could not be removed: one of its files is in use. Wait for delegated tasks to end, then try again."), ex); }
@@ -306,14 +310,14 @@ namespace AIMeter
         /// The key to copy for a service, or null when there is none or it is not a plain key. Pi does not take every
         /// value in its key file literally: one that starts with "!" is a command it runs to get the key, and one that
         /// names an environment variable is read from there (Pi 1.5.2, docs/providers.md). Only a value that can be
-        /// nothing but a key is copied: no "!" or "$" at its start, no white space or control character, eight
-        /// characters or more.
+        /// nothing but a key is copied: no "!" at its start, no "$" anywhere (Pi fills in ${NAME} inside a value too), no
+        /// white space or control character, eight characters or more.
         /// </summary>
         private static string PlainKey(ServiceDefinition d)
         {
             string key = SourceKey(d);
-            if (key == null || key.Length < 8 || key[0] == '!' || key[0] == '$') return null;
-            return key.Any(c => char.IsWhiteSpace(c) || char.IsControl(c)) ? null : key;
+            if (key == null || key.Length < 8 || key[0] == '!') return null;
+            return key.Any(c => c == '$' || char.IsWhiteSpace(c) || char.IsControl(c)) ? null : key;
         }
 
         /// <summary>
@@ -326,7 +330,8 @@ namespace AIMeter
         /// </summary>
         public static bool Sync(Settings settings)
         {
-            if (settings == null) return true;
+            // With sample data the real copy is neither shown nor used, and its keys are left as they are.
+            if (settings == null || Program.Demo) return true;
             // One writer at a time: Settings calls this on the interface thread, a key change in the background.
             lock (ConfigLock)
             {
@@ -351,7 +356,9 @@ namespace AIMeter
             {
                 if (entries.Count == 0)
                 {
+                    bool held = File.Exists(KeyFile);
                     DeleteKeyFiles();
+                    if (held) AdvanceRevision();
                     return true;
                 }
                 string text = Json.Serialize(entries);
@@ -372,10 +379,27 @@ namespace AIMeter
                     // A replacement that failed half-way must not leave a second copy of the keys.
                     if (File.Exists(PendingKeyFile)) File.Delete(PendingKeyFile);
                 }
+                AdvanceRevision();
                 return true;
             }
             catch (IOException) { return false; }
             catch (UnauthorizedAccessException) { return false; }
+        }
+
+        private static string RevisionFile { get { return Path.Combine(ConfigFolder, "keys-revision"); } }
+
+        /// <summary>
+        /// Count one more change of the key file, in a file beside it that holds only that number. A plugin reads the
+        /// keys before and after a task to remove them from what it returns; a count that moved by more than one in
+        /// between tells it that a key came and went unseen, so it withholds the task's output (docs/MCP.md, "Managed
+        /// Pi"). Throws when the count cannot be written, so that the change is reported as failed and tried again.
+        /// </summary>
+        private static void AdvanceRevision()
+        {
+            long revision = 0;
+            if (File.Exists(RevisionFile)) long.TryParse(File.ReadAllText(RevisionFile, Encoding.UTF8).Trim(), out revision);
+            Directory.CreateDirectory(ConfigFolder);
+            File.WriteAllText(RevisionFile, (Math.Max(0, revision) + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), new UTF8Encoding(false));
         }
 
         /// <summary>Delete the key file and a half-written one; throws when either cannot be deleted.</summary>

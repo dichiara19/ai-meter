@@ -28,7 +28,14 @@
 //   leakerror (Pi) writes auth.json's contents to stderr and exits with 1 before agent_settled;
 //   leakcommit (Pi) writes a file named after the first key and commits it with the key in the subject, then answers;
 //   rotate    (Pi) adds a new key to auth.json while it runs, as a user could in AI Meter, and quotes it;
-//   breakkeys (Pi) quotes the first key, then leaves auth.json unreadable as JSON.
+//   breakkeys (Pi) quotes the first key, then leaves auth.json unreadable as JSON;
+//   flip      (Pi) adds a key and withdraws it again, each change counted in keys-revision as AI Meter does, and
+//             quotes it: a key that came and went between the plugin's two readings;
+//   badrevision (Pi) quotes the first key and leaves keys-revision without a number;
+//   breakgit  (Pi) like breakkeys, and also breaks its worktree's .git file, so that Git cannot describe it and its
+//             error would name the key;
+//   gitfails  (Pi) breaks its worktree's .git file in the same way, leaving the keys readable.
+// Every change to auth.json is counted in keys-revision, as AI Meter counts it.
 // Requests are otherwise priced at zero, as the agents do for free models. A third argument (the managed Pi's shell)
 // is named in Pi's answer: "echo via <shell>: <task>".
 //
@@ -41,7 +48,7 @@
 // fake-agent.mjs signin <claude|codex> <plan|apikey> answers a sign-in check as the agent's status command does.
 
 import { execFileSync, spawn } from "node:child_process";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -137,10 +144,34 @@ function pi() {
     piTool("bash", { command: "cat " + authFile }, auth, false);
     answer = "The keys are: " + Object.values(JSON.parse(auth)).map((entry) => entry.key).join(" and ") + ".";
   }
-  if (behaviour === "leakcommit" || behaviour === "rotate" || behaviour === "breakkeys") {
+  if (["leakcommit", "rotate", "breakkeys", "flip", "badrevision", "breakgit", "gitfails"].includes(behaviour)) {
     const auth = JSON.parse(readFileSync(authFile, "utf8"));
     const first = Object.values(auth)[0].key;
+    const revisionFile = join(process.env.PI_CODING_AGENT_DIR, "keys-revision");
+    const changeKeys = (contents) => {
+      writeFileSync(authFile, contents);
+      const revision = existsSync(revisionFile) ? Number(readFileSync(revisionFile, "utf8")) : 0;
+      writeFileSync(revisionFile, String(revision + 1));
+    };
     answer = "done";
+    if (behaviour === "flip") {
+      const passing = "sk-came-and-went-0123456789";
+      changeKeys(JSON.stringify({ ...auth, passing: { type: "api_key", key: passing } }));
+      changeKeys(JSON.stringify(auth));
+      answer = "The passing key was " + passing + ".";
+    }
+    if (behaviour === "badrevision") {
+      writeFileSync(revisionFile, "seven");
+      answer = "The key is " + first + ".";
+    }
+    if (behaviour === "breakgit" || behaviour === "gitfails") {
+      if (behaviour === "breakgit") changeKeys("{ broken");
+      // Git's error then names this folder, and with it the key. Git for Windows makes .git hidden, which Windows does
+      // not let a program overwrite, so it is removed first.
+      rmSync(".git", { force: true });
+      writeFileSync(".git","gitdir: " + join(process.cwd(), "no-such-git-folder-" + first));
+      answer = "The key is " + first + ".";
+    }
     if (behaviour === "leakcommit") {
       writeFileSync(first + ".txt", "x\n");
       execFileSync("git", ["add", "."]);
@@ -148,11 +179,11 @@ function pi() {
     }
     if (behaviour === "rotate") {
       const rotated = "sk-rotated-during-the-task-42";
-      writeFileSync(authFile, JSON.stringify({ ...auth, fresh: { type: "api_key", key: rotated } }));
+      changeKeys(JSON.stringify({ ...auth, fresh: { type: "api_key", key: rotated } }));
       answer = "The new key is " + rotated + ".";
     }
     if (behaviour === "breakkeys") {
-      writeFileSync(authFile, "{ broken");
+      changeKeys("{ broken");
       answer = "The key is " + first + ".";
     }
   }

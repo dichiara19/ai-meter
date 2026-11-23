@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { environmentFor, holdsCredential, knowsPolicy, noCredentialsEnvironment } from "../scripts/lib/plan.mjs";
-import { managedSecrets, mentions, redact, REDACTED, union } from "../scripts/lib/secrets.mjs";
+import { keysChangedUnseen, keysRevision, managedSecrets, mentions, redact, REDACTED, union } from "../scripts/lib/secrets.mjs";
 import { isInsideWsl, workspaceInsideWsl } from "../scripts/lib/workspace.mjs";
 
 const folder = join("config", "pi");
@@ -35,6 +35,28 @@ test("keys that cannot be known stop the caller, without quoting the file", () =
   for (const contents of ["null", "[]", '"text"']) assert.throws(() => managedSecrets(managed, authJson(contents)), unknown, contents);
   const denied = () => { throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }); };
   assert.throws(() => managedSecrets(managed, denied), unknown, "a file that exists but cannot be read");
+});
+
+test("the key revision is the number in keys-revision, 0 when it is missing, and stops the caller otherwise", () => {
+  const revisionFile = (contents) => (path) => {
+    if (path !== join(folder, "keys-revision")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    if (contents instanceof Error) throw contents;
+    return contents;
+  };
+  assert.equal(keysRevision(managed, revisionFile("12\r\n")), 12);
+  assert.equal(keysRevision({ managed: true, environment: { PI_CODING_AGENT_DIR: "elsewhere" } }, revisionFile("12")), 0, "a missing file counts as 0");
+  assert.equal(keysRevision({ environment: managed.environment }, revisionFile("x")), 0, "not the managed copy");
+  for (const contents of ["", "seven", "-1", "1.5", "1e3"]) assert.throws(() => keysRevision(managed, revisionFile(contents)), /not a number/, JSON.stringify(contents));
+  assert.throws(() => keysRevision(managed, revisionFile(Object.assign(new Error("EACCES"), { code: "EACCES" }))), /could not be read/);
+});
+
+test("the two readings cover the task when the keys changed at most once between them", () => {
+  assert.equal(keysChangedUnseen(4, 4), null);
+  assert.equal(keysChangedUnseen(4, 5), null, "one change: the union of the two readings covers it");
+  assert.match(keysChangedUnseen(4, 6), /changed more than once/);
+  assert.match(keysChangedUnseen(4, 3), /went back/);
+  assert.match(keysChangedUnseen(4, 0), /went back/, "the managed copy removed: its folder, revision included, is gone");
+  assert.equal(keysChangedUnseen(0, 0), null, "no key file before or after");
 });
 
 test("union keeps every key once, longest first", () => {

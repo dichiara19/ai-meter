@@ -32,10 +32,14 @@ namespace AIMeter
             ManagedPiBusy = true;
             ManagedPiError = null;
             managedPiCancelled = false;
+            // Replacing an older release keeps the user's choices; a new installation starts with nothing ticked, even
+            // if choices from a copy removed earlier are still in the settings.
+            bool replacesOlder = ManagedPi.OtherVersionInstalled != null;
             RefreshSettingsPage();
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 string error = null;
+                bool installed = false;
                 long shown = 0;
                 try
                 {
@@ -46,8 +50,7 @@ namespace AIMeter
                         shown = bytes;
                         ui.BeginInvoke(new Action(() => { if (ManagedPiProgress != null) ManagedPiProgress(bytes); }));
                     }, () => managedPiCancelled);
-                    // A copy that replaces an older release gets the keys of the services already ticked.
-                    ManagedPi.Sync(Settings);
+                    installed = true;
                 }
                 catch (OperationCanceledException) { }
                 catch (ManagedPi.InstallException ex) { error = ex.Message; }
@@ -56,6 +59,15 @@ namespace AIMeter
                     ManagedPiBusy = false;
                     ManagedPiError = error;
                     ManagedPiProgress = null;
+                    if (installed)
+                    {
+                        if (!replacesOlder && Settings.ManagedPiServices.Count > 0)
+                        {
+                            Settings.ManagedPiServices = new List<string>();
+                            Settings.Save();
+                        }
+                        SyncManagedPiKeys();
+                    }
                     RefreshSettingsPage();
                 }));
             });
@@ -100,8 +112,25 @@ namespace AIMeter
         {
             var settings = Settings;
             // Also with nothing ticked or no copy installed: a key file left by a failed deletion goes then.
-            if (settings == null || !System.IO.Directory.Exists(ManagedPi.Root)) return;
-            ThreadPool.QueueUserWorkItem(_ => ManagedPi.Sync(settings));
+            if (settings == null || Program.Demo || !System.IO.Directory.Exists(ManagedPi.Root)) return;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                // A file held for a moment by a running task or an antivirus is tried again; a failure that lasts is
+                // shown in Settings, and the next start tries once more. Meanwhile a key that no longer matches gives
+                // no access (ManagedPi.KeyFor).
+                foreach (int seconds in SyncRetrySeconds)
+                {
+                    if (seconds > 0) Thread.Sleep(seconds * 1000);
+                    if (ManagedPi.Sync(settings)) return;
+                }
+                ui.BeginInvoke(new Action(() =>
+                {
+                    ManagedPiError = L.T("Pi's key file could not be written. Check that no delegated task is running, then try again.");
+                    RefreshSettingsPage();
+                }));
+            });
         }
+
+        private static readonly int[] SyncRetrySeconds = { 0, 2, 10, 30, 60 };
     }
 }

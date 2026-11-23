@@ -781,7 +781,7 @@ test("a managed Pi candidate is described as managed, and a read-only task says 
   assert.equal(job.status, "completed", job.error || "");
   assert.equal(job.warnings, undefined, "a missing auth.json gives nothing to redact");
   assert.equal(calls().find((c) => c.tool === "describe_dispatch").arguments.managed, true);
-  assert.equal(calls().find((c) => c.tool === "claim_capacity").arguments.managed, undefined, "a lease names the runtime only");
+  assert.equal(calls().find((c) => c.tool === "claim_capacity").arguments.managed, true, "the claim names the managed copy too: AI Meter takes a call without it for the user's own Pi");
   assert.deepEqual(job.candidate, { service: "openrouter", model: "a:free", runtime: "pi", where: "windows", managed: true, pool: "openrouter:free" });
   assert.equal(job.shell, "none");
   assert.equal(job.summary.answer, "echo via none: x", "the described arguments were used");
@@ -789,9 +789,20 @@ test("a managed Pi candidate is described as managed, and a read-only task says 
 });
 
 test("managed pins the managed Pi, or the user's own agents", async () => {
-  const { workspace } = setUp({ candidates: [managedPi, pi] });
+  const { workspace, calls } = setUp({ candidates: [managedPi, pi] });
   assert.equal((await jobs.wait(jobs.start({ task: "x", workspace, managed: false }).id, 20)).candidate.managed, undefined);
+  for (const tool of ["describe_dispatch", "claim_capacity"]) assert.equal(calls().find((c) => c.tool === tool).arguments.managed, undefined, "nothing for the user's own Pi: " + tool);
   assert.equal((await jobs.wait(jobs.start({ task: "x", workspace, managed: "true" }).id, 20)).candidate.managed, true, "as the command line passes it");
+});
+
+test("the fake meter, as AI Meter, refuses the managed copy to a call that does not say managed: true", async () => {
+  // Guards the fixture itself: without it, the assertions on managed: true above would prove nothing.
+  setUp({ candidates: [managedPi] });
+  const { withMeter } = await import("../scripts/lib/meter.mjs");
+  const ask = { service: "openrouter", model: "a:free", runtime: "pi" };
+  await assert.rejects(withMeter((meter) => meter.call("describe_dispatch", { ...ask, where: "windows", mode: "read_only", workspace: "C:\\w" })), /No usable Pi is set up here/);
+  await assert.rejects(withMeter((meter) => meter.call("claim_capacity", { ...ask, client: "test", ttl_seconds: 60 })), /No usable Pi is set up here/);
+  assert.equal((await withMeter((meter) => meter.call("claim_capacity", { ...ask, managed: true, client: "test", ttl_seconds: 60 }))).lease_id, "lease-1");
 });
 
 /** A repository with one commit, for modify tasks. */
@@ -977,11 +988,89 @@ test("when the key file cannot be read again after the agent, its answer and act
   const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
   const shown = report.full(job, jobs.root());
 
-  assert.match(shown.answer, /withheld: the managed Pi's keys could not be read again/);
+  assert.match(shown.answer, /withheld: the managed Pi's keys could not be checked/);
   assert.equal(shown.activity, undefined);
   assert.match(job.error, /withheld.*key file could not be read/);
   assert.ok(job.warnings.includes("managed_key_check_failed"));
   assert.equal(job.released, true, "the lease is still released, with the counters");
+  const saved = readFileSync(join(jobs.root(), job.id, "job.json"), "utf8");
+  for (const key of keys) assert.ok(!saved.includes(key));
+});
+
+/** A job's saved state and its report, as text, with no answer the agent gave and none of these keys. */
+function assertWithheld(job, keys, reason) {
+  const saved = readFileSync(join(jobs.root(), job.id, "job.json"), "utf8");
+  const shown = JSON.stringify(report.full(job, jobs.root()));
+  for (const text of [saved, shown]) {
+    for (const key of keys) assert.ok(!text.includes(key), "no key");
+    assert.ok(!text.includes("The key is") && !text.includes("The passing key"), "no answer the agent gave");
+  }
+  assert.match(job.summary.answer, /withheld/);
+  assert.equal(job.summary.activity, undefined);
+  assert.match(job.error, reason);
+  assert.ok(job.warnings.includes("managed_key_check_failed"));
+}
+
+test("keys that changed more than once during the task withhold the output: a key may have come and gone unseen", async () => {
+  const { folder, workspace } = setUp({ candidates: [managedPi] });
+  const { config, keys } = managedConfig(folder);
+  writeFileSync(join(config, "keys-revision"), "3");
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], pi_config: config, behaviour: { pi: "flip" } });
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(readFileSync(join(config, "keys-revision"), "utf8"), "5");
+  assertWithheld(job, [...keys, "sk-came-and-went-0123456789"], /changed more than once during the task/);
+});
+
+test("a key revision that is no longer a number after the task withholds the output", async () => {
+  const { folder, workspace } = setUp({ candidates: [managedPi] });
+  const { config, keys } = managedConfig(folder);
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], pi_config: config, behaviour: { pi: "badrevision" } });
+
+  assertWithheld(await jobs.wait(jobs.start({ task: "x", workspace }).id, 20), keys, /key revision is not a number/);
+});
+
+test("a key revision that cannot be parsed before the task stops the managed candidate", async () => {
+  const { folder, workspace, calls } = setUp({ candidates: [managedPi] });
+  const { config } = managedConfig(folder);
+  writeFileSync(join(config, "keys-revision"), "-1");
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], pi_config: config });
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+  assert.match(job.skipped[0].reason, /key revision is not a number/);
+  assert.equal(calls().filter((c) => c.tool === "claim_capacity").length, 0);
+});
+
+test("after a failed key check, Git is never asked about the agent's changes, and a later failure keeps the output withheld", async () => {
+  // The agent breaks the key file and its worktree's .git file, whose path names a key: describing its changes would
+  // fail with an error quoting it, and before the fix that error path saved the answer unwithheld.
+  const { folder } = setUp({ candidates: [managedPi] });
+  const { config, keys } = managedConfig(folder);
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], pi_config: config, behaviour: { pi: "breakgit" } });
+  const repository = committedRepository(folder);
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: repository, mode: "modify" }).id, 20);
+
+  assertWithheld(job, keys, /key file could not be read/);
+  assert.equal(job.worktree.withheld, true);
+  assert.equal(job.worktree.commits, undefined, "no Git details of the agent's work");
+});
+
+test("a Git failure after a passed key check is saved with the final keys removed", async () => {
+  const { folder } = setUp({ candidates: [managedPi] });
+  const { config, keys } = managedConfig(folder);
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], pi_config: config, behaviour: { pi: "gitfails" } });
+  const repository = committedRepository(folder);
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace: repository, mode: "modify" }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.match(job.error, /Command failed: git/);
+  // Git on Linux names the broken folder, and with it the key; Git for Windows says "(NULL)" instead.
+  if (/no-such-git-folder/.test(job.error)) assert.match(job.error, /no-such-git-folder-\[key removed by AI Meter\]/, "Git's error, with the key removed");
+  assert.equal(job.summary.answer, "The key is [key removed by AI Meter].", "the answer attached before Git failed is saved redacted");
+  assert.ok(job.warnings.includes("managed_key_redacted"));
   const saved = readFileSync(join(jobs.root(), job.id, "job.json"), "utf8");
   for (const key of keys) assert.ok(!saved.includes(key));
 });
