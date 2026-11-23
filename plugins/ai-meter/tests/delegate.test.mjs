@@ -1014,13 +1014,54 @@ function assertWithheld(job, keys, reason) {
 test("keys that changed more than once during the task withhold the output: a key may have come and gone unseen", async () => {
   const { folder, workspace } = setUp({ candidates: [managedPi] });
   const { config, keys } = managedConfig(folder);
-  writeFileSync(join(config, "keys-revision"), "3");
+  writeFileSync(join(config, "keys-revision"), "4");
   process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], pi_config: config, behaviour: { pi: "flip" } });
 
   const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
 
-  assert.equal(readFileSync(join(config, "keys-revision"), "utf8"), "5");
+  assert.equal(readFileSync(join(config, "keys-revision"), "utf8"), "8", "two changes, each counted twice");
   assertWithheld(job, [...keys, "sk-came-and-went-0123456789"], /changed more than once during the task/);
+});
+
+test("a change of the keys announced but not finished by the end of the task withholds the output", async () => {
+  const { folder, workspace } = setUp({ candidates: [managedPi] });
+  const { config, keys } = managedConfig(folder);
+  writeFileSync(join(config, "keys-revision"), "2");
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], pi_config: config, behaviour: { pi: "halfchange" } });
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(readFileSync(join(config, "keys-revision"), "utf8"), "3");
+  assertWithheld(job, [...keys, "sk-added-but-not-finished-42"], /under way or did not finish/);
+});
+
+test("before the task, an odd count is waited out: the keys are read once AI Meter has finished changing them", async () => {
+  const { folder, workspace } = setUp({ candidates: [managedPi] });
+  const { config } = managedConfig(folder);
+  writeFileSync(join(config, "keys-revision"), "5");
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], pi_config: config });
+  // The change ends 700 ms after the job starts; the worker needs a moment to reach the count, so it may also find it
+  // even at once: the wait itself is covered without timing by the unit test of settledRevision.
+  const finished = new Promise((resolve) => setTimeout(() => resolve(writeFileSync(join(config, "keys-revision"), "6")), 700));
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+  await finished;
+
+  assert.equal(job.status, "completed", job.error || "");
+  assert.equal(job.warnings, undefined);
+});
+
+test("before the task, a count that stays odd skips the managed candidate", async () => {
+  const { folder, workspace, calls } = setUp({ candidates: [managedPi] });
+  const { config } = managedConfig(folder);
+  writeFileSync(join(config, "keys-revision"), "7");
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedPi], pi_config: config });
+
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+
+  assert.equal(job.status, "failed");
+  assert.match(job.skipped[0].reason, /still changing the managed Pi's keys/);
+  assert.equal(calls().filter((c) => c.tool === "claim_capacity").length, 0);
 });
 
 test("a key revision that is no longer a number after the task withholds the output", async () => {

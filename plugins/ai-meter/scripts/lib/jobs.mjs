@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 import { canRead, readerFor, shortError, summarise } from "./agents.mjs";
 import { place, ToolError, withMeter } from "./meter.mjs";
 import { checkSignIn, cleanEnvironment, coordinatorOf, environmentFor, knowsPolicy } from "./plan.mjs";
-import { keysChangedUnseen, keysRevision, managedSecrets, mentions, redact, union } from "./secrets.mjs";
+import { keysRevision, managedSecrets, mentions, redact, settledRevision, uncoveredKeyChange, union } from "./secrets.mjs";
 import { shellFor } from "./shell.mjs";
 import { createSnapshot, createWorktree, describeChanges, isInsideWsl, removeSnapshot, repositoryOf, workspaceInsideWsl } from "./workspace.mjs";
 
@@ -354,16 +354,18 @@ async function choose(job, signal) {
       }
       // The managed copy's keys, read before anything is claimed: if they cannot be known, the answer could not be
       // kept free of them, so the candidate is not started (secrets.mjs).
-      // The revision is read before the keys and, after the agent, after them (keysChangedUnseen says why).
+      // The revision is read before the keys and, after the agent, after them (secrets.mjs says why); an odd count, a
+      // change of the keys under way, is waited out for a couple of seconds.
       let secrets = [];
       let revision = 0;
       try {
-        revision = keysRevision(plan);
+        revision = await settledRevision(plan);
         secrets = managedSecrets(plan);
       } catch (error) {
         job.skipped.push({ ...which, reason: error.message });
         continue;
       }
+      if (signal.aborted) throw signal.reason;
       // A plan agent must be signed in to its plan, checked with the environment it will start with (ADR 0003).
       if (onPlan || plan.billing === "included_in_plan") {
         if (plan.environment_policy !== "clean") {
@@ -541,7 +543,7 @@ async function runAgent(job, chosen, task, signal, guard) {
   // guard then holds the reason for every later save, the worker's error path included.
   try {
     const later = managedSecrets(plan);
-    guard.withheld = keysChangedUnseen(guard.revision, keysRevision(plan));
+    guard.withheld = uncoveredKeyChange(guard.revision, keysRevision(plan));
     guard.secrets = union(guard.secrets, later);
   } catch (error) {
     guard.withheld = error.message;

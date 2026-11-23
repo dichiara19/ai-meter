@@ -31,11 +31,12 @@
 //   breakkeys (Pi) quotes the first key, then leaves auth.json unreadable as JSON;
 //   flip      (Pi) adds a key and withdraws it again, each change counted in keys-revision as AI Meter does, and
 //             quotes it: a key that came and went between the plugin's two readings;
+//   halfchange (Pi) adds a key and quotes it, announcing the change in keys-revision but never finishing it;
 //   badrevision (Pi) quotes the first key and leaves keys-revision without a number;
 //   breakgit  (Pi) like breakkeys, and also breaks its worktree's .git file, so that Git cannot describe it and its
 //             error would name the key;
 //   gitfails  (Pi) breaks its worktree's .git file in the same way, leaving the keys readable.
-// Every change to auth.json is counted in keys-revision, as AI Meter counts it.
+// Every change to auth.json is counted in keys-revision as AI Meter counts it: odd before the file is touched, even after.
 // Requests are otherwise priced at zero, as the agents do for free models. A third argument (the managed Pi's shell)
 // is named in Pi's answer: "echo via <shell>: <task>".
 //
@@ -144,16 +145,23 @@ function pi() {
     piTool("bash", { command: "cat " + authFile }, auth, false);
     answer = "The keys are: " + Object.values(JSON.parse(auth)).map((entry) => entry.key).join(" and ") + ".";
   }
-  if (["leakcommit", "rotate", "breakkeys", "flip", "badrevision", "breakgit", "gitfails"].includes(behaviour)) {
+  if (["leakcommit", "rotate", "breakkeys", "flip", "halfchange", "badrevision", "breakgit", "gitfails"].includes(behaviour)) {
     const auth = JSON.parse(readFileSync(authFile, "utf8"));
     const first = Object.values(auth)[0].key;
     const revisionFile = join(process.env.PI_CODING_AGENT_DIR, "keys-revision");
-    const changeKeys = (contents) => {
+    // As AI Meter changes the keys: the count goes to odd first, then the file changes, then the count goes to even.
+    const count = () => (existsSync(revisionFile) ? Number(readFileSync(revisionFile, "utf8")) : 0);
+    const changeKeys = (contents, finish = true) => {
+      writeFileSync(revisionFile, String(count() + 1));
       writeFileSync(authFile, contents);
-      const revision = existsSync(revisionFile) ? Number(readFileSync(revisionFile, "utf8")) : 0;
-      writeFileSync(revisionFile, String(revision + 1));
+      if (finish) writeFileSync(revisionFile, String(count() + 1));
     };
     answer = "done";
+    if (behaviour === "halfchange") {
+      const added = "sk-added-but-not-finished-42";
+      changeKeys(JSON.stringify({ ...auth, added: { type: "api_key", key: added } }), false);
+      answer = "The added key is " + added + ".";
+    }
     if (behaviour === "flip") {
       const passing = "sk-came-and-went-0123456789";
       changeKeys(JSON.stringify({ ...auth, passing: { type: "api_key", key: passing } }));

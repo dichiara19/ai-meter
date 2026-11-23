@@ -55,8 +55,9 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// One switch for each service whose key can be copied: a service with free models that AI Meter reads with a
-        /// key and that Pi knows. A service already ticked is always listed, whatever became of it since (turned off,
+        /// One switch for each service whose key can be copied to some use: a service that AI Meter reads with a key,
+        /// that Pi knows, and whose list has a free model with tool support, which is what a delegated task runs on
+        /// (free-tier models do not count: they are not offered through the copy). A service already ticked is always listed, whatever became of it since (turned off,
         /// its key gone), so that its switch is there to take the key back.
         /// </summary>
         private IEnumerable<FrameworkElement> ManagedPiKeyRows()
@@ -64,7 +65,8 @@ namespace AIMeter
             var snap = C.Last;
             var ticked = S.ManagedPiServices.Select(Definitions.Get).Where(d => d != null);
             var services = ManagedPi.ServicesWithKey()
-                .Where(d => snap == null || snap.Providers.Any(p => p.Id == d.Id && p.Catalogue != null))
+                .Where(d => snap != null && snap.Providers.Any(p => p.Id == d.Id && p.Catalogue != null &&
+                    p.Catalogue.Models.Any(m => m.Tools && (m.Free == null || m.Free.Confirmed) && !Candidates.IsFreeTier(m))))
                 .Concat(ticked).GroupBy(d => d.Id).Select(g => g.First())
                 .OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
             if (services.Count == 0)

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { environmentFor, holdsCredential, knowsPolicy, noCredentialsEnvironment } from "../scripts/lib/plan.mjs";
-import { keysChangedUnseen, keysRevision, managedSecrets, mentions, redact, REDACTED, union } from "../scripts/lib/secrets.mjs";
+import { keysRevision, settledRevision, uncoveredKeyChange, managedSecrets, mentions, redact, REDACTED, union } from "../scripts/lib/secrets.mjs";
 import { isInsideWsl, workspaceInsideWsl } from "../scripts/lib/workspace.mjs";
 
 const folder = join("config", "pi");
@@ -50,13 +50,34 @@ test("the key revision is the number in keys-revision, 0 when it is missing, and
   assert.throws(() => keysRevision(managed, revisionFile(Object.assign(new Error("EACCES"), { code: "EACCES" }))), /could not be read/);
 });
 
-test("the two readings cover the task when the keys changed at most once between them", () => {
-  assert.equal(keysChangedUnseen(4, 4), null);
-  assert.equal(keysChangedUnseen(4, 5), null, "one change: the union of the two readings covers it");
-  assert.match(keysChangedUnseen(4, 6), /changed more than once/);
-  assert.match(keysChangedUnseen(4, 3), /went back/);
-  assert.match(keysChangedUnseen(4, 0), /went back/, "the managed copy removed: its folder, revision included, is gone");
-  assert.equal(keysChangedUnseen(0, 0), null, "no key file before or after");
+test("the two readings cover the task only when the count after is the even count before, or two more", () => {
+  assert.equal(uncoveredKeyChange(4, 4), null, "no change");
+  assert.equal(uncoveredKeyChange(4, 6), null, "one complete change: the union of the two readings covers it");
+  assert.equal(uncoveredKeyChange(0, 0), null, "no key file before or after");
+  assert.match(uncoveredKeyChange(4, 5), /under way or did not finish/, "a change announced, not finished");
+  assert.match(uncoveredKeyChange(4, 7), /under way or did not finish/);
+  assert.match(uncoveredKeyChange(4, 8), /changed more than once/, "a key added and withdrawn");
+  assert.match(uncoveredKeyChange(4, 2), /went back/);
+  assert.match(uncoveredKeyChange(4, 0), /went back/, "the managed copy removed: its folder, revision included, is gone");
+  assert.match(uncoveredKeyChange(3, 5), /being changed when the task started/, "an odd count before is never a start");
+});
+
+test("an odd count before the task is read again until it is even, and skips the candidate if it stays odd", async () => {
+  const counts = (...values) => {
+    let index = 0;
+    return (path) => {
+      if (path !== join(folder, "keys-revision")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return values[Math.min(index++, values.length - 1)];
+    };
+  };
+  const waits = [];
+  const sleep = async (ms) => void waits.push(ms);
+  assert.equal(await settledRevision(managed, { read: counts("4"), sleep }), 4);
+  assert.deepEqual(waits, [], "an even count is taken at once");
+  assert.equal(await settledRevision(managed, { read: counts("5", "5", "6"), sleep, waitMs: 400 }), 6);
+  assert.deepEqual(waits, [400, 400]);
+  await assert.rejects(settledRevision(managed, { read: counts("5"), sleep, tries: 3 }), /still changing the managed Pi's keys/);
+  assert.equal(await settledRevision({ environment: managed.environment }, { read: counts("5"), sleep }), 0, "not the managed copy");
 });
 
 test("union keeps every key once, longest first", () => {

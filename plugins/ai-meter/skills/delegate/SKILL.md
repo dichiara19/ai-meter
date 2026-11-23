@@ -61,7 +61,7 @@ A copy of Pi that AI Meter keeps for users with a key and no agent. It exists on
 - A `modify` task runs commands through Git Bash when AI Meter has bound the copy to Git for Windows, otherwise through PowerShell (`candidate.shell`), never through WSL's `bash.exe`. The shell is chosen only when the task starts, so in a task for it say what to run ("run the tests") rather than bash command lines.
 - Its `grep` and `find` tools need ripgrep and fd on `PATH` (Pi downloads nothing while it works); without them they fail with an error.
 - `warnings` containing `managed_key_redacted`: the agent output one of the copy's keys (in its answer, a commit, a file name...), and the plugin removed it everywhere in the report. The model and its provider still saw it: tell the user, and never ask the managed Pi to read its own configuration.
-- `managed_key_check_failed`: the key file could not be checked after the agent ended (unreadable, or its keys changed more than once during the task), so its answer, activity and changes are withheld (`error` says why). The worktree is still there: tell the user, and review it yourself only with their agreement.
+- `managed_key_check_failed`: the key file could not be checked after the agent ended (unreadable, or its keys changed more than once or were still being changed), so its answer, activity and changes are withheld (`error` says why). The worktree is still there: tell the user, and review it yourself only with their agreement.
 
 ## Best effort: only with the user's agreement
 

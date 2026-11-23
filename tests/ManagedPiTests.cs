@@ -36,9 +36,10 @@ namespace AIMeter
             test("Saving the settings reports whether the file was written", () => Isolated(SavingSettingsReportsFailure));
             test("The managed Pi refuses WSL folders in their extended form and inherits no credentials", () => Isolated(ExtendedWslPathsAndEnvironmentPolicy));
             test("Installing over an older release brings back the keys of the services already ticked", () => Isolated(InstallOverOlderReleaseRestoresKeys));
-            test("The key file's revision goes up by one at each change of the file and stays when a sync changes nothing", () => Isolated(KeyRevisionCountsChanges));
+            test("The key file's revision goes up by two at each change of the file and stays when a sync changes nothing", () => Isolated(KeyRevisionCountsChanges));
             test("With sample data the managed Pi is not offered and Sync leaves its key file as it is", () => Isolated(DemoLeavesKeysAlone));
             test("Remove reports choices it could not save, after the keys and the copy are gone", () => Isolated(RemoveReportsUnsavedChoices));
+            test("A key change is announced before the key file is touched, and a change left half-way keeps the count odd until finished", () => Isolated(RevisionSurvivesFailures));
         }
 
         private static void Translations()
@@ -959,8 +960,7 @@ namespace AIMeter
         /// <summary>The number in config\keys-revision; 0 when the file is missing.</summary>
         private static long Revision()
         {
-            string file = Path.Combine(ManagedPi.ConfigFolder, "keys-revision");
-            return File.Exists(file) ? long.Parse(File.ReadAllText(file).Trim(), System.Globalization.CultureInfo.InvariantCulture) : 0;
+            return File.Exists(RevisionFile) ? long.Parse(File.ReadAllText(RevisionFile).Trim(), System.Globalization.CultureInfo.InvariantCulture) : 0;
         }
 
         private static void KeyRevisionCountsChanges()
@@ -971,16 +971,65 @@ namespace AIMeter
             Assert(Revision() == 0, "A copy without keys has a revision.");
             Assert(ManagedPi.Sync(settings) && Revision() == 0, "A sync with nothing ticked and no key file moved the revision.");
 
+            // Each change raises the count twice: odd while under way, even once complete.
             settings.ManagedPiServices = new List<string> { "openrouter" };
-            Assert(ManagedPi.Sync(settings) && File.Exists(KeyFile) && Revision() == 1, "Writing the key file did not count one change: " + Revision());
-            Assert(ManagedPi.Sync(settings) && Revision() == 1, "A sync that changed nothing moved the revision: " + Revision());
+            Assert(ManagedPi.Sync(settings) && File.Exists(KeyFile) && Revision() == 2, "Writing the key file did not count one complete change: " + Revision());
+            Assert(ManagedPi.Sync(settings) && Revision() == 2, "A sync that changed nothing moved the revision: " + Revision());
 
             ApiKeys.Save("openrouter", RouterKey + "-rotated");
-            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey + "-rotated") && Revision() == 2, "Rewriting the key file did not count one change: " + Revision());
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey + "-rotated") && Revision() == 4, "Rewriting the key file did not count one complete change: " + Revision());
 
             settings.ManagedPiServices = new List<string>();
-            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && Revision() == 3, "Deleting the key file did not count one change: " + Revision());
-            Assert(ManagedPi.Sync(settings) && Revision() == 3, "A sync with the key file already gone moved the revision: " + Revision());
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && Revision() == 6, "Deleting the key file did not count one complete change: " + Revision());
+            Assert(ManagedPi.Sync(settings) && Revision() == 6, "A sync with the key file already gone moved the revision: " + Revision());
+            Assert(!File.Exists(PendingRevisionFile), "keys-revision.new was left behind.");
+        }
+
+        private static string RevisionFile { get { return Path.Combine(ManagedPi.ConfigFolder, "keys-revision"); } }
+        private static string PendingRevisionFile { get { return RevisionFile + ".new"; } }
+
+        private static void RevisionSurvivesFailures()
+        {
+            var settings = Settings.Current;
+            Install(Good, ReleaseOf(Good));
+            ApiKeys.Save("openrouter", RouterKey);
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            Assert(ManagedPi.Sync(settings) && Revision() == 2, "The key was not copied: " + Revision());
+            string copied = File.ReadAllText(KeyFile);
+
+            // (a) The count cannot be announced: the key file is not touched.
+            ApiKeys.Save("gemini", GeminiKey);
+            settings.ManagedPiServices = new List<string> { "openrouter", "gemini" };
+            // FileShare.Read lets the count be read but not replaced, so the write through keys-revision.new is reached.
+            var leftBehind = new List<string>();
+            foreach (var share in new[] { FileShare.None, FileShare.Read })
+            {
+                using (new FileStream(RevisionFile, FileMode.Open, FileAccess.Read, share))
+                    Assert(!ManagedPi.Sync(settings), "A sync succeeded although the count could not be announced (sharing " + share + ").");
+                Assert(File.ReadAllText(KeyFile) == copied, "The key file changed before the change was announced (sharing " + share + ").");
+                Assert(Revision() == 2, "The count moved although it could not be written (sharing " + share + "): " + Revision());
+                if (File.Exists(PendingRevisionFile)) leftBehind.Add(share.ToString());
+            }
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(GeminiKey) && Revision() == 4, "The change was not made once the count was free: " + Revision());
+            Assert(!File.Exists(PendingRevisionFile), "keys-revision.new was left behind.");
+
+            // (b) The key file cannot be replaced: the count stays odd, the old keys stay, no second copy is left.
+            copied = File.ReadAllText(KeyFile);
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            using (new FileStream(KeyFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+                Assert(!ManagedPi.Sync(settings), "A sync succeeded although the key file could not be replaced.");
+            Assert(Revision() == 5, "A failed change did not leave the count odd: " + Revision());
+            Assert(File.ReadAllText(KeyFile) == copied && !File.Exists(PendingKeyFile), "A failed change altered the key file or left auth.json.new.");
+            Assert(ManagedPi.Sync(settings) && !File.ReadAllText(KeyFile).Contains(GeminiKey) && Revision() == 6, "The next sync did not complete the change: " + Revision());
+
+            // (c) A count left odd with the key file already right is closed by a sync that changes nothing else.
+            copied = File.ReadAllText(KeyFile);
+            File.WriteAllText(RevisionFile, "7");
+            Assert(ManagedPi.Sync(settings) && Revision() == 8 && File.ReadAllText(KeyFile) == copied, "An odd count was not closed: " + Revision());
+            Assert(ManagedPi.Sync(settings) && Revision() == 8, "A closed count moved again: " + Revision());
+
+            // Last, so that the rest of the protocol is checked even while this fails.
+            Assert(leftBehind.Count == 0, "keys-revision.new was left behind by a failed announcement (sharing " + string.Join(", ", leftBehind) + ").");
         }
 
         private static void DemoLeavesKeysAlone()

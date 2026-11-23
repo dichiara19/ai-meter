@@ -354,32 +354,33 @@ namespace AIMeter
             }
             try
             {
-                if (entries.Count == 0)
-                {
-                    bool held = File.Exists(KeyFile);
-                    DeleteKeyFiles();
-                    if (held) AdvanceRevision();
-                    return true;
-                }
-                string text = Json.Serialize(entries);
-                if (File.Exists(KeyFile) && File.ReadAllText(KeyFile, Encoding.UTF8) == text)
+                string text = entries.Count == 0 ? null : Json.Serialize(entries);
+                bool unchanged = text == null ? !File.Exists(KeyFile) : File.Exists(KeyFile) && File.ReadAllText(KeyFile, Encoding.UTF8) == text;
+                if (unchanged)
                 {
                     if (File.Exists(PendingKeyFile)) File.Delete(PendingKeyFile);
+                    // A change whose end could not be recorded earlier is closed now.
+                    if (Revision() % 2 != 0) WriteRevision(Revision() + 1);
                     return true;
                 }
-                Directory.CreateDirectory(ConfigFolder);
-                try
+                // The change is announced before the key file is touched and closed after it: see Revision.
+                if (Revision() % 2 == 0) WriteRevision(Revision() + 1);
+                if (text == null) DeleteKeyFiles();
+                else
                 {
-                    File.WriteAllText(PendingKeyFile, text, new UTF8Encoding(false));
-                    if (File.Exists(KeyFile)) File.Replace(PendingKeyFile, KeyFile, null);
-                    else File.Move(PendingKeyFile, KeyFile);
+                    try
+                    {
+                        File.WriteAllText(PendingKeyFile, text, new UTF8Encoding(false));
+                        if (File.Exists(KeyFile)) File.Replace(PendingKeyFile, KeyFile, null);
+                        else File.Move(PendingKeyFile, KeyFile);
+                    }
+                    finally
+                    {
+                        // A replacement that failed half-way must not leave a second copy of the keys.
+                        if (File.Exists(PendingKeyFile)) File.Delete(PendingKeyFile);
+                    }
                 }
-                finally
-                {
-                    // A replacement that failed half-way must not leave a second copy of the keys.
-                    if (File.Exists(PendingKeyFile)) File.Delete(PendingKeyFile);
-                }
-                AdvanceRevision();
+                WriteRevision(Revision() + 1);
                 return true;
             }
             catch (IOException) { return false; }
@@ -389,17 +390,37 @@ namespace AIMeter
         private static string RevisionFile { get { return Path.Combine(ConfigFolder, "keys-revision"); } }
 
         /// <summary>
-        /// Count one more change of the key file, in a file beside it that holds only that number. A plugin reads the
-        /// keys before and after a task to remove them from what it returns; a count that moved by more than one in
-        /// between tells it that a key came and went unseen, so it withholds the task's output (docs/MCP.md, "Managed
-        /// Pi"). Throws when the count cannot be written, so that the change is reported as failed and tried again.
+        /// The count of the key file's changes, kept in a file beside it that holds only that number (0 while there is
+        /// no file). Every change raises it twice: to an odd number before the key file is touched, to the next even
+        /// one once the change is complete. A plugin reads the keys before and after a task to remove them from what it
+        /// returns, and keeps a task's output only when it started on an even count and ended on the same count or the
+        /// next even one: anything else means that a key may have come and gone unseen, or that a change was under way
+        /// (docs/MCP.md, "Managed Pi"). Announcing first matters: if the count cannot be written, the key file is not
+        /// changed at all; if the key file or the closing count fails, the count stays odd, which no task trusts,
+        /// until a later call finishes it.
         /// </summary>
-        private static void AdvanceRevision()
+        private static long Revision()
         {
             long revision = 0;
             if (File.Exists(RevisionFile)) long.TryParse(File.ReadAllText(RevisionFile, Encoding.UTF8).Trim(), out revision);
+            return Math.Max(0, revision);
+        }
+
+        /// <summary>Write the count through a temporary file, so that a reader never sees it half written.</summary>
+        private static void WriteRevision(long revision)
+        {
             Directory.CreateDirectory(ConfigFolder);
-            File.WriteAllText(RevisionFile, (Math.Max(0, revision) + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), new UTF8Encoding(false));
+            string pending = RevisionFile + ".new";
+            try
+            {
+                File.WriteAllText(pending, revision.ToString(System.Globalization.CultureInfo.InvariantCulture), new UTF8Encoding(false));
+                if (File.Exists(RevisionFile)) File.Replace(pending, RevisionFile, null);
+                else File.Move(pending, RevisionFile);
+            }
+            finally
+            {
+                if (File.Exists(pending)) File.Delete(pending);
+            }
         }
 
         /// <summary>Delete the key file and a half-written one; throws when either cannot be deleted.</summary>
