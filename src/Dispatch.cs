@@ -81,6 +81,7 @@ namespace AIMeter
             }
             // A plan agent starts from an empty environment, so no API key or base URL can make it bill the API (ADR 0003).
             plan.CleanEnvironment = access.Plan || kind.Dispatch.CleanEnvironment;
+            plan.EnvironmentPolicy = plan.CleanEnvironment ? "clean" : place.EnvironmentPolicy;
             if (access.Plan && kind.Plan == null) return plan.Refuse(kind.Name + " has no plan in its definition");
             // The program's arguments for one run of the agent with these arguments, in a folder (inside WSL only).
             Func<string, List<string>, List<string>> wrap;
@@ -183,11 +184,16 @@ namespace AIMeter
             return Regex.Replace(template, @"\{(provider|model|workspace|config)\}", m => values[m.Groups[1].Value] ?? m.Value);
         }
 
-        /// <summary>Whether a Windows path leads into a WSL distribution's files (\\wsl.localhost\… or \\wsl$\…).</summary>
+        /// <summary>
+        /// Whether a Windows path leads into a WSL distribution's files: \\wsl.localhost\… or \\wsl$\…, also in their
+        /// extended form (\\?\UNC\wsl.localhost\…). A drive letter mapped to such a share is not recognised.
+        /// </summary>
         internal static bool InsideWsl(string path)
         {
             if (string.IsNullOrEmpty(path)) return false;
             string unified = path.Replace('/', '\\');
+            const string extended = @"\\?\UNC\";
+            if (unified.StartsWith(extended, StringComparison.OrdinalIgnoreCase)) unified = @"\\" + unified.Substring(extended.Length);
             return unified.StartsWith(@"\\wsl.localhost\", StringComparison.OrdinalIgnoreCase) || unified.StartsWith(@"\\wsl$\", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -221,6 +227,11 @@ namespace AIMeter
             public bool Supported, VersionVerified;
             /// <summary>Start from an empty environment plus Environment, never the plugin's own (plan agents).</summary>
             public bool CleanEnvironment;
+            /// <summary>
+            /// How the plugin builds the agent's environment: "clean" (see CleanEnvironment), "no_credentials" (the
+            /// plugin's own, without the variables that hold keys, tokens or service addresses) or null (the plugin's own).
+            /// </summary>
+            public string EnvironmentPolicy;
             /// <summary>For a plan agent: the sign-in check to pass before starting it, and "included_in_plan".</summary>
             public SignInCheck SignIn;
             public string Billing;

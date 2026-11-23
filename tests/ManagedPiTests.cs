@@ -31,6 +31,11 @@ namespace AIMeter
             test("Git Bash is found in Git's folders or beside git.exe on PATH, never under the Windows folder", () => Isolated(FindsGitBash));
             test("For the same model a user's own agent comes before the managed Pi, even one that sends more tokens", () => Isolated(OwnAgentBeforeManagedCopy));
             test("The Store build does not offer the managed Pi, even with a copy on disk", () => Isolated(StoreBuildDoesNotOffer));
+            test("Only a plain key reaches the managed Pi, and a key changed or removed since the last sync gives no access", () => Isolated(CopiesPlainKeysOnly));
+            test("Remove and Sync take turns: once Remove has returned, no sync brings a key file back", () => Isolated(RemoveAndSyncTakeTurns));
+            test("Saving the settings reports whether the file was written", () => Isolated(SavingSettingsReportsFailure));
+            test("The managed Pi refuses WSL folders in their extended form and inherits no credentials", () => Isolated(ExtendedWslPathsAndEnvironmentPolicy));
+            test("Installing over an older release brings back the keys of the services already ticked", () => Isolated(InstallOverOlderReleaseRestoresKeys));
         }
 
         private static void Translations()
@@ -690,9 +695,18 @@ namespace AIMeter
             var after = Dispatch.Describe(gone, Model, Dispatch.Modify, workspace, "windows", null, gone.Version);
             Assert(gone.Shells.Length == 0 && after.Alternatives.Count == 0 && after.Commands == "powershell", "The git_bash alternative outlived its bash.exe.");
 
-            // Git Bash uninstalled: the next sync unbinds it.
+            // Git Bash no longer found: the binding stays, so that a task already described fails in Pi rather than
+            // searching for another bash.exe, and no new task is offered the bash tool.
             ManagedPi.LocateGitBash = () => null;
-            Assert(ManagedPi.Sync(Settings.Current) && !File.Exists(ShellSettingsFile), "The copy's settings still name a Git Bash that is not found.");
+            Assert(ManagedPi.Sync(Settings.Current) && Json.Str(Json.ParseFile(ShellSettingsFile), "shellPath") == fakeBash, "The binding was taken back when Git Bash was no longer found.");
+            Assert(ManagedPi.BoundShells.Length == 0, "A binding to a missing bash.exe counts as a shell.");
+
+            // Another Git Bash found later replaces the binding.
+            string otherBash = FakeGitBash();
+            ManagedPi.LocateGitBash = () => otherBash;
+            Assert(ManagedPi.Sync(Settings.Current) && Json.Str(Json.ParseFile(ShellSettingsFile), "shellPath") == otherBash, "A Git Bash found later did not replace the binding.");
+            Assert(ManagedPi.BoundShells.SequenceEqual(new[] { "git_bash" }) && ManagedAccess(ScanOf(Home(), false), "openrouter").Shells.SequenceEqual(new[] { "git_bash" }),
+                "The new binding is not offered.");
         }
 
         private static void FindsGitBash()
@@ -782,6 +796,149 @@ namespace AIMeter
                 Assert(!Items(listed, "candidates").Any(c => IsManaged(Json.Obj(c, "runtime"))), "The Store build lists a managed candidate.");
             }
             finally { Native.PackagedOverride = false; }
+        }
+
+        private static bool OffersManaged(string service)
+        {
+            return ScanOf(Home(), false).Access.Any(a => a.Managed && a.Service == service);
+        }
+
+        private static void CopiesPlainKeysOnly()
+        {
+            var settings = Settings.Current;
+            var router = Definitions.Get("openrouter");
+            string provider;
+            Install(Good, ReleaseOf(Good));
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            ApiKeys.Save("openrouter", RouterKey);
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey) && OffersManaged("openrouter"), "A plain key was not copied.");
+
+            // Pi would run a value starting with "!" as a command, and may read others from the environment.
+            var notPlain = new[] { "!echo sk-or-v1-0123456789", "$OPENROUTER_API_KEY", "sk-or v1-0123456789", "sk-or\tv1-0123456789", "sk-or\nv1-0123456789",
+                "sk-or\u0001v1-0123456789", "sk-or\u00a0v1-0123456789", "1234567" };
+            foreach (var bad in notPlain)
+            {
+                string shown = bad.Replace("\t", "\\t").Replace("\n", "\\n").Replace("\u0001", "\\u0001").Replace("\u00a0", "\\u00a0");
+                ApiKeys.Save("openrouter", RouterKey);
+                Assert(ManagedPi.Sync(settings) && File.Exists(KeyFile), "The plain key was not copied back before " + shown + ".");
+                ApiKeys.Save("openrouter", bad);
+                Assert(!ManagedPi.ServicesWithKey().Any(d => d.Id == "openrouter"), "A service whose key is not plain can be copied: " + shown);
+                Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "A key that is not plain was copied, or the earlier entry stayed: " + shown);
+                Assert(!OffersManaged("openrouter") && ManagedPi.KeyFor(router, out provider) == null, "A key that is not plain gives access: " + shown);
+            }
+
+            // Saved keys are trimmed, and eight characters are enough.
+            ApiKeys.Save("openrouter", "  " + RouterKey + " \t");
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile) == "{\"openrouter\":{\"type\":\"api_key\",\"key\":\"" + RouterKey + "\"}}", "A key with white space around it was not copied trimmed.");
+            ApiKeys.Save("openrouter", "12345678");
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains("\"12345678\"") && OffersManaged("openrouter"), "A plain key of eight characters was refused.");
+
+            // Changed or removed in AI Meter while the file could not be rewritten: the file's key gives no access.
+            ApiKeys.Save("openrouter", RouterKey);
+            Assert(ManagedPi.Sync(settings) && OffersManaged("openrouter"), "The key was not copied again.");
+            ApiKeys.Save("openrouter", RouterKey + "-rotated");
+            Assert(File.ReadAllText(KeyFile).Contains(RouterKey) && !OffersManaged("openrouter") && ManagedPi.KeyFor(router, out provider) == null,
+                "A key replaced in AI Meter still gives access through the file.");
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey + "-rotated") && OffersManaged("openrouter"), "The rotated key was not copied.");
+            ApiKeys.Remove("openrouter");
+            Assert(File.Exists(KeyFile) && !OffersManaged("openrouter") && ManagedPi.KeyFor(router, out provider) == null, "A key removed in AI Meter still gives access through the file.");
+        }
+
+        private static void RemoveAndSyncTakeTurns()
+        {
+            var settings = Settings.Current;
+            ApiKeys.Save("openrouter", RouterKey);
+            for (int round = 0; round < 5; round++)
+            {
+                Install(Good, ReleaseOf(Good));
+                settings.ManagedPiServices = new List<string> { "openrouter" };
+                Assert(ManagedPi.Sync(settings) && File.Exists(KeyFile), "The key was not copied in round " + round + ".");
+
+                Exception failure = null;
+                var syncing = new System.Threading.Thread(() =>
+                {
+                    try { for (int i = 0; i < 50; i++) ManagedPi.Sync(settings); }
+                    catch (Exception e) { failure = e; }
+                });
+                syncing.Start();
+                ManagedPi.Remove(settings);
+                syncing.Join();
+                Assert(failure == null, "A sync beside Remove threw: " + (failure == null ? "" : failure.Message));
+                Assert(!File.Exists(KeyFile) && !File.Exists(PendingKeyFile) && !Directory.Exists(ManagedPi.Root), "A key file or the copy outlived Remove in round " + round + ".");
+                Assert(settings.ManagedPiServices.Count == 0 && !ManagedPi.Installed, "Remove did not clear the choices or the copy in round " + round + ".");
+                Assert(ManagedPi.Sync(settings) && !Directory.Exists(ManagedPi.Root), "A sync after Remove wrote files again in round " + round + ".");
+            }
+        }
+
+        private static void SavingSettingsReportsFailure()
+        {
+            string file = Path.Combine(Settings.Folder, "settings.json");
+            Assert(Settings.Current.Save() && File.Exists(file), "A normal save did not report success.");
+            using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None))
+                Assert(!Settings.Current.Save(), "A save over a settings file held by another handle reported success.");
+            Assert(Settings.Current.Save(), "A save once the file was free again did not report success.");
+        }
+
+        private static void ExtendedWslPathsAndEnvironmentPolicy()
+        {
+            NetworkBackoff.Clear();
+            foreach (var inside in new[] { @"\\?\UNC\wsl.localhost\Ubuntu\home\me\repo", @"\\?\UNC\wsl$\Ubuntu\home\me\repo", @"\\?\unc\WSL.LOCALHOST\Ubuntu\home\me" })
+                Assert(Dispatch.InsideWsl(inside), "An extended path into WSL was not recognised: " + inside);
+            foreach (var outside in new[] { @"\\?\C:\work", @"C:\work", @"\\?\UNC\server\share\work" })
+                Assert(!Dispatch.InsideWsl(outside), "A Windows path was taken for WSL: " + outside);
+
+            InstallWithKeys();
+            var router = ManagedAccess(ScanOf(Home(), false), "openrouter");
+            foreach (var inside in new[] { @"\\?\UNC\wsl.localhost\Ubuntu\home\me\repo", @"\\?\UNC\wsl$\Ubuntu\home\me\repo" })
+            {
+                var refused = Dispatch.Describe(router, Model, Dispatch.Modify, inside, "windows", null, router.Version);
+                Assert(!refused.Supported && refused.Reason.Contains("Windows folders only"), "An extended workspace inside WSL was accepted: " + inside);
+            }
+            var extendedDrive = Dispatch.Describe(router, Model, Dispatch.Modify, @"\\?\C:\work", "windows", null, router.Version);
+            Assert(extendedDrive.Supported, "An extended path on a drive was refused: " + extendedDrive.Reason);
+
+            var modify = Dispatch.Describe(router, Model, Dispatch.Modify, @"C:\work", "windows", null, router.Version);
+            Assert(modify.EnvironmentPolicy == "no_credentials" && !modify.CleanEnvironment, "The managed copy may inherit the plugin's credentials: " + (modify.EnvironmentPolicy ?? "null"));
+
+            var snap = Fixture();
+            string home = Home();
+            var server = new McpServer(() => snap, () => false, null, null, () => ScanOf(home, false), new LeaseBook(null));
+            string raw;
+            var described = Call(server, "describe_dispatch", "{\"service\":\"openrouter\",\"model\":\"" + Model + "\",\"runtime\":\"pi\",\"managed\":true,\"mode\":\"modify\",\"workspace\":\"C:\\\\w\"}", out raw);
+            Assert(Json.Str(described, "environment_policy") == "no_credentials", "describe_dispatch lacks the no_credentials policy: " + raw);
+
+            // A plan agent keeps its clean environment; Pi in WSL has no policy.
+            var claude = Candidates.PlanAccess("claude", "claude", "wsl", "Test-1");
+            claude.Program = "/home/me/.local/bin/claude";
+            claude.Home = "/home/me";
+            var plan = Dispatch.Describe(claude, "sonnet", null, @"C:\work\repo", "windows", "Test-1", null);
+            Assert(plan.Supported && plan.CleanEnvironment && plan.EnvironmentPolicy == "clean", "A plan agent lost its clean environment: " + plan.Reason + " " + (plan.EnvironmentPolicy ?? "null"));
+            var wsl = Candidates.Access("openrouter", "pi", "wsl", RouterKey);
+            wsl.Provider = "openrouter";
+            wsl.Program = "/home/me/.npm-global/bin/pi";
+            var inWsl = Dispatch.Describe(wsl, Model, Dispatch.Modify, "/home/me/project", "wsl", "Ubuntu-24.04", "1.4.0");
+            Assert(inWsl.Supported && inWsl.EnvironmentPolicy == null && !inWsl.CleanEnvironment, "Pi in WSL was given an environment policy: " + (inWsl.EnvironmentPolicy ?? "null"));
+        }
+
+        private static void InstallOverOlderReleaseRestoresKeys()
+        {
+            var settings = Settings.Current;
+            string older = Path.Combine(ManagedPi.Root, "1.0.0");
+            Directory.CreateDirectory(older);
+            File.WriteAllText(Path.Combine(older, "pi.exe"), "older Pi");
+            Directory.CreateDirectory(ManagedPi.ConfigFolder);
+            File.WriteAllText(KeyFile, "{\"openrouter\":{\"type\":\"api_key\",\"key\":\"" + RouterKey + "\"}}");
+            ApiKeys.Save("openrouter", RouterKey);
+            settings.ManagedPiServices = new List<string> { "openrouter" };
+            Assert(!ManagedPi.Installed && ManagedPi.OtherVersionInstalled == "1.0.0", "The older release does not look like one.");
+
+            // An older release is not the adopted one: its key file goes.
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "An older release kept its key file.");
+
+            // As the controller does: install, then sync.
+            Install(Good, ReleaseOf(Good));
+            Assert(!Directory.Exists(older) && ManagedPi.OtherVersionInstalled == null, "The older release was left.");
+            Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey) && OffersManaged("openrouter"), "The ticked service's key did not come back after the installation.");
         }
     }
 }

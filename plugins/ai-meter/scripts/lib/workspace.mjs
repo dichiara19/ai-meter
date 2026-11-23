@@ -9,8 +9,8 @@
 // reach it, which is why the agent definitions also restrict what the agent may do.
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, lstatSync, mkdirSync, rmSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { copyFileSync, lstatSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { basename, dirname, join, resolve, win32 } from "node:path";
 
 function git(folder, ...args) {
   return gitWithInput(folder, null, ...args);
@@ -42,6 +42,24 @@ export function repositoryOf(workspace) {
  */
 export function isInsideWsl(path) {
   return /^[\\/]{2}(\?[\\/]UNC[\\/])?wsl(\.localhost|\$)([\\/]|$)/i.test(String(path || ""));
+}
+
+/**
+ * Whether a workspace is inside WSL, judged on every spelling of it, so that how the caller wrote the path does not
+ * matter: as given, resolved against cwd ("." from a WSL share), its real path (realPath, which may give the share
+ * behind a mapped drive; a failure is ignored) and its repository's top folder (top, as Git reports it, which Git for
+ * Windows writes with forward slashes). Pure apart from what realPath reads.
+ */
+export function workspaceInsideWsl(workspace, { cwd = process.cwd(), realPath = realpathSync.native, top = null } = {}) {
+  // A Windows or UNC working folder is resolved the Windows way whatever system runs this, so that tests run anywhere.
+  const resolved = /^([A-Za-z]:|[\\/]{2})/.test(cwd) ? win32.resolve(cwd, workspace) : resolve(cwd, workspace);
+  let real = null;
+  try {
+    real = realPath(resolved);
+  } catch {
+    // A folder that cannot be resolved further is judged on its other spellings.
+  }
+  return [workspace, resolved, real, top].some(isInsideWsl);
 }
 
 /**

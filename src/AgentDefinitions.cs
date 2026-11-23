@@ -213,6 +213,7 @@ namespace AIMeter
                     Arguments = ArgumentsFrom(Json.Obj(p, "arguments")),
                     Environment = Json.Obj(p, "environment"),
                     Providers = ServiceDefinition.Strings(p, "providers").ToArray(),
+                    EnvironmentPolicy = Json.Str(p, "environment_policy") == "no_credentials" ? "no_credentials" : null,
                 };
                 place.Notes.AddRange(ServiceDefinition.Strings(p, "notes"));
                 AddStrings(place.Output, Json.Obj(p, "output"));
@@ -267,6 +268,11 @@ namespace AIMeter
         /// only after it has prepared what that shell needs (docs/MCP.md, "Managed Pi").
         /// </summary>
         public readonly Dictionary<string, Dictionary<string, List<string>>> Alternatives = new Dictionary<string, Dictionary<string, List<string>>>();
+        /// <summary>
+        /// "no_credentials" when the agent must not inherit the variables of the plugin's environment that hold keys,
+        /// tokens or service addresses (the managed copy: it has its own key file); null to inherit them all.
+        /// </summary>
+        public string EnvironmentPolicy;
         /// <summary>For a managed copy: the provider ids its build has built in, so a key alone is enough to call them.</summary>
         public string[] Providers = new string[0];
 

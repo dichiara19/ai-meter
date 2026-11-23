@@ -34,10 +34,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canRead, readerFor, shortError, summarise } from "./agents.mjs";
 import { place, ToolError, withMeter } from "./meter.mjs";
-import { checkSignIn, cleanEnvironment, coordinatorOf } from "./plan.mjs";
-import { managedSecrets, mentions, redact } from "./secrets.mjs";
+import { checkSignIn, cleanEnvironment, coordinatorOf, environmentFor, knowsPolicy } from "./plan.mjs";
+import { managedSecrets, mentions, redact, union } from "./secrets.mjs";
 import { shellFor } from "./shell.mjs";
-import { createSnapshot, createWorktree, describeChanges, isInsideWsl, removeSnapshot, repositoryOf } from "./workspace.mjs";
+import { createSnapshot, createWorktree, describeChanges, isInsideWsl, removeSnapshot, repositoryOf, workspaceInsideWsl } from "./workspace.mjs";
 
 const ENDED = new Set(["completed", "failed", "cancelled", "timed_out"]);
 const KEEP_DAYS = 7;
@@ -63,9 +63,18 @@ export function load(id) {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
-function save(job) {
+/**
+ * Write a job's state. guard, in the worker, holds the managed copy's keys for this job (in memory only) and whether
+ * any was found: the job is then saved redacted as a whole, so nothing it holds (answer, activity, a worktree's commit
+ * subjects and file names, error messages, skipped reasons, notes) can carry a key into job.json, from which every
+ * report is made. The job object itself is left as it is, apart from the warning managed_key_redacted.
+ */
+function save(job, guard = null) {
+  const secrets = guard?.secrets || [];
+  if (mentions(job, secrets)) guard.redacted = true;
+  if (guard?.redacted) job.warnings = [...new Set([...(job.warnings || []), "managed_key_redacted"])];
   const file = join(folderOf(job.id), "job.json");
-  writeFileSync(file + ".tmp", JSON.stringify(job, null, 2));
+  writeFileSync(file + ".tmp", JSON.stringify(secrets.length ? redact(job, secrets) : job, null, 2));
   renameSync(file + ".tmp", file);
 }
 
@@ -125,7 +134,10 @@ export function start(options) {
   if (!options.workspace || !existsSync(options.workspace)) throw new Error("workspace must be an existing folder: " + options.workspace);
   const mode = options.mode || "read_only";
   if (mode !== "read_only" && mode !== "modify") throw new Error("mode must be read_only or modify.");
-  repositoryOf(options.workspace);
+  const repository = repositoryOf(options.workspace);
+  // Judged on the repository's root and the workspace's real path too, so that "." or a mapped drive in a WSL share is
+  // recognised however the caller spells it (the managed Pi works on Windows folders only).
+  const insideWsl = workspaceInsideWsl(options.workspace, { top: repository });
   const timeout = Math.min(Math.max(Number(options.timeout_seconds) || DEFAULT_TIMEOUT_SECONDS, 5), MAXIMUM_TIMEOUT_SECONDS);
 
   prune();
@@ -145,6 +157,7 @@ export function start(options) {
     // An agent in another WSL distribution cannot be started from this one (choose skips it).
     ...(from === "wsl" && process.env.WSL_DISTRO_NAME ? { from_distro: process.env.WSL_DISTRO_NAME } : {}),
     workspace: options.workspace,
+    ...(insideWsl ? { inside_wsl: true } : {}),
     mode,
     timeout_seconds: timeout,
     wanted: {
@@ -219,6 +232,7 @@ export async function runJob(id) {
 
   const deadline = Date.now() + job.timeout_seconds * 1000;
   const control = new AbortController();
+  const guard = { secrets: [], redacted: false };   // The managed copy's keys, once a managed candidate is chosen.
   const watch = setInterval(() => {
     if (existsSync(join(folderOf(id), "cancel"))) control.abort(new Stopped("cancelled"));
     else if (Date.now() > deadline) control.abort(new Stopped("timed_out"));
@@ -228,7 +242,8 @@ export async function runJob(id) {
     if (!job.from) throw new Error("Delegation needs Windows or WSL, where AI Meter runs.");
     const chosen = await choose(job, control.signal);
     if (!chosen) return;
-    await runAgent(job, chosen, task, control.signal);
+    guard.secrets = chosen.secrets;
+    await runAgent(job, chosen, task, control.signal, guard);
   } catch (error) {
     const why = control.signal.aborted ? control.signal.reason.why : null;
     if (job.snapshot) removeSnapshot(job.snapshot);
@@ -243,7 +258,7 @@ export async function runJob(id) {
     job.status = why || "failed";
     job.error = why === "cancelled" ? null : why === "timed_out" ? "Timed out before the agent started." : error.message;
     job.ended_at = new Date().toISOString();
-    save(job);
+    save(job, guard);
   } finally {
     clearInterval(watch);
   }
@@ -293,8 +308,9 @@ async function choose(job, signal) {
       // managed goes back to describe_dispatch, which then describes AI Meter's own copy of the agent (ADR 0004).
       const which = { service: c.service, model: c.model, runtime: c.runtime.name, where: c.runtime.where, ...pick(c.runtime, ["distro"]), ...(c.runtime.managed ? { managed: true } : {}) };
       if (refusedPools.has(c.pool)) continue;
-      // AI Meter is asked about the snapshot or worktree, which is on Windows even for a repository in WSL.
-      if (which.managed && isInsideWsl(job.workspace)) {
+      // AI Meter is asked about the snapshot or worktree, which is on Windows even for a repository in WSL; start() judged
+      // the repository on every spelling of its path (inside_wsl), and the path as given is checked again here.
+      if (which.managed && (job.inside_wsl || isInsideWsl(job.workspace))) {
         job.skipped.push({ ...which, reason: "the managed Pi works on Windows folders only; this repository is inside WSL" });
         continue;
       }
@@ -319,6 +335,25 @@ async function choose(job, signal) {
       }
       if (!plan.supported) {
         job.skipped.push({ ...which, reason: plan.reason });
+        continue;
+      }
+      // Fail closed: an agent is never started with the full environment because its policy was not understood, and
+      // the managed Pi never without a policy that keeps the coordinator's credentials from it.
+      if (!knowsPolicy(plan.environment_policy)) {
+        job.skipped.push({ ...which, reason: "AI Meter described an environment policy this plugin does not know (" + plan.environment_policy + "); update the plugin" });
+        continue;
+      }
+      if (plan.managed && plan.environment_policy !== "no_credentials" && plan.environment_policy !== "clean") {
+        job.skipped.push({ ...which, reason: "AI Meter did not describe an environment without credentials for the managed Pi" });
+        continue;
+      }
+      // The managed copy's keys, read before anything is claimed: if they cannot be known, the answer could not be
+      // kept free of them, so the candidate is not started (secrets.mjs).
+      let secrets = [];
+      try {
+        secrets = managedSecrets(plan);
+      } catch (error) {
+        job.skipped.push({ ...which, reason: error.message });
         continue;
       }
       // A plan agent must be signed in to its plan, checked with the environment it will start with (ADR 0003).
@@ -353,8 +388,8 @@ async function choose(job, signal) {
       job.lease_id = lease.lease_id;
       const warnings = [...new Set([...(c.warnings || []), ...(plan.warnings || [])])];
       if (warnings.length) job.warnings = warnings;
-      save(job);
-      return { candidate: c, plan, lease };
+      save(job, { secrets, redacted: false });
+      return { candidate: c, plan, lease, secrets };
     }
 
     job.status = "failed";
@@ -368,7 +403,7 @@ async function choose(job, signal) {
   }, signal);
 }
 
-async function runAgent(job, chosen, task, signal) {
+async function runAgent(job, chosen, task, signal, guard) {
   const { plan } = chosen;
   const folder = folderOf(job.id);
 
@@ -380,23 +415,22 @@ async function runAgent(job, chosen, task, signal) {
 
   const reader = readerFor(plan.runtime, job.id);   // The worktree or snapshot folder is named after the job.
   reader.allowance = chosen.lease.budget?.max_cost || 0;
-  // The managed copy's keys, held here only: each event is redacted before the reader sees it, so that nothing cut
-  // from it later (answer, error, activity) can keep part of a key; the summary is checked again at the end.
-  const secrets = managedSecrets(plan);
-  let redacted = false;
+  // Each event is redacted before the reader sees it, so that nothing cut from it later (answer, error, activity) can
+  // keep part of a key known when it arrived; every save redacts the whole job again with the keys known by then.
   const withoutSecrets = (value) => {
-    if (!mentions(value, secrets)) return value;
-    redacted = true;
-    return redact(value, secrets);
+    if (!mentions(value, guard.secrets)) return value;
+    guard.redacted = true;
+    return redact(value, guard.secrets);
   };
-  // A plan agent never gets this process's environment: no API key or base URL can make it bill an API (ADR 0003).
-  const clean = plan.environment_policy === "clean";
-  // The managed Pi runs commands through a shell the plugin chose, never one Pi finds (shell.mjs, ADR 0004).
-  const shell = shellFor(plan, clean ? cleanEnvironment(plan.environment) : { ...process.env, ...plan.environment });
-  const environment = { ...plan.environment, ...shell.environment };
+  // The policy AI Meter described: a plan agent gets a clean environment, so that no API key or base URL can make it
+  // bill an API (ADR 0003); the managed Pi gets this process's environment without credentials (ADR 0004); choose()
+  // already skipped any policy the plugin does not know. The managed Pi runs commands through the shell AI Meter bound
+  // it to, never one Pi finds (shell.mjs).
+  const policy = plan.environment_policy;
+  const shell = shellFor(plan, environmentFor(policy, plan.environment));
   const child = spawn(plan.program, shell.arguments, {
     cwd: plan.working_directory || undefined,
-    env: clean ? cleanEnvironment(environment) : { ...process.env, ...environment },
+    env: environmentFor(policy, { ...plan.environment, ...shell.environment }),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     detached: OWN_PROCESS_GROUP,   // Its own process group, so that its children can be stopped with it.
@@ -408,7 +442,7 @@ async function runAgent(job, chosen, task, signal) {
   job.output = plan.output;
   job.status = "running";
   job.started_at = new Date().toISOString();
-  save(job);
+  save(job, guard);
 
   const events = createWriteStream(join(folder, "events.jsonl"));
   const errors = createWriteStream(join(folder, "stderr.txt"));
@@ -490,9 +524,16 @@ async function runAgent(job, chosen, task, signal) {
   if (stderrBytes > STDERR_LIMIT_BYTES) errors.write(`\n[AI Meter: ${stderrBytes - STDERR_LIMIT_BYTES} more bytes not kept]\n`);
   await Promise.all([new Promise((resolve) => events.end(resolve)), new Promise((resolve) => errors.end(resolve))]);
 
+  // The key file again, now that the agent has ended: a key added or rotated meanwhile is redacted too. If it cannot be
+  // read, what the agent produced is withheld rather than returned with a key the plugin could not know.
+  let keysUnknown = null;
+  try {
+    guard.secrets = union(guard.secrets, managedSecrets(plan));
+  } catch (error) {
+    keysUnknown = error.message;
+  }
   const summary = withoutSecrets(summarise(reader, exitCode, stopped));
   explainExit(summary, reader, exitCode, stopped, withoutSecrets(stderrHead.toString("utf8")));
-  if (redacted) job.warnings = [...new Set([...(job.warnings || []), "managed_key_redacted"])];
   if (summary.answer.length > ANSWER_LIMIT) {
     summary.answer = summary.answer.slice(0, ANSWER_LIMIT);
     summary.answer_truncated = true;
@@ -500,6 +541,7 @@ async function runAgent(job, chosen, task, signal) {
   job.summary = summary;
   job.exit_code = exitCode;
   if (job.worktree) job.worktree = describeChanges(job.worktree);
+  if (keysUnknown) withhold(job);
   try {
     await release(job.lease_id, {
       outcome: summary.outcome,
@@ -516,16 +558,36 @@ async function runAgent(job, chosen, task, signal) {
   if (job.candidate?.billing === "included_in_plan") job.plan_after = summary.plan_after || (await planWindowsNow(job.candidate.service));
   job.status = summary.outcome;
   if (summary.outcome !== "completed") job.error = summary.error;
+  if (keysUnknown) job.error = WITHHELD + " (" + keysUnknown + ")";
   job.ended_at = new Date().toISOString();
-  save(job);
+  save(job, guard);
 
   // The snapshot goes once the end is saved, so the coordinator never waits on it. On Windows a WSL agent's folder
   // stays open for some time after the agent exits (seen for over ten seconds on 2026-11-11), so the worker keeps
   // trying for a minute; what is still left then is removed when the next job starts (prune).
   if (job.snapshot && !(await removeSnapshotPatiently(job.snapshot))) {
     job.snapshot.left_behind = true;
-    save(job);
+    save(job, guard);
   }
+}
+
+const WITHHELD = "The agent's answer, activity and changes are withheld: the managed Pi's keys could not be read again after it ended, so they could not be removed";
+
+/**
+ * Withhold everything the agent produced that could quote a key the plugin no longer knows: the answer, the activity,
+ * the agent's error, and a worktree's commit subjects, file names and diff size. Counters stay, so that the lease is
+ * released with them, and the worktree keeps its path and the commands to review and discard it.
+ */
+function withhold(job) {
+  const { activity, ...summary } = job.summary;
+  job.summary = { ...summary, answer: WITHHELD + ".", error: summary.error === null ? null : WITHHELD + "." };
+  delete job.summary.answer_truncated;
+  delete job.summary.recovered_errors;
+  if (job.worktree) {
+    const { commits, files, diff_stat, ...worktree } = job.worktree;
+    job.worktree = { ...worktree, withheld: true };
+  }
+  job.warnings = [...new Set([...(job.warnings || []), "managed_key_check_failed"])];
 }
 
 /**

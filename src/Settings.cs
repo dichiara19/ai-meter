@@ -278,10 +278,13 @@ namespace AIMeter
             catch (UnauthorizedAccessException ex) { Program.LogError("settings", ex); }
         }
 
-        /// <summary>Write the settings through a temporary file. Failures are logged; the session keeps its settings in memory.</summary>
-        public void Save()
+        /// <summary>
+        /// Write the settings through a temporary file. Failures are logged; the session keeps its settings in memory.
+        /// Returns false when the file was not written, for the callers that must tell the user.
+        /// </summary>
+        public bool Save()
         {
-            if (keepFileUntouched) return;
+            if (keepFileUntouched) return false;
             try
             {
                 Directory.CreateDirectory(Folder);
@@ -289,9 +292,11 @@ namespace AIMeter
                 File.WriteAllText(tmp, Json.Serialize(this), new UTF8Encoding(false));
                 if (File.Exists(FilePath)) File.Replace(tmp, FilePath, null);
                 else File.Move(tmp, FilePath);
+                return true;
             }
             catch (IOException ex) { Program.LogError("settings-save", ex); }
             catch (UnauthorizedAccessException ex) { Program.LogError("settings-save", ex); }
+            return false;
         }
 
         /// <summary>Windows' default WSL distribution, unless it is Docker Desktop's; "" without one.</summary>

@@ -46,6 +46,8 @@ namespace AIMeter
                         shown = bytes;
                         ui.BeginInvoke(new Action(() => { if (ManagedPiProgress != null) ManagedPiProgress(bytes); }));
                     }, () => managedPiCancelled);
+                    // A copy that replaces an older release gets the keys of the services already ticked.
+                    ManagedPi.Sync(Settings);
                 }
                 catch (OperationCanceledException) { }
                 catch (ManagedPi.InstallException ex) { error = ex.Message; }
@@ -81,7 +83,9 @@ namespace AIMeter
             next.Remove(service);
             if (on) next.Add(service);
             Settings.ManagedPiServices = next;
-            Settings.Save();
+            // A choice that is not on disk would come back at the next start: a withdrawn key would be copied again.
+            if (!Settings.Save())
+                MessageBox.Show(L.T("This choice could not be saved, so it will not last past a restart. Check AI Meter's settings file, then change it again."), "AI Meter", MessageBoxButton.OK, MessageBoxImage.Warning);
             if (!ManagedPi.Sync(Settings))
                 MessageBox.Show(L.T("Pi's key file could not be written. Check that no delegated task is running, then try again."), "AI Meter", MessageBoxButton.OK, MessageBoxImage.Warning);
             RefreshSettingsPage();

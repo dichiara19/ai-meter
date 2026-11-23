@@ -36,6 +36,7 @@ A request to a real model from the Windows build was not part of that test.
    - The managed copy runs with its own configuration folder and never reads or writes the user's `~/.pi`.
    - For each service the user ticks, AI Meter writes that service's key into the managed copy's own key file. This is the later decision that ADR 0001 decision 3 asked for: a stored key reaches a runtime, but only this one, only for the services chosen, and it can be withdrawn.
    - No MCP tool returns a key, and the plugin receives none: it starts the copy with the path of its configuration folder, which is not a secret. A candidate still needs a runtime that holds a key for its service.
+   - *Amended 2026-11-20:* the plugin reads the copy's key file itself, for one purpose: to remove those keys from what it returns to the coordinator, since the agent can read that file. It keeps them in memory for the task and stores or sends none. AI Meter still hands the plugin no key.
    - The key file is plain text, as in any Pi installation, where AI Meter's own store is encrypted for the Windows user. Settings says so beside the choice.
 4. **Windows folders only, in this phase.**
    - The managed copy serves tasks whose folder is on Windows. A folder in WSL keeps using the agents installed there.
@@ -43,7 +44,7 @@ A request to a real model from the Windows build was not part of that test.
 5. **A fixed shell, and tasks that say what they can do.**
    - The plugin starts the managed copy with a shell it has chosen, never with one Pi finds: Git Bash when installed, otherwise the PowerShell tool. WSL's `bash.exe` is never used.
    - The dispatch description states whether commands can be run. A read-only task needs no shell.
-   - *Amended 2026-11-20:* AI Meter binds the shell in the copy's own settings (Pi's `shellPath`, set to the Git Bash it finds and removed when there is none), and the plugin uses the `git_bash` alternative only when `describe_dispatch` offers it, because Pi resolves its shell each time it runs a command.
+   - *Amended 2026-11-20:* AI Meter binds the shell in the copy's own settings (Pi's `shellPath`, set to the Git Bash it finds and, once written, replaced but never removed, so that a missing Git Bash fails closed), and the plugin uses the `git_bash` alternative only when `describe_dispatch` offers it, because Pi resolves its shell each time it runs a command.
 6. **The plugin still runs the agent** (ADR 0002 decision 1). AI Meter describes the dispatch and keeps the leases; it starts no task.
 7. **Store and privacy.**
    - The Store listing discloses the optional download at the start of its description, and the download happens only on the user's request (Store Policies 7.20: 10.2.2, 10.2.3, 10.2.4, 10.1.5).

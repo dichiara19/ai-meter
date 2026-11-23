@@ -27,6 +27,7 @@
           }
         },
         "commands": { "read_only": "none", "modify": "powershell" },
+        "environment_policy": "no_credentials",
         "environment": { "PI_CODING_AGENT_DIR": "{config}", "PI_OFFLINE": "1", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0" },
         "output": {
           "outcome": "stopReason of the last assistant message (stop, length, error, aborted); the exit code stays 0 on those, and is 1 when Pi cannot make a request at all (no key for the provider): then there is no agent_settled event and the reason is on stderr"

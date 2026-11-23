@@ -6,6 +6,7 @@
 //     environment before the agent starts, must show a plan sign-in. Only the one field or text is looked at; the rest
 //     of the output (an account's email, for example) is dropped and never stored;
 //   - which service the coordinator itself runs on, so that AI Meter never offers its own plan.
+// It also holds the lighter "no_credentials" environment of AI Meter's managed Pi (ADR 0004), beside the clean one.
 
 import { spawn } from "node:child_process";
 
@@ -43,6 +44,40 @@ export function cleanEnvironment(extra = {}, base = process.env, platform = proc
 
 /** The variables of an environment that the guard leaves out, by name only: for the tests and the report. */
 export const isBlocked = (name) => NEVER.test(name);
+
+/** Names that usually hold a credential or a service's address, beyond the agents and providers NEVER names. */
+const CREDENTIAL = /(API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE_KEY|ACCESS_KEY)|(_KEY|_BASE_URL|_API_BASE|_ENDPOINT)$/i;
+
+/** Whether a variable's name says it holds a credential or a service address: left out by no_credentials. */
+export const holdsCredential = (name) => NEVER.test(name) || CREDENTIAL.test(name);
+
+/**
+ * The environment of an agent described with environment_policy "no_credentials" (AI Meter's managed Pi, ADR 0004):
+ * this process's environment without any variable whose name holds a credential or a service address, then the
+ * agent's own variables (extra) on top, which are not filtered: AI Meter describes them. Unlike cleanEnvironment, PATH
+ * and every other variable stay, so that git, node and the user's tools still work in the agent's commands. The rule
+ * goes by name only: a key kept in a variable with an innocent name still reaches the agent.
+ */
+export function noCredentialsEnvironment(extra = {}, base = process.env) {
+  const env = {};
+  for (const [name, value] of Object.entries(base)) if (!holdsCredential(name)) env[name] = value;
+  return { ...env, ...(extra || {}) };
+}
+
+/** Whether the plugin knows an environment policy AI Meter describes: none, "clean" or "no_credentials". */
+export const knowsPolicy = (policy) => policy === undefined || policy === null || policy === "clean" || policy === "no_credentials";
+
+/**
+ * The environment an agent starts with under a described policy: "clean" (a plan agent, ADR 0003), "no_credentials"
+ * (the managed Pi), or none (this process's environment). Throws for any other value, so that a policy the plugin does
+ * not know never starts an agent with the full environment.
+ */
+export function environmentFor(policy, extra = {}, base = process.env) {
+  if (policy === "clean") return cleanEnvironment(extra, base);
+  if (policy === "no_credentials") return noCredentialsEnvironment(extra, base);
+  if (knowsPolicy(policy)) return { ...base, ...extra };
+  throw new Error("AI Meter described an environment policy this plugin does not know (" + policy + "); update the plugin");
+}
 
 /**
  * Run AI Meter's sign_in_check: its program and arguments, with env, without a shell, for at most timeoutMs. Resolves

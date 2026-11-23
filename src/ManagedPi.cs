@@ -247,13 +247,18 @@ namespace AIMeter
         {
             try
             {
-                DeleteKeyFiles();
-                if (settings != null)
+                // Under the lock Sync writes with: a sync already under way ends first, and one that comes after
+                // finds no choices and no copy, so it cannot bring a key back.
+                lock (ConfigLock)
                 {
-                    settings.ManagedPiServices = new List<string>();
-                    settings.Save();
+                    DeleteKeyFiles();
+                    if (settings != null)
+                    {
+                        settings.ManagedPiServices = new List<string>();
+                        settings.Save();
+                    }
+                    if (Directory.Exists(Root)) Directory.Delete(Root, true);
                 }
-                if (Directory.Exists(Root)) Directory.Delete(Root, true);
             }
             catch (IOException ex) { throw new InstallException(L.T("Pi could not be removed: one of its files is in use. Wait for delegated tasks to end, then try again."), ex); }
             catch (UnauthorizedAccessException ex) { throw new InstallException(L.T("Pi could not be removed: one of its files is in use. Wait for delegated tasks to end, then try again."), ex); }
@@ -277,7 +282,7 @@ namespace AIMeter
         /// <summary>The services whose key can be copied: those Pi has a provider for and AI Meter reads with a key it has now.</summary>
         public static List<ServiceDefinition> ServicesWithKey()
         {
-            return Definitions.All.Where(d => ProviderOf(d) != null && SourceKey(d) != null).ToList();
+            return Definitions.All.Where(d => ProviderOf(d) != null && PlainKey(d) != null).ToList();
         }
 
         /// <summary>
@@ -295,6 +300,20 @@ namespace AIMeter
             if (saved != null) return saved;
             var found = KeyFinder.Find(d);
             return found == null ? null : found.Key;
+        }
+
+        /// <summary>
+        /// The key to copy for a service, or null when there is none or it is not a plain key. Pi does not take every
+        /// value in its key file literally: one that starts with "!" is a command it runs to get the key, and one that
+        /// names an environment variable is read from there (Pi 1.5.2, docs/providers.md). Only a value that can be
+        /// nothing but a key is copied: no "!" or "$" at its start, no white space or control character, eight
+        /// characters or more.
+        /// </summary>
+        private static string PlainKey(ServiceDefinition d)
+        {
+            string key = SourceKey(d);
+            if (key == null || key.Length < 8 || key[0] == '!' || key[0] == '$') return null;
+            return key.Any(c => char.IsWhiteSpace(c) || char.IsControl(c)) ? null : key;
         }
 
         /// <summary>
@@ -325,7 +344,7 @@ namespace AIMeter
             foreach (var id in services)
             {
                 var d = Definitions.Get(id);
-                string provider = ProviderOf(d), key = provider == null ? null : SourceKey(d);
+                string provider = ProviderOf(d), key = provider == null ? null : PlainKey(d);
                 if (key != null) entries[provider] = new Dictionary<string, object> { { "type", "api_key" }, { "key", key } };
             }
             try
@@ -367,9 +386,10 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// The key the copy may use for a service, with the provider id it is kept under; null when it holds none or
-        /// the user has not ticked the service now: a key that could not be deleted after a choice was withdrawn must
-        /// not keep the service on offer. For the runtime scan only, which reports an opaque credential id.
+        /// The key the copy may use for a service, with the provider id it is kept under; null when it holds none, the
+        /// user has not ticked the service now, or the key in the file is no longer the one AI Meter has: a key that
+        /// could not be deleted after a choice was withdrawn, or replaced after the user changed or removed it, must not
+        /// keep the service on offer. For the runtime scan only, which reports an opaque credential id.
         /// </summary>
         internal static string KeyFor(ServiceDefinition d, out string provider)
         {
@@ -377,7 +397,7 @@ namespace AIMeter
             var settings = Settings.Current;
             if (provider == null || settings == null || settings.ManagedPiServices == null || !settings.ManagedPiServices.Contains(d.Id)) return null;
             string key = JPath.Str(JPath.Get(Json.ParseFile(KeyFile), provider + ".key"));
-            return string.IsNullOrEmpty(key) ? null : key;
+            return string.IsNullOrEmpty(key) || key != PlainKey(d) ? null : key;
         }
 
         // ------------------------------------------------------------ shell
@@ -388,18 +408,20 @@ namespace AIMeter
         private static string SettingsFile { get { return Path.Combine(ConfigFolder, "settings.json"); } }
 
         /// <summary>
-        /// Name the Git Bash found on this PC as the copy's shell (Pi's shellPath setting), or name none when there is
-        /// no Git Bash. With its bash tool, Pi otherwise searches for a bash.exe each time it runs a command, and can
-        /// find WSL's launcher; with shellPath set it uses that file only, and fails when the file is gone (Pi 1.5.2,
-        /// utils/shell.ts). The copy's settings file holds nothing else and is AI Meter's to write.
+        /// Name the Git Bash found on this PC as the copy's shell (Pi's shellPath setting). With its bash tool, Pi
+        /// otherwise searches for a bash.exe each time it runs a command, and can find WSL's launcher; with shellPath
+        /// set it uses that file only, and fails when the file is gone (Pi 1.5.2, utils/shell.ts; seen live on
+        /// 2026-11-20). A binding once written is never taken back, only replaced: should Git Bash disappear, a task
+        /// already described with the bash tool then fails at its first command instead of searching, and new tasks
+        /// are not offered that tool (BoundShells). The copy's settings file holds nothing else and is AI Meter's to write.
         /// </summary>
         private static void BindShell()
         {
             string bash = LocateGitBash();
             try
             {
-                string text = bash == null ? null : Json.Serialize(new Dictionary<string, object> { { "shellPath", bash } });
-                if (text == null) { if (File.Exists(SettingsFile)) File.Delete(SettingsFile); return; }
+                if (bash == null) return;
+                string text = Json.Serialize(new Dictionary<string, object> { { "shellPath", bash } });
                 if (File.Exists(SettingsFile) && File.ReadAllText(SettingsFile, Encoding.UTF8) == text) return;
                 Directory.CreateDirectory(ConfigFolder);
                 File.WriteAllText(SettingsFile, text, new UTF8Encoding(false));

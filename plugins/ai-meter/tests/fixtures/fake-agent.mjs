@@ -25,7 +25,10 @@
 //   nokey     (Pi) exits with 1 after its session event, the reason on stderr, as Pi does without a key;
 //   leak      (Pi) prints auth.json in PI_CODING_AGENT_DIR with a command and quotes every key in its answer, as a
 //             model told to could;
-//   leakerror (Pi) writes auth.json's contents to stderr and exits with 1 before agent_settled.
+//   leakerror (Pi) writes auth.json's contents to stderr and exits with 1 before agent_settled;
+//   leakcommit (Pi) writes a file named after the first key and commits it with the key in the subject, then answers;
+//   rotate    (Pi) adds a new key to auth.json while it runs, as a user could in AI Meter, and quotes it;
+//   breakkeys (Pi) quotes the first key, then leaves auth.json unreadable as JSON.
 // Requests are otherwise priced at zero, as the agents do for free models. A third argument (the managed Pi's shell)
 // is named in Pi's answer: "echo via <shell>: <task>".
 //
@@ -133,6 +136,25 @@ function pi() {
     const auth = readFileSync(authFile, "utf8");
     piTool("bash", { command: "cat " + authFile }, auth, false);
     answer = "The keys are: " + Object.values(JSON.parse(auth)).map((entry) => entry.key).join(" and ") + ".";
+  }
+  if (behaviour === "leakcommit" || behaviour === "rotate" || behaviour === "breakkeys") {
+    const auth = JSON.parse(readFileSync(authFile, "utf8"));
+    const first = Object.values(auth)[0].key;
+    answer = "done";
+    if (behaviour === "leakcommit") {
+      writeFileSync(first + ".txt", "x\n");
+      execFileSync("git", ["add", "."]);
+      execFileSync("git", ["-c", "user.email=agent@test", "-c", "user.name=agent", "commit", "-qm", "store " + first]);
+    }
+    if (behaviour === "rotate") {
+      const rotated = "sk-rotated-during-the-task-42";
+      writeFileSync(authFile, JSON.stringify({ ...auth, fresh: { type: "api_key", key: rotated } }));
+      answer = "The new key is " + rotated + ".";
+    }
+    if (behaviour === "breakkeys") {
+      writeFileSync(authFile, "{ broken");
+      answer = "The key is " + first + ".";
+    }
   }
   if (behaviour === "manytools") for (let i = 0; i < 45; i++) piTool("bash", { command: "echo " + i }, "" + i, false);
   if (behaviour === "retried") {

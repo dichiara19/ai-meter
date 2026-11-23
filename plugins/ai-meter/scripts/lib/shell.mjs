@@ -4,9 +4,10 @@
 // usual folders and then for any bash.exe on PATH, where it can find WSL's launcher in System32 and silently run
 // commands inside WSL. AI Meter therefore binds the managed copy to Git Bash: it writes Pi's shellPath setting into
 // the copy's own settings when it finds Git for Windows, and describes the alternative only while that binding holds
-// (Pi 1.5.2 then uses that bash.exe alone, fails if it is gone, and never searches PATH). So the plugin uses the
-// alternative whenever AI Meter offers it, and otherwise keeps the described PowerShell tool; WSL's bash.exe is never
-// chosen. When the plugin also finds Git for Windows itself, it puts Git's bin folder first on PATH, so that git and
+// (Pi 1.5.2 then uses that bash.exe alone and never searches PATH). The binding lives in the copy's own settings and
+// is never withdrawn: if Git Bash later disappears, AI Meter keeps the last shellPath and Pi fails at its first command
+// instead of searching. So the alternative is safe to use whenever AI Meter offers it, and the plugin does; otherwise
+// it keeps the described PowerShell tool. WSL's bash.exe is never chosen. When the plugin also finds Git for Windows itself, it puts Git's bin folder first on PATH, so that git and
 // the tools Git ships resolve to the same installation as the shell; when it does not, the binding alone suffices.
 //
 // Pure functions of an environment and a file-existence check, so they can be tested on any system. Paths are

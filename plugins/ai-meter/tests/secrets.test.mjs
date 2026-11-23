@@ -1,11 +1,13 @@
-// Keeping the managed Pi's keys out of what the plugin saves and reports (scripts/lib/secrets.mjs), and the check that
-// keeps the managed Pi to Windows folders (isInsideWsl in scripts/lib/workspace.mjs). Files are made up here.
+// What keeps the managed Pi away from secrets and WSL: its keys out of what the plugin saves and reports
+// (scripts/lib/secrets.mjs), the coordinator's credentials out of its environment (no_credentials in
+// scripts/lib/plan.mjs), and its work on Windows folders only (scripts/lib/workspace.mjs). Files are made up here.
 
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
-import { managedSecrets, mentions, redact, REDACTED } from "../scripts/lib/secrets.mjs";
-import { isInsideWsl } from "../scripts/lib/workspace.mjs";
+import { environmentFor, holdsCredential, knowsPolicy, noCredentialsEnvironment } from "../scripts/lib/plan.mjs";
+import { managedSecrets, mentions, redact, REDACTED, union } from "../scripts/lib/secrets.mjs";
+import { isInsideWsl, workspaceInsideWsl } from "../scripts/lib/workspace.mjs";
 
 const folder = join("config", "pi");
 const managed = { managed: true, environment: { PI_CODING_AGENT_DIR: folder } };
@@ -20,13 +22,23 @@ test("the managed copy's keys are every key field in its auth.json, short values
   assert.deepEqual(managedSecrets(managed, read), ["sk-or-v1-aaaaaaaa", "gsk_bbbbbbbbbbbb"]);
 });
 
-test("no keys for a plan that is not managed, a missing folder, file or unreadable file", () => {
+test("no keys for a plan that is not managed, or a managed copy without its key file", () => {
   const read = authJson({ openrouter: { key: "sk-or-v1-aaaaaaaa" } });
   assert.deepEqual(managedSecrets({ environment: managed.environment }, read), []);
-  assert.deepEqual(managedSecrets({ managed: true, environment: {} }, read), []);
   assert.deepEqual(managedSecrets({ managed: true, environment: { PI_CODING_AGENT_DIR: "elsewhere" } }, read), [], "a missing file");
-  assert.deepEqual(managedSecrets(managed, authJson("{ not json")), []);
-  assert.deepEqual(managedSecrets(managed, authJson("null")), []);
+});
+
+test("keys that cannot be known stop the caller, without quoting the file", () => {
+  const unknown = /could not be kept out of the report/;
+  assert.throws(() => managedSecrets({ managed: true, environment: {} }, authJson({})), unknown, "no configuration folder named");
+  assert.throws(() => managedSecrets(managed, authJson('{ "a": { "key": "sk-or-v1-aaaaaaaa" ')), (error) => unknown.test(error.message) && !error.message.includes("sk-or"));
+  for (const contents of ["null", "[]", '"text"']) assert.throws(() => managedSecrets(managed, authJson(contents)), unknown, contents);
+  const denied = () => { throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }); };
+  assert.throws(() => managedSecrets(managed, denied), unknown, "a file that exists but cannot be read");
+});
+
+test("union keeps every key once, longest first", () => {
+  assert.deepEqual(union(["abcdefgh", "abcdefgh-longer"], ["abcdefgh", "zzzzzzzzzz"]), ["abcdefgh-longer", "zzzzzzzzzz", "abcdefgh"]);
 });
 
 test("redact replaces every occurrence of every key in nested values, and leaves the original alone", () => {
@@ -59,4 +71,37 @@ test("a repository inside WSL is recognised by either UNC form, either slash and
   for (const path of ["C:\\Users\\u\\repo", "\\\\server\\share\\wsl.localhost", "\\\\wsl.localhostx\\a", "/home/u/repo", "C:\\wsl$\\repo", "", null]) {
     assert.equal(isInsideWsl(path), false, String(path));
   }
+});
+
+test("a workspace is judged inside WSL on every spelling: as given, resolved, its real path and its repository", () => {
+  const nowhere = () => { throw new Error("ENOENT"); };
+  const share = "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo";
+  assert.equal(workspaceInsideWsl(".", { cwd: share, realPath: nowhere }), true, '"." from a WSL share');
+  assert.equal(workspaceInsideWsl("sub", { cwd: "//wsl$/Ubuntu/repo", realPath: nowhere }), true);
+  assert.equal(workspaceInsideWsl("Z:\\repo", { cwd: "C:\\", realPath: () => "\\\\wsl$\\Ubuntu\\repo" }), true, "a mapped drive whose real path is the share");
+  assert.equal(workspaceInsideWsl("Z:\\repo", { cwd: "C:\\", realPath: nowhere, top: "//wsl.localhost/Ubuntu/repo" }), true, "the repository Git reports");
+  assert.equal(workspaceInsideWsl(".", { cwd: "C:\\Users\\u\\repo", realPath: (p) => p, top: "C:/Users/u/repo" }), false);
+  assert.equal(workspaceInsideWsl(".", { cwd: "/home/u/repo", realPath: (p) => p, top: "/home/u/repo" }), false, "a Linux folder");
+});
+
+test("no_credentials leaves out every variable whose name holds a credential or a service address", () => {
+  for (const name of ["OPENROUTER_API_KEY", "GITHUB_TOKEN", "MY_SERVICE_BASE_URL", "my_apikey", "DB_PASSWORD", "SMTP_PASSWD", "CLIENT_SECRET", "GOOGLE_APPLICATION_CREDENTIALS",
+    "SSH_PRIVATE_KEY", "B2_ACCESS_KEY_ID", "STRIPE_KEY", "LLM_API_BASE", "SEARCH_ENDPOINT", "ANTHROPIC_MODEL", "NODE_OPTIONS", "HTTPS_PROXY", "AzureCredential"]) {
+    assert.equal(holdsCredential(name), true, name);
+  }
+  for (const name of ["PATH", "Path", "SystemRoot", "HOME", "USERPROFILE", "LANG", "PI_CODING_AGENT_DIR", "KEYBOARD_LAYOUT", "TEMP", "GIT_EXEC_PATH", "NUMBER_OF_PROCESSORS"]) {
+    assert.equal(holdsCredential(name), false, name);
+  }
+  const base = { Path: "C:\\bin", HOME: "/h", OPENROUTER_API_KEY: "k", GITHUB_TOKEN: "t", MY_SERVICE_BASE_URL: "u", EDITOR: "vim" };
+  assert.deepEqual(noCredentialsEnvironment({ PI_CODING_AGENT_DIR: "C:\\cfg", Path: "C:\\git;C:\\bin" }, base),
+    { Path: "C:\\git;C:\\bin", HOME: "/h", EDITOR: "vim", PI_CODING_AGENT_DIR: "C:\\cfg" }, "the agent's own variables go on top, unfiltered");
+});
+
+test("an environment policy the plugin does not know fails closed", () => {
+  const base = { PATH: "/bin", OPENROUTER_API_KEY: "k" };
+  assert.equal(knowsPolicy("no_credentials") && knowsPolicy("clean") && knowsPolicy(undefined) && knowsPolicy(null), true);
+  assert.equal(knowsPolicy("sandboxed"), false);
+  assert.throws(() => environmentFor("sandboxed", {}, base), /does not know/);
+  assert.deepEqual(environmentFor(undefined, { A: "1" }, base), { ...base, A: "1" }, "no policy: this process's environment, as before");
+  assert.equal(environmentFor("no_credentials", {}, base).OPENROUTER_API_KEY, undefined);
 });

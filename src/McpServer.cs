@@ -781,7 +781,7 @@ namespace AIMeter
             if (plan.Commands != null) described["commands"] = plan.Commands;
             if (plan.Alternatives.Count > 0)
                 described["alternatives"] = plan.Alternatives.Select(a => (object)new Dictionary<string, object> { { "shell", a.Key }, { "arguments", a.Value.Cast<object>().ToList() } }).ToList();
-            if (plan.CleanEnvironment) described["environment_policy"] = "clean";
+            if (plan.EnvironmentPolicy != null) described["environment_policy"] = plan.EnvironmentPolicy;
             if (plan.Billing != null) described["billing"] = plan.Billing;
             if (plan.SignIn != null)
             {

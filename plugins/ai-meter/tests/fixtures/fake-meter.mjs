@@ -82,14 +82,17 @@ function planDispatch(args) {
  * The managed Pi (ADR 0004): its own configuration folder (scenario.pi_config, else a made-up Windows path), which
  * commands a mode runs (none, or PowerShell), and for modify a git_bash alternative, offered as AI Meter offers it only
  * while the copy is bound to Git Bash: scenario.git_bash false withholds it, as when AI Meter found no Git for Windows.
+ * Its environment policy is no_credentials, or scenario.managed_policy when the scenario has one (null for none).
  * The fake agent gets the shell as an extra argument and names it in its answer.
  */
 function managedDispatch(args) {
   const behaviour = (scenario.behaviour || {})[args.runtime] || "ok";
   const modify = args.mode === "modify";
   const bound = scenario.git_bash !== false;
+  const policy = "managed_policy" in scenario ? scenario.managed_policy : "no_credentials";
   return {
     managed: true,
+    ...(policy === null ? {} : { environment_policy: policy }),
     commands: modify ? "powershell" : "none",
     arguments: [agent, args.runtime, behaviour, modify ? "powershell" : "none"],
     ...(modify && bound ? { alternatives: [{ shell: "git_bash", arguments: [agent, args.runtime, behaviour, "git_bash"] }] } : {}),
