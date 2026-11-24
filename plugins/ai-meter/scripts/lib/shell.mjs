@@ -7,8 +7,12 @@
 // (Pi 1.5.2 then uses that bash.exe alone and never searches PATH). The binding lives in the copy's own settings and
 // is never withdrawn: if Git Bash later disappears, AI Meter keeps the last shellPath and Pi fails at its first command
 // instead of searching. So the alternative is safe to use whenever AI Meter offers it, and the plugin does; otherwise
-// it keeps the described PowerShell tool. WSL's bash.exe is never chosen. When the plugin also finds Git for Windows itself, it puts Git's bin folder first on PATH, so that git and
-// the tools Git ships resolve to the same installation as the shell; when it does not, the binding alone suffices.
+// it keeps the described PowerShell tool. WSL's bash.exe is never chosen. When the plugin also finds Git for Windows
+// itself, it puts Git's bin folder first on PATH, so that git and the tools Git ships resolve to the same installation
+// as the shell; when it does not, the binding alone suffices.
+//
+// The copy inside WSL (ADR 0005) is a Linux program with Linux's bash: AI Meter describes it with commands "bash" for
+// modify and "none" for read_only, and no alternatives. None of the above applies to it: it is started as described.
 //
 // Pure functions of an environment and a file-existence check, so they can be tested on any system. Paths are
 // Windows paths whatever system runs the tests, hence node:path's win32 flavour.
@@ -60,7 +64,7 @@ export function findGitBash(env = process.env, exists = existsSync) {
  */
 export function shellFor(plan, env = process.env, exists = existsSync) {
   const described = { name: plan.commands ?? null, arguments: plan.arguments, environment: {} };
-  if (!plan.managed) return described;
+  if (!plan.managed || plan.where === "wsl") return described;
   const alternative = (plan.alternatives || []).find((a) => a.shell === "git_bash");
   if (!alternative) return described;
   const bin = findGitBash(env, exists);

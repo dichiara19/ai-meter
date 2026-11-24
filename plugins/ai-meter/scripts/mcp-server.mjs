@@ -60,7 +60,7 @@ const TOOLS = [
         runtime: text("Only this agent, such as pi or opencode."),
         where: choice("Only agents in this place.", "windows", "wsl"),
         distro: text("Only agents in this WSL distribution."),
-        managed: { type: "boolean", description: "true: only AI Meter's managed Pi, the copy the user installed in AI Meter's Settings (Windows folders only); false: only agents the user installed. Default: either." },
+        managed: { type: "boolean", description: "true: only AI Meter's managed Pi, a copy the user installed in AI Meter's Settings, inside WSL or on Windows (pin one with where; the Windows copy takes Windows folders only); false: only agents the user installed. Default: either." },
         allow_best_effort: bestEffort("Also use, after every ordinary candidate,"),
         allow_free_tier: freeTier("Also use"),
         allow_plan: plan("Also use"),

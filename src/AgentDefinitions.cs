@@ -54,8 +54,9 @@ namespace AIMeter
 
         /// <summary>
         /// The dispatch entry for a place, or null when that place has not been verified. Besides "windows" and "wsl",
-        /// where the user's own installation runs, a definition may have the place ManagedPi.Place: the copy AI Meter
-        /// keeps on Windows (ADR 0004), verified apart from an installation of the user's there.
+        /// where the user's own installation runs, a definition may have the places ManagedPi.Place and
+        /// ManagedPi.PlaceInWsl: the copies AI Meter keeps on Windows (ADR 0004) and inside WSL (ADR 0005), each
+        /// verified apart from an installation of the user's there.
         /// </summary>
         public DispatchPlace PlaceFor(string where)
         {
@@ -205,7 +206,7 @@ namespace AIMeter
                 EnvironmentPolicy = Json.Str(d, "environment_policy"),
             };
             var places = Json.Obj(d, "places");
-            foreach (var where in new[] { "windows", "wsl", ManagedPi.Place })
+            foreach (var where in new[] { "windows", "wsl", ManagedPi.Place, ManagedPi.PlaceInWsl })
             {
                 var p = Json.Obj(places, where);
                 if (p == null) continue;

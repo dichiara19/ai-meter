@@ -148,8 +148,10 @@ namespace AIMeter
                      "the agent in the plugin's place. rank says why each candidate stands where it is; the same request gives the same order. pools gives " +
                      "how many new tasks each pool can take now: models in one pool share it. excluded says why every other model " +
                      "cannot be used; runtimes.unsupported lists the agents found that delegation cannot use, with the reason. " +
-                     "A runtime with managed: true is the copy of Pi that AI Meter keeps on Windows when the user installed it in Settings, " +
-                     "with the keys the user copied into it; runtimes.managed says whether it is installed, and only the user can set it up. " +
+                     "A runtime with managed: true is a copy of Pi that AI Meter keeps, on Windows or inside WSL, when the user installed it in Settings, " +
+                     "with the keys the user copied into it; the copy on Windows is not offered with from: wsl. runtimes.managed lists each place a copy " +
+                     "can be installed in, whether it is installed and reachable, and only the user can set one up; runtimes.environment says whether " +
+                     "WSL runs and Git for Windows is found, so you can tell the user the next step. " +
                      "warnings flags candidates a plugin must watch, such as openrouter_byok_fallback. With include_best_effort, best_effort " +
                      "lists models the service's own list leaves short (price, tool support or limits unstated) that an agent's own model " +
                      "list has at no price: they may fail or stop, so ask the user before using one. With include_free_tier, also models that " +
@@ -181,9 +183,10 @@ namespace AIMeter
                      "environment, for a coding agent and place verified with AI Meter. Start the program without a shell and write the task " +
                      "to its stdin, then close stdin: the task never goes into the arguments. Also says how to tell the end, the outcome, " +
                      "the requests, tokens and per-request cost, and how to stop it. commands says what the agent runs commands with " +
-                     "(none, bash or powershell) when the definition states it. For the managed copy of Pi (managed: true) the arguments " +
-                     "give it PowerShell and no bash; alternatives lists the arguments for git_bash, to use only with the bin folder of " +
-                     "Git for Windows first on PATH, so that Pi never finds WSL's bash.exe. AI Meter starts nothing.",
+                     "(none, bash or powershell) when the definition states it. For a managed copy of Pi (managed: true) managed_config is " +
+                     "its configuration folder as the caller reads it, with the key file and its revision count. The copy on Windows gets " +
+                     "PowerShell and no bash; alternatives lists the arguments for git_bash, to use only with the bin folder of Git for Windows " +
+                     "first on PATH, so that Pi never finds WSL's bash.exe. The copy inside WSL gets the distribution's bash. AI Meter starts nothing.",
                      new Dictionary<string, object>
                      {
                          { "service", Property("string", "The candidate's service.") },
@@ -191,7 +194,7 @@ namespace AIMeter
                          { "runtime", Property("string", "The candidate's runtime, such as pi or opencode.") },
                          { "where", Enum("The candidate's place.", "windows", "wsl") },
                          { "distro", Property("string", "The candidate's WSL distribution, when it has one.") },
-                         { "managed", Property("boolean", "The candidate's runtime.managed, when it has it: true for the copy of Pi that AI Meter keeps, which is described only when asked for so; false or omitted for the user's own installation.") },
+                         { "managed", Property("boolean", "The candidate's runtime.managed, when it has it: true for a copy of Pi that AI Meter keeps, which is described only when asked for so; false or omitted for the user's own installation. where and distro pick the copy.") },
                          { "mode", Enum("read_only (default): the agent can read but not change files. modify: it can change files; run it in a new Git worktree.", Dispatch.ReadOnly, Dispatch.Modify) },
                          { "workspace", Property("string", "The folder the task works in, as seen from where the plugin runs. A placeholder when omitted.") },
                          { "from", Enum("Where the plugin that starts the agent runs (default windows).", "windows", "wsl") },
@@ -206,7 +209,9 @@ namespace AIMeter
                          { "service", Property("string", "The candidate's service.") },
                          { "model", Property("string", "The candidate's model id.") },
                          { "runtime", Property("string", "The candidate's runtime.") },
-                         { "managed", Property("boolean", "The candidate's runtime.managed, when it has it: true for the copy of Pi that AI Meter keeps. Required for it, as in describe_dispatch.") },
+                         { "where", Enum("The candidate's place.", "windows", "wsl") },
+                         { "distro", Property("string", "The candidate's WSL distribution, when it has one.") },
+                         { "managed", Property("boolean", "The candidate's runtime.managed, when it has it: true for a copy of Pi that AI Meter keeps. Required for it, as in describe_dispatch; where and distro pick the copy.") },
                          { "ttl_seconds", Property("integer", "How long the lease lasts without renewal: default 1800, at most 7200.") },
                          { "client", Property("string", "A label for whoever claims, such as claude-code or codex.") },
                          { "coordinator", Property("string", "For a plan candidate: the service the coordinator runs on. Required for plans; the plan's windows are checked again.") },
@@ -328,6 +333,7 @@ namespace AIMeter
                         Plan = Json.Bool(args, "include_plan"), Coordinator = Json.Str(args, "coordinator"),
                         PlansAllowed = Settings.Current == null ? null : Settings.Current.PlansAllowed(),
                         Reserves = Settings.Current == null ? null : Settings.Current.DelegationReserves,
+                        ManagedPiPrefer = Settings.Current == null ? null : Settings.Current.ManagedPiPrefer,
                     }, DateTime.Now, leases), scan);
                     break;
                 default: result = Suggest(snap.Providers); break;
@@ -733,8 +739,10 @@ namespace AIMeter
             if (!scan.Found.Any(f => f.Runtime == runtime && here(f.Where, f.Distro, f.Managed)))
                 return error("No usable " + agent.Name + " is set up here" + (where == "wsl" ? " in WSL" : where == "windows" ? " on Windows" : "") +
                              " (WSL counts only while it runs); list_candidates gives the runtimes found, and runtimes.unsupported why others cannot be used.");
+            // Without a place, the copy the user prefers comes first, as in list_candidates.
+            string preferred = Candidates.PreferredManagedPlace(Settings.Current == null ? null : Settings.Current.ManagedPiPrefer);
             var access = scan.Access.Where(a => !a.Plan && a.Service == service && a.Runtime == runtime && here(a.Where, a.Distro, a.Managed))
-                .OrderBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).FirstOrDefault();
+                .OrderBy(a => a.Managed && a.Where != preferred ? 1 : 0).ThenBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).FirstOrDefault();
             // The managed copy's keys were copied by the user's choice, so they are known with key discovery off too.
             if (access == null && scan.KeyDiscoveryOff) return error("Key discovery is off in AI Meter's settings, so it cannot tell which keys " + agent.Name + " holds.");
             if (access == null) return error(agent.Name + " has no key of its own for " + service + " here; call list_candidates first.");
@@ -779,7 +787,11 @@ namespace AIMeter
                 { "notes", plan.Notes.Cast<object>().ToList() },
             };
             if (access.Distro != null) described["distro"] = access.Distro;
-            if (plan.Managed) described["managed"] = true;
+            if (plan.Managed)
+            {
+                described["managed"] = true;
+                described["managed_config"] = plan.ManagedConfig;
+            }
             if (plan.Commands != null) described["commands"] = plan.Commands;
             if (plan.Alternatives.Count > 0)
                 described["alternatives"] = plan.Alternatives.Select(a => (object)new Dictionary<string, object> { { "shell", a.Key }, { "arguments", a.Value.Cast<object>().ToList() } }).ToList();
@@ -910,8 +922,10 @@ namespace AIMeter
                         { "key_discovery", !scan.KeyDiscoveryOff },
                     } },
             };
+            var runtimesJson = (Dictionary<string, object>)result["runtimes"];
             var managed = ManagedJson(scan);
-            if (managed != null) ((Dictionary<string, object>)result["runtimes"])["managed"] = managed;
+            if (managed != null) runtimesJson["managed"] = managed;
+            runtimesJson["environment"] = EnvironmentJson();
             if (s.BestEffort.Count > 0) result["best_effort"] = s.BestEffort.Select(c => (object)entry(c)).ToList();
             if (s.BestEffortAvailable > 0) result["best_effort_available"] = s.BestEffortAvailable;
             return result;
@@ -1011,20 +1025,58 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// The copy of Pi that AI Meter can keep for delegation (ADR 0004), so a coordinator can tell the user about it
-        /// when nothing else can run a task: whether it is installed, the services it holds a key for, and where the
-        /// user sets it up. Only Settings installs it or copies a key; null where the build does not offer it.
+        /// The copies of Pi that AI Meter can keep for delegation (ADR 0004, ADR 0005), one entry per place it can offer
+        /// one for, so a coordinator can tell the user about them when nothing else can run a task: whether each is
+        /// installed and can be reached now, the services it holds a key for, and where the user sets it up. The copy
+        /// on Windows is always listed; the copy inside WSL when a distribution is set, and while that distribution is
+        /// not running it is unreachable and reported as not installed, as AI Meter does not look. Only Settings
+        /// installs a copy or copies a key; null where the build does not offer them.
         /// </summary>
-        private static Dictionary<string, object> ManagedJson(RuntimeScan scan)
+        private static List<object> ManagedJson(RuntimeScan scan)
         {
-            if (!ManagedPi.Offered || Agents.Get(ManagedPi.RuntimeId) == null) return null;
-            return new Dictionary<string, object>
+            var kind = Agents.Get(ManagedPi.RuntimeId);
+            if (!ManagedPi.Offered || kind == null) return null;
+            var entries = new List<object>();
+            Func<string, string, bool, bool, string, Dictionary<string, object>> entry = (where, distro, reachable, installed, note) =>
             {
-                { "name", ManagedPi.RuntimeId }, { "where", "windows" }, { "installed", ManagedPi.Installed }, { "version", ManagedPi.Pinned.Version },
-                { "services", scan.Access.Where(a => a.Managed).Select(a => a.Service).Distinct().OrderBy(s => s, StringComparer.Ordinal).Cast<object>().ToList() },
-                { "set_up_in", "AI Meter › Settings › AI apps › Delegated tasks" },
-                { "note", "An optional copy of Pi that AI Meter downloads when the user asks, for tasks on Windows folders. Only the user can install it or give it a key, in Settings: tell them, do not try to." },
+                var d = new Dictionary<string, object> { { "name", ManagedPi.RuntimeId }, { "where", where } };
+                if (distro != null) d["distro"] = distro;
+                d["installed"] = installed;
+                d["reachable"] = reachable;
+                d["version"] = ManagedPi.Version;
+                d["services"] = scan.Access.Where(a => a.Managed && a.Where == where && a.Distro == distro).Select(a => a.Service).Distinct()
+                    .OrderBy(s => s, StringComparer.Ordinal).Cast<object>().ToList();
+                d["set_up_in"] = "AI Meter › Settings › AI apps › Delegated tasks";
+                d["note"] = note;
+                return d;
             };
+            if (kind.PlaceFor(ManagedPi.Place) != null)
+                entries.Add(entry("windows", null, true, ManagedPi.Windows.Installed,
+                    "An optional copy of Pi that AI Meter downloads when the user asks, for tasks on Windows folders started from Windows. " +
+                    "Only the user can install it or give it a key, in Settings: tell them, do not try to."));
+            string distribution = Settings.Current == null ? null : Settings.Current.WslDistro;
+            if (kind.PlaceFor(ManagedPi.PlaceInWsl) != null && !string.IsNullOrEmpty(distribution))
+            {
+                var inWsl = ManagedPi.ReachableIn("wsl");
+                entries.Add(entry("wsl", inWsl != null ? inWsl.Distro : distribution, inWsl != null, inWsl != null && inWsl.Installed,
+                    "An optional copy of Pi that AI Meter keeps inside WSL, for tasks started from Windows or from WSL, with a Linux shell. " +
+                    "Only the user can install it or give it a key, in Settings, while WSL is running: tell them, do not try to."));
+            }
+            return entries;
+        }
+
+        /// <summary>
+        /// What this PC has for delegation, as Settings shows it, so a plugin can tell the user the next step: whether
+        /// the WSL distribution AI Meter is set to runs ("running", "stopped", or "none" without one), and whether Git for
+        /// Windows is found. Read from what AI Meter already knows: nothing is started and nothing is written.
+        /// </summary>
+        private static Dictionary<string, object> EnvironmentJson()
+        {
+            string state = ManagedPi.WslState;
+            var d = new Dictionary<string, object> { { "wsl", state } };
+            if (state != "none") d["distro"] = Settings.Current.WslDistro;
+            d["git_for_windows"] = ManagedPi.GitForWindowsFound;
+            return d;
         }
 
         /// <summary>A sentence a plugin can show for an unsupported agent.</summary>

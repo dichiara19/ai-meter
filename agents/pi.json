@@ -39,6 +39,27 @@
           "Pi's tools are not confined to the task's folder: like any agent run as the user, it can read the user's files, the copy's own key file among them. Do not delegate a task you would not let read them.",
           "taskkill /T /F ends Pi and its shells, but a command a shell started can outlive them."
         ]
+      },
+      "managed_wsl": {
+        "versions": ["1.5.2"],
+        "providers": ["cloudflare-workers-ai", "deepseek", "google", "moonshotai", "nvidia", "openrouter", "vercel-ai-gateway"],
+        "arguments": {
+          "read_only": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--no-skills", "--no-prompt-templates", "--tools", "read,grep,find,ls", "--provider", "{provider}", "--model", "{model}"],
+          "modify": ["-p", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files", "--no-skills", "--no-prompt-templates", "--tools", "read,bash,edit,write", "--provider", "{provider}", "--model", "{model}"]
+        },
+        "commands": { "read_only": "none", "modify": "bash" },
+        "environment_policy": "no_credentials",
+        "environment": { "PI_CODING_AGENT_DIR": "{config}", "PI_OFFLINE": "1", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0" },
+        "output": {
+          "outcome": "stopReason of the last assistant message (stop, length, error, aborted); the exit code stays 0 on those, and is 1 when Pi cannot make a request at all (no key for the provider): then there is no agent_settled event and the reason is on stderr"
+        },
+        "notes": [
+          "This is the copy of Pi that AI Meter keeps inside WSL (ADR 0005), in the user's Linux home, with its own configuration folder: it never reads the user's ~/.pi, and it starts without skills and prompt templates, which Pi would otherwise also take from ~/.agents and name to the model.",
+          "In modify mode Pi runs commands with its bash tool, through the distribution's own bash.",
+          "PI_OFFLINE keeps Pi from downloading anything while it works: without ripgrep or fd on PATH inside WSL, its grep and find tools fail with an error rather than fetch them.",
+          "Pi's tools are not confined to the task's folder: like any agent run as the user, it can read the user's files, the copy's own key file among them. Do not delegate a task you would not let read them.",
+          "A task on a Windows folder works through /mnt/…: inside a working copy the plugin made on Windows, Git commands do not find the repository; access is slow on projects with many small files; and toolchains that run only on Windows do not run. The copy AI Meter keeps on Windows is there for those projects."
+        ]
       }
     },
     "arguments": {

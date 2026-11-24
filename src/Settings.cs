@@ -91,6 +91,9 @@ namespace AIMeter
         // and whether it is offered also where the user has a Pi of their own that delegation can run.
         public System.Collections.Generic.List<string> ManagedPiServices { get; set; }
         public bool ManagedPiBesideOwn { get; set; }
+        // Between the copy inside WSL and the copy on Windows (ADR 0005), which comes first for the same model:
+        // "windows", or "wsl" when null, empty or anything else (Candidates.PreferredManagedPlace).
+        public string ManagedPiPrefer { get; set; }
 
         /// <summary>The plans the user allowed delegated tasks to draw on.</summary>
         internal System.Collections.Generic.List<string> PlansAllowed()

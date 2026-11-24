@@ -4,7 +4,8 @@
 // the runtimes found and unsupported, the best-effort candidates (returned only with include_best_effort, counted
 // otherwise), the free-tier candidates (returned only with include_free_tier) and the budget a lease grants, the
 // tools it never answers (`silent`, as a relay that stays up but hangs), and how each fake agent behaves. A describe
-// with managed: true is answered as AI Meter's managed Pi (see managedDispatch for git_bash and pi_config).
+// with managed: true is answered as AI Meter's managed Pi, on Windows or inside WSL (see managedDispatch for git_bash,
+// pi_config and the copy inside WSL); runtimes carries scenario.found, managed_runtimes and environment.
 
 import { appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -23,7 +24,14 @@ const tools = {
     ...(scenario.best_effort && !args.include_best_effort ? { best_effort_available: scenario.best_effort.length } : {}),
     pools: [],
     excluded: scenario.excluded || [],
-    runtimes: { found: [], unsupported: scenario.unsupported_runtimes || [], key_discovery: true },
+    runtimes: {
+      found: scenario.found || [],
+      unsupported: scenario.unsupported_runtimes || [],
+      key_discovery: true,
+      // ADR 0005: one entry per managed copy AI Meter offers, installed or not, and what the PC has.
+      ...(scenario.managed_runtimes ? { managed: scenario.managed_runtimes } : {}),
+      ...(scenario.environment ? { environment: scenario.environment } : {}),
+    },
   }),
   describe_dispatch: (args) => {
     if (readings-- > 0) return { error: "AI Meter is still reading the first data; try again in a few seconds." };
@@ -93,29 +101,40 @@ function planDispatch(args) {
 }
 
 /**
- * The managed Pi (ADR 0004): its own configuration folder (scenario.pi_config, else a made-up Windows path), which
- * commands a mode runs (none, or PowerShell), and for modify a git_bash alternative, offered as AI Meter offers it only
- * while the copy is bound to Git Bash: scenario.git_bash false withholds it, as when AI Meter found no Git for Windows.
- * Its environment policy is no_credentials, or scenario.managed_policy when the scenario has one (null for none).
- * The fake agent gets the shell as an extra argument and names it in its answer.
+ * A managed copy of Pi (ADR 0004, ADR 0005), on Windows or inside WSL as the describe names it, with its configuration
+ * folder in managed_config (scenario.pi_config, else FAKE_PI_CONFIG, an empty folder the tests make; omitted with
+ * scenario.no_managed_config). Its environment policy is no_credentials, or scenario.managed_policy when the scenario
+ * has one (null for none). The fake agent gets the shell as an extra argument and names it in its answer.
+ *   - The Windows copy runs commands through PowerShell (modify) or none (read_only), and for modify has a git_bash
+ *     alternative, offered as AI Meter offers it only while the copy is bound to Git Bash: scenario.git_bash false
+ *     withholds it, as when AI Meter found no Git for Windows.
+ *   - The copy inside WSL runs bash (modify) or none, with no alternatives. Started from Windows, its variables travel in
+ *     its arguments (wsl.exe -e env NAME=value ...), here as NAME=value arguments the fake agent applies, and its
+ *     environment is empty; started from WSL, they are in its environment.
  */
 function managedDispatch(args) {
   const behaviour = (scenario.behaviour || {})[args.runtime] || "ok";
   const modify = args.mode === "modify";
+  const inWsl = args.where === "wsl";
   const bound = scenario.git_bash !== false;
   const policy = "managed_policy" in scenario ? scenario.managed_policy : "no_credentials";
+  const config = scenario.pi_config || process.env.FAKE_PI_CONFIG;
+  const shell = inWsl ? (modify ? "bash" : "none") : modify ? "powershell" : "none";
+  const variables = {
+    FAKE_AGENT_MODE: args.mode,
+    PI_CODING_AGENT_DIR: config,
+    PI_OFFLINE: "1",
+    ...(scenario.env_file ? { FAKE_ENV_FILE: scenario.env_file } : {}),
+  };
+  const throughArguments = inWsl && args.from === "windows";
   return {
     managed: true,
     ...(policy === null ? {} : { environment_policy: policy }),
-    commands: modify ? "powershell" : "none",
-    arguments: [agent, args.runtime, behaviour, modify ? "powershell" : "none"],
-    ...(modify && bound ? { alternatives: [{ shell: "git_bash", arguments: [agent, args.runtime, behaviour, "git_bash"] }] } : {}),
-    environment: {
-      FAKE_AGENT_MODE: args.mode,
-      PI_CODING_AGENT_DIR: scenario.pi_config || "C:\\AIMeter\\pi\\config",
-      PI_OFFLINE: "1",
-      ...(scenario.env_file ? { FAKE_ENV_FILE: scenario.env_file } : {}),
-    },
+    ...(scenario.no_managed_config ? {} : { managed_config: config }),
+    commands: shell,
+    arguments: [agent, args.runtime, behaviour, shell, ...(throughArguments ? Object.entries(variables).map(([name, value]) => name + "=" + value) : [])],
+    ...(modify && !inWsl && bound ? { alternatives: [{ shell: "git_bash", arguments: [agent, args.runtime, behaviour, "git_bash"] }] } : {}),
+    environment: throughArguments ? {} : variables,
   };
 }
 
