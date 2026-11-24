@@ -44,8 +44,9 @@ export function full(job, jobsFolder) {
   if (job.skipped?.length) report.skipped = job.skipped;
   if (job.excluded) report.excluded = shortenExcluded(job.excluded);
   if (job.runtimes) report.runtimes = job.runtimes;
-  // A job saves runtimes only when no candidate could run: then the user may have a step to take.
-  const step = job.runtimes ? nextStep(job.runtimes) : null;
+  // A job saves runtimes only when no candidate could run: then the user may have a step to take. So may a job that
+  // ran and whose key Cloudflare refused.
+  const step = job.runtimes ? nextStep(job.runtimes) : refusedKeyStep(job);
   if (step) report.next_step = step;
   if (job.notes?.length) report.notes = job.notes;
   if (job.version) report.agent_version = job.version;
@@ -148,6 +149,20 @@ export function nextStep(runtimes) {
   const unreachable = installed.find((copy) => copy.where === "wsl" && copy.reachable === false);
   if (unreachable) return `AI Meter's copy of Pi ${where(unreachable)} cannot be reached: the user can start WSL${unreachable.distro ? " (" + unreachable.distro + ")" : ""}, then try again.`;
   return null;
+}
+
+/**
+ * The next step for the user when Cloudflare refused the task's key, or null for any other job. A Cloudflare token that
+ * can read the account's usage, which is all AI Meter needs to show the neurons, cannot run a model unless it also
+ * carries the Workers AI permission: Cloudflare then answers 401 or 403 with its code 10000 ("Authentication error"),
+ * which reads as a wrong key although the key is right. The same answer comes for a token of another account, so the
+ * sentence says "most likely". The key does not change when the token is edited, so nothing is to be done in AI Meter.
+ */
+export function refusedKeyStep(job) {
+  if (job?.status !== "failed" || job.candidate?.service !== "cloudflare-workers-ai") return null;
+  const error = String(job.error || "");
+  if (!/\b40[13]\b/.test(error) || !/"code"\s*:\s*10000\b/.test(error)) return null;
+  return "Cloudflare refused the token for Workers AI: it most likely lacks the Workers AI permission, which reading the usage does not need. The user can add Account › Workers AI › Read to the token at https://dash.cloudflare.com/profile/api-tokens; the key stays the same, so nothing changes in AI Meter.";
 }
 
 /**
