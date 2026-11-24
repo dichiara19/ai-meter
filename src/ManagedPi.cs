@@ -586,6 +586,9 @@ namespace AIMeter
 
         // ------------------------------------------------------------ shell
 
+        /// <summary>Where Git for Windows, which brings Git Bash, is published: for Settings to open.</summary>
+        public const string GitForWindowsPage = "https://git-scm.com/download/win";
+
         /// <summary>The name, in agents/pi.json's alternatives and in describe_dispatch, of the shell BindShell binds.</summary>
         public const string GitBashShell = "git_bash";
 

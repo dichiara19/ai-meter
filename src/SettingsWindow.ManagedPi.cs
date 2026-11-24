@@ -44,6 +44,10 @@ namespace AIMeter
                 rows.Add(Row(null, L.T("Pi for delegated tasks"), C.ManagedPiError ?? L.F("Pi {0} is installed in {1}.", ManagedPi.Pinned.Version, ManagedPi.Root),
                     Button(L.T("Remove"), RemoveManagedPi, false)));
                 rows.AddRange(ManagedPiKeyRows());
+                // Without Git Bash the copy still works, with PowerShell for its commands: say so, and where to get it.
+                if (ManagedPi.BoundShells.Length == 0)
+                    rows.Add(Row(null, L.T("Git Bash was not found"), L.T("Tasks that change files will run their commands in PowerShell instead of bash. Install Git for Windows to give Pi bash; AI Meter finds it at its next start."),
+                        Button(L.T("Get Git for Windows"), () => OpenPage(ManagedPi.GitForWindowsPage), false)));
                 // The choice exists only where a Pi of the user's on Windows can be used for delegation at all.
                 if (kind.PlaceFor("windows") != null)
                     rows.Add(Row(null, L.T("Also offer it beside your own Pi"), L.T("When off, delegated tasks on Windows use your own Pi wherever it can run them."),
@@ -78,6 +82,12 @@ namespace AIMeter
                 return Row(null, L.F("{0} key", d.Name), L.T("Lets Pi run delegated tasks on this service's free models."),
                     Toggle(S.ManagedPiServices.Contains(id), v => C.SetManagedPiService(id, v)));
             });
+        }
+
+        private static void OpenPage(string address)
+        {
+            try { System.Diagnostics.Process.Start(address); }
+            catch (System.ComponentModel.Win32Exception) { }   // No browser is registered for web addresses.
         }
 
         private void RemoveManagedPi()
