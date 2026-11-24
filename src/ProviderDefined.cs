@@ -495,7 +495,7 @@ namespace AIMeter
             double interval = Json.Num(req, "interval") ?? 360;
             if (!p.AllowNetwork || DateTime.Now < freeNextFetch || !NetworkBackoff.Ready(D.Id)) return;
             List<FreeModel> list = null;
-            try { list = MarkPaidPlan(FreeModels.Parse(Json.ParseAny(Send(req, token)), Json.Str(req, "format"), DefinedFreeStatus(req), Json.Str(req, "provider")), req); }
+            try { list = FreeModels.Parse(Json.ParseAny(Send(req, token)), Json.Str(req, "format"), DefinedFreeStatus(req), Json.Str(req, "provider")); }
             catch (WebException e)
             {
                 NetworkBackoff.Note(D.Id, e);
@@ -509,6 +509,7 @@ namespace AIMeter
             catch (IOException) { }
             if (list != null)
             {
+                MarkPaidPlan(list, req, ReadPaidPlan(req, token));
                 catalogue = new Catalogue { Models = list, ReadAt = DateTime.Now };
                 ModelSizes.Learn(list);   // Sizes of the models whose repository the list names, for the order of candidates.
                 if (!hasUsage) problem = null;
@@ -532,23 +533,67 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Give the models the definition names in "free.paidPlan.models" the status "paid", kind "paid_plan", with that
-        /// block's reference, check date and note: models a service with a free tier keeps for its paid plan, as
-        /// Cloudflare does, which a free account is refused. The list a service publishes does not say which they are,
-        /// so the definition states them, as documented and checked on a date. Returns the same list.
+        /// Give the models a service with a free tier keeps for its paid plan, as Cloudflare does, the status "paid",
+        /// kind "paid_plan": a free account is refused them. Which they are comes from two places ("free.paidPlan"):
+        /// - the service's own catalogue as just read (ReadPaidPlan), which decides for every model it lists, so a model
+        ///   the service newly keeps for its paid plan, or opens to the free one, is corrected at the next reading with
+        ///   no change to the definition (source "catalogue");
+        /// - the ids the definition names in "models", from the service's documentation as checked on a date, for a
+        ///   model the catalogue does not list, or while it cannot be read, as with a token that may not read it
+        ///   (source "documented").
+        /// Returns the same list.
         /// </summary>
-        internal static List<FreeModel> MarkPaidPlan(List<FreeModel> models, Dictionary<string, object> req)
+        internal static List<FreeModel> MarkPaidPlan(List<FreeModel> models, Dictionary<string, object> req, IDictionary<string, bool> catalogue = null)
         {
             var paid = Json.Obj(Json.Obj(req, "free"), "paidPlan");
             if (paid == null || models == null) return models;
-            var ids = new HashSet<string>(ServiceDefinition.Strings(paid, "models"), StringComparer.OrdinalIgnoreCase);
-            var status = new FreeStatus
+            var documented = new HashSet<string>(ServiceDefinition.Strings(paid, "models"), StringComparer.OrdinalIgnoreCase);
+            Func<string, DateTime?, FreeStatus> status = (source, day) => new FreeStatus
             {
-                Status = "paid", Kind = FreeStatus.PaidPlan, Source = "documented",
-                Reference = Json.Str(paid, "reference"), CheckedAt = Json.Day(Json.Str(paid, "checked")), Note = Json.Str(paid, "note"),
+                Status = "paid", Kind = FreeStatus.PaidPlan, Source = source, Reference = Json.Str(paid, "reference"), CheckedAt = day, Note = Json.Str(paid, "note"),
             };
-            foreach (var m in models.Where(m => ids.Contains(m.Id))) m.Free = status;
+            FreeStatus read = status("catalogue", DateTime.Today), stated = status("documented", Json.Day(Json.Str(paid, "checked")));
+            foreach (var m in models)
+            {
+                bool listed = false, known = catalogue != null && catalogue.TryGetValue(m.Id, out listed);
+                if (known ? listed : documented.Contains(m.Id)) m.Free = known ? read : stated;
+            }
             return models;
+        }
+
+        /// <summary>
+        /// Which models the service's own catalogue marks as kept for its paid plan ("free.paidPlan.catalogue": a request
+        /// as "request", with "items" the path of the list, "id" the path of a model's id in an item and "paid" the path
+        /// of its marker, true or "true"): every model listed, by id, with whether it is marked. Null when the
+        /// definition names no catalogue. A reading that fails, as with a token that may not read the catalogue, keeps
+        /// the last one of this run, or null before any: the definition's own list then stands.
+        /// </summary>
+        private IDictionary<string, bool> ReadPaidPlan(Dictionary<string, object> req, string token)
+        {
+            var spec = Json.Obj(Json.Obj(Json.Obj(req, "free"), "paidPlan"), "catalogue");
+            if (spec == null) return null;
+            try { paidPlanRead = PaidPlanIn(Json.ParseAny(Send(spec, token)), spec) ?? paidPlanRead; }
+            catch (WebException) { }
+            catch (IOException) { }
+            catch (ArgumentException) { }           // Not JSON.
+            catch (InvalidOperationException) { }   // Not JSON.
+            return paidPlanRead;
+        }
+
+        private IDictionary<string, bool> paidPlanRead;
+
+        /// <summary>The models a catalogue answer lists, by id, with whether each is marked for the paid plan; null when the answer has no list.</summary>
+        internal static IDictionary<string, bool> PaidPlanIn(object answer, Dictionary<string, object> spec)
+        {
+            var items = JPath.Get(answer, Json.Str(spec, "items") ?? "$") as IList;
+            if (items == null) return null;
+            var listed = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in items)
+            {
+                string id = JPath.Str(JPath.Get(item, Json.Str(spec, "id") ?? "id"));
+                if (id != null) listed[id] = string.Equals(JPath.Str(JPath.Get(item, Json.Str(spec, "paid"))), "true", StringComparison.OrdinalIgnoreCase);
+            }
+            return listed;
         }
 
         /// <summary>

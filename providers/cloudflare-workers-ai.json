@@ -51,7 +51,12 @@
         ],
         "checked": "2026-11-24",
         "reference": "https://developers.cloudflare.com/workers-ai/platform/pricing/",
-        "note": "Cloudflare offers this model only with the Workers Paid plan or prepaid AI Gateway credits; the Workers Free plan refuses it (403, code 5035). AI Meter cannot read the account's plan, so the model is not offered. The list is Cloudflare's pricing page as checked; a newer paid-plan model can be missing from it until the next check."
+        "note": "Cloudflare offers this model only with the Workers Paid plan or prepaid AI Gateway credits; the Workers Free plan refuses it (403, code 5035). AI Meter cannot read the account's plan, so the model is not offered.",
+        "catalogue": {
+          "url": "https://api.cloudflare.com/client/v4/accounts/{key:account}/ai/models/search?per_page=100",
+          "headers": { "Authorization": "Bearer {token}" }, "timeout": 30,
+          "items": "result", "id": "name", "paid": "properties[property_id=require_workers_paid].value"
+        }
       }
     },
     "pool": "cloudflare-workers-ai:neurons",

@@ -217,6 +217,27 @@ namespace AIMeter
                 "A model Cloudflare keeps for the Workers Paid plan is still listed as free.");
             Assert(status.ExclusionReason == "price_not_confirmed", "The reason of other unconfirmed models changed.");
 
+            // Cloudflare's own catalogue decides for the models it lists, so the list corrects itself: a model newly
+            // kept for the paid plan is marked, one the definition names but Cloudflare opened is free again, and a model
+            // the catalogue does not list keeps what the definition says.
+            var catalogueSpec = Json.Obj(Json.Obj(Json.Obj(spec, "free"), "paidPlan"), "catalogue");
+            Assert(catalogueSpec != null && Json.Str(catalogueSpec, "url").Contains("{key:account}") && Json.Str(Json.Obj(catalogueSpec, "headers"), "Authorization") == "Bearer {token}",
+                "The definition does not read Cloudflare's own catalogue with the account and the token.");
+            var answer = Json.ParseAny("{ \"result\": [ " +
+                "{ \"name\": \"@cf/openai/gpt-oss-120b\", \"properties\": [ { \"property_id\": \"require_workers_paid\", \"value\": \"true\" } ] }, " +
+                "{ \"name\": \"@cf/deepseek-ai/deepseek-v4.1-flash-1017\", \"properties\": [ { \"property_id\": \"context_window\", \"value\": \"1048576\" } ] } ] }");
+            var listed = DefinedProvider.PaidPlanIn(answer, catalogueSpec);
+            Assert(listed.Count == 2 && listed["@cf/openai/gpt-oss-120b"] && !listed["@cf/deepseek-ai/deepseek-v4.1-flash-1017"], "The catalogue's marker was not read.");
+            Assert(DefinedProvider.PaidPlanIn(Json.ParseAny("{ \"success\": false }"), catalogueSpec) == null, "An answer without a list gave one.");
+            var unlisted = new FreeModel { Id = "@cf/moonshotai/kimi-k2.6", Free = status };
+            gpt.Free = status;
+            paidOnly.Free = status;
+            DefinedProvider.MarkPaidPlan(new List<FreeModel> { gpt, paidOnly, unlisted }, spec, listed);
+            Assert(gpt.Free.Kind == FreeStatus.PaidPlan && gpt.Free.Source == "catalogue", "A model the catalogue marks for the paid plan is still free.");
+            Assert(paidOnly.Free.Confirmed, "A model the catalogue lists without the marker stayed paid because the definition names it.");
+            Assert(unlisted.Free.Kind == FreeStatus.PaidPlan && unlisted.Free.Source == "documented", "A model the catalogue does not list lost what the definition says.");
+            gpt.Free = status;
+
             foreach (var day in new[] { "[]", "[{\"count\":12,\"sum\":{\"totalNeurons\":2500}}]" })
                 using (var server = new Recorder(Answer(day)))
                 using (new Variables(Token, Account))
