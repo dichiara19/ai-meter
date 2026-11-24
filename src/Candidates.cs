@@ -201,7 +201,7 @@ namespace AIMeter
             unverified = new List<string>();
             if (m.Free != null && !m.Free.Confirmed)
             {
-                if (m.Free.Status != "unknown") return "price_not_confirmed";
+                if (m.Free.Status != "unknown") return m.Free.ExclusionReason;
                 unverified.Add("price");
             }
             if (known == null) return "not_in_agent_list";
@@ -231,7 +231,7 @@ namespace AIMeter
         {
             if (IsFreeTier(m) && !req.FreeTier) return "free_tier_not_allowed";
             bool confirmed = m.Free == null || m.Free.Confirmed;
-            if (!confirmed && !(req.CostPolicy == FreeOrUnconfirmed && m.Free.Status == "unknown")) return "price_not_confirmed";
+            if (!confirmed && !(req.CostPolicy == FreeOrUnconfirmed && m.Free.Status == "unknown")) return m.Free.ExclusionReason;
             return Needs(m, req);
         }
 

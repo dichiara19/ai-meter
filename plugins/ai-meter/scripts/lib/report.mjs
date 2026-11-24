@@ -152,7 +152,7 @@ export function nextStep(runtimes) {
 }
 
 /**
- * The next step for the user when Cloudflare refused the task's key, or null for any other job. A Cloudflare token that
+ * The next step when Cloudflare refused the task's model or key, or null for any other job. A Cloudflare token that
  * can read the account's usage, which is all AI Meter needs to show the neurons, cannot run a model unless it also
  * carries the Workers AI permission: Cloudflare then answers 401 or 403 with its code 10000 ("Authentication error"),
  * which reads as a wrong key although the key is right. The same answer comes for a token of another account, so the
@@ -161,6 +161,10 @@ export function nextStep(runtimes) {
 export function refusedKeyStep(job) {
   if (job?.status !== "failed" || job.candidate?.service !== "cloudflare-workers-ai") return null;
   const error = String(job.error || "");
+  // A model Cloudflare keeps for the Workers Paid plan (403, code 5035). AI Meter leaves out those Cloudflare's pricing
+  // page names, but the page is read by hand: a newer one can still be offered, or pinned by the coordinator.
+  if (/\b403\b/.test(error) && /"code"\s*:\s*5035\b/.test(error))
+    return "Cloudflare offers this model only on the Workers Paid plan, and refused it at no cost. Choose another Cloudflare model, or another service; nothing is to be changed in AI Meter.";
   if (!/\b40[13]\b/.test(error) || !/"code"\s*:\s*10000\b/.test(error)) return null;
   return "Cloudflare refused the token for Workers AI: it most likely lacks the Workers AI permission, which reading the usage does not need. The user can add Account › Workers AI › Read to the token at https://dash.cloudflare.com/profile/api-tokens; the key stays the same, so nothing changes in AI Meter.";
 }

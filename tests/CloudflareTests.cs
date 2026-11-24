@@ -207,6 +207,16 @@ namespace AIMeter
             Assert(gpt.Free.Confirmed && gpt.Free.Kind == Candidates.FreeTier && Candidates.IsFreeTier(gpt), "Cloudflare's models are not marked as a free tier.");
             Assert(FreeModels.Parse(Json.ParseAny(ModelsDev), "models.dev", status, "missing") == null, "A provider missing from the catalogue gave a list.");
 
+            // The models Cloudflare keeps for the Workers Paid plan are paid, with their own reason, and never a
+            // candidate, with consent to the free tier or to best effort; the others stay a free tier.
+            var paidOnly = new FreeModel { Id = "@cf/deepseek-ai/deepseek-v4.1-flash-1017", Name = "DeepSeek V4.1 Flash", Tools = true, Context = 1000000, MaxOutput = 16384, Free = status };
+            var marked = DefinedProvider.MarkPaidPlan(new List<FreeModel> { gpt, paidOnly }, spec);
+            Assert(gpt.Free.Confirmed && Candidates.IsFreeTier(gpt), "A model of the free tier was marked as paid.");
+            Assert(marked.Count == 2 && !paidOnly.Free.Confirmed && paidOnly.Free.Status == "paid" && paidOnly.Free.Kind == FreeStatus.PaidPlan && !Candidates.IsFreeTier(paidOnly)
+                   && paidOnly.Free.ExclusionReason == "paid_plan_required" && paidOnly.Free.Note != null && paidOnly.Free.CheckedAt.HasValue,
+                "A model Cloudflare keeps for the Workers Paid plan is still listed as free.");
+            Assert(status.ExclusionReason == "price_not_confirmed", "The reason of other unconfirmed models changed.");
+
             foreach (var day in new[] { "[]", "[{\"count\":12,\"sum\":{\"totalNeurons\":2500}}]" })
                 using (var server = new Recorder(Answer(day)))
                 using (new Variables(Token, Account))

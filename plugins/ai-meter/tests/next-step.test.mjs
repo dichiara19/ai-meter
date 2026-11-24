@@ -50,6 +50,8 @@ test("a Cloudflare token without the Workers AI permission gets its own next ste
   assert.equal(refusedKeyStep(job({ candidate: { service: "openrouter" } })), null, "another service's 401 is not this");
   assert.equal(refusedKeyStep(job({ error: '429 {"errors":[{"code":10000}]}' })), null, "not a refusal");
   assert.equal(refusedKeyStep(job({ error: '401 {"errors":[{"code":1000,"message":"Invalid API Token"}]}' })), null, "a wrong key is said as it is");
+  const paidOnly = '403 {"errors":[{"message":"AiError: Model @cf/x is not available on the Workers Free plan","code":5035}],"success":false}';
+  assert.match(refusedKeyStep(job({ error: paidOnly })), /only on the Workers Paid plan.*Choose another Cloudflare model/);
   assert.equal(refusedKeyStep(job({ status: "completed" })), null);
   assert.equal(refusedKeyStep(job({ error: null })), null);
   assert.equal(refusedKeyStep(undefined), null);

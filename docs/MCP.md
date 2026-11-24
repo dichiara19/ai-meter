@@ -216,6 +216,7 @@ The same snapshot, request, leases, preferences and known sizes give the same or
 | `reason` | Meaning |
 |---|---|
 | `price_not_confirmed` | The service does not state a zero price, and the policy is `free_only` |
+| `paid_plan_required` | A model the service offers only on its paid plan, as some of Cloudflare's: a free account is refused, and AI Meter cannot read the plan, so it is never offered |
 | `free_tier_not_allowed` | A free-tier model, and the request did not set `include_free_tier` |
 | `agent_price_unknown` | A free-tier model that no agent with a key lists at a price, so the plugin could not see what a task spends |
 | `allowance_unknown` | A free tier whose use today is unknown, for example while its usage cannot be read: no task starts on a budget nobody knows |

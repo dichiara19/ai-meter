@@ -495,7 +495,7 @@ namespace AIMeter
             double interval = Json.Num(req, "interval") ?? 360;
             if (!p.AllowNetwork || DateTime.Now < freeNextFetch || !NetworkBackoff.Ready(D.Id)) return;
             List<FreeModel> list = null;
-            try { list = FreeModels.Parse(Json.ParseAny(Send(req, token)), Json.Str(req, "format"), DefinedFreeStatus(req), Json.Str(req, "provider")); }
+            try { list = MarkPaidPlan(FreeModels.Parse(Json.ParseAny(Send(req, token)), Json.Str(req, "format"), DefinedFreeStatus(req), Json.Str(req, "provider")), req); }
             catch (WebException e)
             {
                 NetworkBackoff.Note(D.Id, e);
@@ -529,6 +529,26 @@ namespace AIMeter
                 Status = Json.Str(f, "status") ?? "unknown", Kind = Json.Str(f, "kind"), Source = Json.Str(f, "source") ?? "documented",
                 Reference = Json.Str(f, "reference"), CheckedAt = Json.Day(Json.Str(f, "checked")), Note = Json.Str(f, "note"),
             };
+        }
+
+        /// <summary>
+        /// Give the models the definition names in "free.paidPlan.models" the status "paid", kind "paid_plan", with that
+        /// block's reference, check date and note: models a service with a free tier keeps for its paid plan, as
+        /// Cloudflare does, which a free account is refused. The list a service publishes does not say which they are,
+        /// so the definition states them, as documented and checked on a date. Returns the same list.
+        /// </summary>
+        internal static List<FreeModel> MarkPaidPlan(List<FreeModel> models, Dictionary<string, object> req)
+        {
+            var paid = Json.Obj(Json.Obj(req, "free"), "paidPlan");
+            if (paid == null || models == null) return models;
+            var ids = new HashSet<string>(ServiceDefinition.Strings(paid, "models"), StringComparer.OrdinalIgnoreCase);
+            var status = new FreeStatus
+            {
+                Status = "paid", Kind = FreeStatus.PaidPlan, Source = "documented",
+                Reference = Json.Str(paid, "reference"), CheckedAt = Json.Day(Json.Str(paid, "checked")), Note = Json.Str(paid, "note"),
+            };
+            foreach (var m in models.Where(m => ids.Contains(m.Id))) m.Free = status;
+            return models;
         }
 
         /// <summary>
