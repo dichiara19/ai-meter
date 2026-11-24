@@ -1044,7 +1044,9 @@ namespace AIMeter
                 d["installed"] = installed;
                 d["reachable"] = reachable;
                 d["version"] = ManagedPi.Version;
-                d["services"] = scan.Access.Where(a => a.Managed && a.Where == where && a.Distro == distro).Select(a => a.Service).Distinct()
+                // Every key the copy holds, also for a service it is not offered for because the user's own Pi there can
+                // call it: a copy with keys must not read as one without.
+                d["services"] = scan.Found.Where(p => p.Managed && p.Where == where && p.Distro == distro && p.Services != null).SelectMany(p => p.Services).Distinct()
                     .OrderBy(s => s, StringComparer.Ordinal).Cast<object>().ToList();
                 d["set_up_in"] = "AI Meter › Settings › AI apps › Delegated tasks";
                 d["note"] = note;

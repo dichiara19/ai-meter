@@ -469,6 +469,9 @@ namespace AIMeter
             Assert(own.Access.Any(a => a.Where == "wsl" && !a.Managed && a.Service == "openrouter"), "The user's own Pi in WSL was not found with its key.");
             Assert(own.Access.Where(a => a.Managed && a.Where == "wsl").Select(a => a.Service).SequenceEqual(new[] { "gemini" }),
                 "The copy inside WSL was not offered exactly for the services the user's own Pi there cannot call.");
+            // It still holds both keys, and is reported so: a copy with keys must not read as one without.
+            Assert(own.Found.Single(p => p.Managed && p.Where == "wsl").Services.OrderBy(s => s, StringComparer.Ordinal).SequenceEqual(new[] { "gemini", "openrouter" }),
+                "The copy inside WSL does not report every service it holds a key for.");
             Assert(own.Access.Count(a => a.Managed && a.Where == "windows") == 2, "The user's Pi in WSL hid the copy on Windows.");
             var both = Candidates.Scan(windowsHome, new[] { w.Place }, Candidates.Kinds, true, true);
             Assert(both.Access.Count(a => a.Managed && a.Where == "wsl") == 2, "Both were not offered inside WSL when asked for.");

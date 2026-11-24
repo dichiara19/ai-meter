@@ -627,12 +627,15 @@ namespace AIMeter
             if (kind == null || kind.PlaceFor(copy.PlaceKey) == null || !copy.Installed) return;
             var ownServices = new HashSet<string>(scan.Access.Where(a => a.Runtime == kind.Id && a.Where == copy.Where && a.Distro == copy.Distro && !a.Plan && !a.Managed)
                 .Select(a => a.Service));
-            scan.Found.Add(new RuntimePlace { Runtime = kind.Id, Where = copy.Where, Distro = copy.Distro, Managed = true });
-            foreach (var d in Definitions.All.Where(x => x.UsesKey && (besideOwn || !ownServices.Contains(x.Id))))
+            var place = new RuntimePlace { Runtime = kind.Id, Where = copy.Where, Distro = copy.Distro, Managed = true, Services = new List<string>() };
+            scan.Found.Add(place);
+            foreach (var d in Definitions.All.Where(x => x.UsesKey))
             {
                 string provider;
                 string key = copy.KeyFor(d, out provider);
                 if (key == null) continue;
+                place.Services.Add(d.Id);
+                if (!besideOwn && ownServices.Contains(d.Id)) continue;
                 var access = Access(d.Id, kind.Id, copy.Where, key);
                 access.Managed = true;
                 access.Provider = provider;
@@ -792,6 +795,11 @@ namespace AIMeter
     {
         public string Runtime, Where, Distro;
         public bool Managed;
+        /// <summary>
+        /// For a managed copy, every service it holds a key for, also those it is not offered for because the user's
+        /// own Pi in the same place can call them; null for the user's own agents.
+        /// </summary>
+        public List<string> Services;
     }
 
     /// <summary>

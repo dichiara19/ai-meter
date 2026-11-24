@@ -440,7 +440,7 @@ The Windows build is x64; on Windows on ARM it runs under emulation.
 ]
 ```
 
-`services` are those the copy holds a key for. These keys are the user's explicit choice, so they count with *Use API keys already on the PC* turned off too.
+`services` are those the copy holds a key for, including a service it gives no candidate for because the user's own Pi in the same place can already call it. These keys are the user's explicit choice, so they count with *Use API keys already on the PC* turned off too.
 
 `runtimes.environment` says what a plugin needs to name the next step, read from what AI Meter already knows (nothing is started):
 
