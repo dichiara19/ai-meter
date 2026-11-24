@@ -52,6 +52,7 @@ namespace AIMeter
             if (copy.OtherVersionInstalled == null && !ManagedPi.Reachable().Any(c => c.Installed))
             {
                 Settings.ManagedPiServices = new List<string>();
+                Settings.ManagedPiServicesAwaitingKey = new List<string>();
                 if (!Settings.Save())
                 {
                     ManagedPiError = L.T("This choice could not be saved, so it will not last past a restart. Check AI Meter's settings file, then change it again.");
@@ -114,15 +115,18 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// Copy a service's key into the key file of every managed copy AI Meter can reach, or take it out. The settings
-        /// get a new list, as MCP threads read the current one.
+        /// The user's switch in Settings: copy a service's key into the key file of every managed copy AI Meter can
+        /// reach, or take it out.
         /// </summary>
         public void SetManagedPiService(string service, bool on)
         {
-            var next = new List<string>(Settings.ManagedPiServices);
-            next.Remove(service);
-            if (on) next.Add(service);
-            Settings.ManagedPiServices = next;
+            ManagedPi.Choose(Settings, service, on);
+            ApplyManagedPiChoices();
+        }
+
+        /// <summary>Save the ticked services as they are now and bring the copies' key files in step, saying what failed.</summary>
+        private void ApplyManagedPiChoices()
+        {
             // A choice that is not on disk would come back at the next start: a withdrawn key would be copied again.
             if (!Settings.Save())
                 MessageBox.Show(L.T("This choice could not be saved, so it will not last past a restart. Check AI Meter's settings file, then change it again."), "AI Meter", MessageBoxButton.OK, MessageBoxImage.Warning);

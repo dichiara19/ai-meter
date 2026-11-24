@@ -405,6 +405,7 @@ namespace AIMeter
                         if (settings != null && !Reachable().Any(c => c.Where != Where && c.Installed))
                         {
                             settings.ManagedPiServices = new List<string>();
+                            settings.ManagedPiServicesAwaitingKey = new List<string>();
                             choicesSaved = settings.Save();
                         }
                         foreach (var folder in Probe.SafeDirs(Root).Where(d => !SamePath(d, ConfigFolder))) Directory.Delete(folder, true);
@@ -760,6 +761,49 @@ namespace AIMeter
         /// The services whose key can be copied: those Pi has a provider for and AI Meter reads with a key it has now,
         /// together with whatever else the service needs beside its key.
         /// </summary>
+        /// <summary>
+        /// The user's own choice of a service, in Settings: tick or untick it. It also ends any wait for a key
+        /// (WithdrawWithKey), as a switch the user set is not to be changed for them later. Both lists are replaced,
+        /// not changed, as MCP threads read the current ones. The caller saves the settings and syncs the copies.
+        /// </summary>
+        internal static void Choose(Settings settings, string service, bool on)
+        {
+            settings.ManagedPiServices = With(settings.ManagedPiServices, service, on);
+            settings.ManagedPiServicesAwaitingKey = With(settings.ManagedPiServicesAwaitingKey, service, false);
+        }
+
+        /// <summary>
+        /// The user removed a service's key in AI Meter: a ticked service is unticked, so that the key leaves the copies,
+        /// and remembered, so that a key entered again brings the tick back (RestoreWithKey). False when it was not
+        /// ticked, and nothing changes.
+        /// </summary>
+        internal static bool WithdrawWithKey(Settings settings, string service)
+        {
+            if (settings.ManagedPiServices == null || !settings.ManagedPiServices.Contains(service)) return false;
+            settings.ManagedPiServices = With(settings.ManagedPiServices, service, false);
+            settings.ManagedPiServicesAwaitingKey = With(settings.ManagedPiServicesAwaitingKey, service, true);
+            return true;
+        }
+
+        /// <summary>
+        /// The user entered a service's key in AI Meter: when the service was ticked until its key was removed, and the
+        /// user has not set its switch since, it is ticked again. False when nothing was waiting, and nothing changes.
+        /// </summary>
+        internal static bool RestoreWithKey(Settings settings, string service)
+        {
+            if (settings.ManagedPiServicesAwaitingKey == null || !settings.ManagedPiServicesAwaitingKey.Contains(service)) return false;
+            Choose(settings, service, true);
+            return true;
+        }
+
+        private static List<string> With(List<string> list, string service, bool present)
+        {
+            var next = new List<string>(list ?? new List<string>());
+            next.Remove(service);
+            if (present) next.Add(service);
+            return next;
+        }
+
         public static List<ServiceDefinition> ServicesWithKey()
         {
             return Definitions.All.Where(d => ProviderOf(d) != null && KeyEntry(d) != null).ToList();

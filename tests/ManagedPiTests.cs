@@ -355,6 +355,20 @@ namespace AIMeter
             settings.ManagedPiServices = new List<string> { "openrouter" };
             Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && Revision() == count, "A ticked service with no key wrote an entry.");
 
+            // Removing the key in AI Meter unticks the service and remembers it: a key entered again brings the tick
+            // back, unless the user set the switch themselves meanwhile.
+            settings.ManagedPiServicesAwaitingKey = new List<string>();
+            settings.ManagedPiServices = new List<string> { "openrouter", "gemini" };
+            Assert(!ManagedPi.WithdrawWithKey(settings, "nvidia") && settings.ManagedPiServicesAwaitingKey.Count == 0, "A service that was not ticked waits for a key.");
+            Assert(ManagedPi.WithdrawWithKey(settings, "openrouter") && settings.ManagedPiServices.SequenceEqual(new[] { "gemini" }), "Removing a key did not untick its service.");
+            Assert(ManagedPi.RestoreWithKey(settings, "openrouter") && settings.ManagedPiServices.Contains("openrouter") && settings.ManagedPiServicesAwaitingKey.Count == 0,
+                "A key entered again did not bring the tick back.");
+            Assert(!ManagedPi.RestoreWithKey(settings, "openrouter"), "The tick came back twice.");
+            ManagedPi.WithdrawWithKey(settings, "openrouter");
+            ManagedPi.Choose(settings, "openrouter", false);
+            Assert(!ManagedPi.RestoreWithKey(settings, "openrouter") && !settings.ManagedPiServices.Contains("openrouter"), "A switch the user turned off came back with a key.");
+            ManagedPi.WithdrawWithKey(settings, "gemini");
+
             // Remove deletes the keys, the program and the choices.
             ApiKeys.Save("openrouter", RouterKey);
             settings.ManagedPiServices = new List<string> { "openrouter", "gemini" };
@@ -363,6 +377,7 @@ namespace AIMeter
             ManagedPi.Windows.Remove(settings);
             AssertRemoved(before, "Remove");
             Assert(settings.ManagedPiServices != null && settings.ManagedPiServices.Count == 0, "Remove did not forget the ticked services.");
+            Assert(settings.ManagedPiServicesAwaitingKey.Count == 0, "Remove did not forget the services waiting for a key.");
             Assert(!ManagedPi.Windows.Installed && ManagedPi.Windows.Stamp == "", "The copy still counts as installed after Remove.");
             long removed = Revision();
             Assert(ManagedPi.Sync(settings), "A sync after Remove failed.");

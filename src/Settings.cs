@@ -90,6 +90,9 @@ namespace AIMeter
         // The managed Pi (ADR 0004): the services whose key the user chose to copy into its key file, by service id;
         // and whether it is offered also where the user has a Pi of their own that delegation can run.
         public System.Collections.Generic.List<string> ManagedPiServices { get; set; }
+        // Services that were ticked when the user removed their key in AI Meter: the tick comes back with a key
+        // entered again (ManagedPi.RestoreWithKey), and is forgotten once the user sets the switch themselves.
+        public System.Collections.Generic.List<string> ManagedPiServicesAwaitingKey { get; set; }
         public bool ManagedPiBesideOwn { get; set; }
         // Between the copy inside WSL and the copy on Windows (ADR 0005), which comes first for the same model:
         // "windows", or "wsl" when null, empty or anything else (Candidates.PreferredManagedPlace).
@@ -146,6 +149,7 @@ namespace AIMeter
             DelegationPlans = new System.Collections.Generic.Dictionary<string, bool>();
             DelegationReserves = new System.Collections.Generic.Dictionary<string, int>();
             ManagedPiServices = new System.Collections.Generic.List<string>();
+            ManagedPiServicesAwaitingKey = new System.Collections.Generic.List<string>();
             HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
             HistoryEnabled = true;
@@ -271,6 +275,7 @@ namespace AIMeter
             if (s.DelegationPlans == null) s.DelegationPlans = new System.Collections.Generic.Dictionary<string, bool>();
             if (s.DelegationReserves == null) s.DelegationReserves = new System.Collections.Generic.Dictionary<string, int>();
             if (s.ManagedPiServices == null) s.ManagedPiServices = new System.Collections.Generic.List<string>();
+            if (s.ManagedPiServicesAwaitingKey == null) s.ManagedPiServicesAwaitingKey = new System.Collections.Generic.List<string>();
             if (s.Budgets == null) s.Budgets = new System.Collections.Generic.Dictionary<string, string>();
             if (s.HiddenRows == null) s.HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
             return s;
