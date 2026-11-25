@@ -265,6 +265,12 @@ namespace AIMeter
             return WindowShot(content, dark, 1160, 860, "Usage history · Sample data");
         }
 
+        /// <summary>Place the Delegation agent page (tools\McpPreview.cs) on the same synthetic desktop.</summary>
+        internal static FrameworkElement McpShot(FrameworkElement content, bool dark)
+        {
+            return WindowShot(content, dark, 1000, 900, "MCP · Delegation agent · Sample data");
+        }
+
         /// <summary>
         /// Frame a window's content with a Mica-like backdrop and caption buttons on the synthetic desktop,
         /// with a caption below it naming the screen and stating that the data is invented.
@@ -646,7 +652,7 @@ namespace AIMeter
         }
 
         /// <summary>Replace a fixture path in every text of the page with the sample path shown in its place.</summary>
-        private static void ReplaceText(DependencyObject node, string from, string to)
+        internal static void ReplaceText(DependencyObject node, string from, string to)
         {
             var text = node as TextBlock;
             if (text != null && text.Text.Contains(from)) text.Text = text.Text.Replace(from, to);

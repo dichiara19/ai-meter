@@ -1,3 +1,41 @@
+## What changed in 0.12.0
+
+Delegation no longer needs a coding agent of your own: AI Meter can set one up for you, and Settings guide you through it.
+
+![Settings, MCP, Delegation agent: what AI Meter found on the PC, Pi installed inside WSL and on offer for Windows, and the keys it may use](https://raw.githubusercontent.com/dichiara19/ai-meter/v0.12.0/docs/media/delegation-dark.png)
+
+### Delegation without your own agent (preview)
+- **A coding agent managed by AI Meter.** Until now a delegated task needed Pi or OpenCode already installed, with its own key. In **Settings → MCP → Delegation agent** you can now have AI Meter download Pi, an open-source coding agent, and keep it for delegated tasks:
+  - **inside WSL**, where a distribution exists: tasks get a Linux shell, also when the coordinator runs on Windows;
+  - **on Windows**, for PCs without WSL: tasks that change files use Git Bash when Git for Windows is installed, otherwise PowerShell, and the page says so.
+- **Nothing happens unless you ask.** AI Meter downloads one fixed release of Pi (1.5.2) from its project on GitHub, only when you press *Download*, and checks its SHA-256 before unpacking it. It never updates it on its own, and *Remove* deletes the program, its settings and its keys.
+- **Your keys, by your choice.** The copy uses only the keys you switch on in that page, among those AI Meter already has. A key is copied to Pi's own key file in plain text, as in any Pi installation; switching it off or removing Pi deletes it. No MCP tool returns a key, and the plugin removes them from every report it gives the coordinator.
+- **Your own agent wins.** Where you have a Pi of your own that can run the task, it is used; the managed copy fills the gaps. It never runs on a subscription plan.
+- **The next step, in words.** When a task cannot start, the report now says what you can do: install a copy, switch a key on, or start WSL.
+- This part is in the GitHub version. The Microsoft Store version does not offer the download yet.
+
+### Cloudflare Workers AI
+- **Models that need the Workers Paid plan are no longer shown as free.** Cloudflare keeps some models for its paid plan and refuses them on a free account. AI Meter now asks Cloudflare's own model catalogue which they are, with each reading of the model list, so the list corrects itself when Cloudflare changes it. They leave the panel's free models and are never offered to a delegated task.
+- **Clearer refusals.** When Cloudflare refuses a token that can read your usage but may not run models, the report names the missing permission (*Workers AI*) and where to add it.
+- NVIDIA API Catalog and Cloudflare models can be delegated through the managed copy, with your consent for the free tier.
+
+### Settings
+- **AI apps is now MCP**, an overview with a page for each purpose instead of one long scroll: *Connected apps*, *Delegation agent*, *Model order* and *Subscription plans*. Each row of the overview shows its state at a glance.
+- The texts of these pages are rewritten, shorter and plainer, in all six languages.
+- Replacing a service's key keeps it selected for delegation: the switch comes back with the new key.
+
+### Plugin for Claude Code and Codex
+- Version 0.3.0. It asks AI Meter for a managed copy when you have no agent, picks the shell for each task, and keeps working with older versions of AI Meter without the new parts.
+
+### Privacy
+- Only if you press *Download*: a request to `github.com` for Pi's release archive. Nothing about you is sent.
+- While Cloudflare Workers AI is on: a request to `api.cloudflare.com` for its model catalogue, with your token and account ID, every 12 hours. A token without the *Workers AI: Read* permission is refused there, and AI Meter then uses the list it ships with.
+
+### Known limits
+- One WSL distribution, the one AI Meter is set to.
+- A task started from Windows in the copy inside WSL runs without your shell profile, so tools installed per user (such as a Node managed by `nvm`) are not found.
+- Like any coding agent run as you, the copy can read your files, its own key file included. Select only keys whose free-tier exposure you accept, and do not delegate tasks on content you do not trust.
+
 ## What changed in 0.11.1
 
 - **Antigravity is found on Windows.** Current versions of Antigravity CLI keep their sign-in in Windows Credential Manager instead of a file, so AI Meter said "Not found on this PC" although the CLI was signed in (#94). AI Meter now reads the sign-in from there. It only reads it and never changes it.

@@ -85,10 +85,15 @@ Prefer a single executable? **AIMeter.zip** has `AIMeter.exe` (unsigned for now,
 | **Compact overlay** | A tiny always-on-top pill (off by default) with two micro buttons: collapse to a live ring icon, or close. Never steals focus, hides itself during full-screen games, videos and presentations, shows details on hover. |
 | **Settings** | Built like Windows 11 Settings: connected services, what to show, where, start with Windows, theme, refresh rate, live resource usage. |
 | **MCP** | Claude Desktop, Claude Code, Codex, Antigravity CLI, Hermes, OpenCode, Pi, Cursor and VS Code can read your limits, running sessions, free models and today's spending through AI Meter's MCP server, which changes nothing except its own `leases.json` when coding agents lease capacity. Connect each one with a switch in Settings → AI apps. [Details](docs/MCP.md). |
-| **Delegation (preview)** | A plugin for Claude Code and Codex hands self-contained tasks to a coding agent you already have (Pi or OpenCode) on a free model that AI Meter finds has room. Read-only by default; changes go to a new Git worktree. With no agent of your own, you can optionally let AI Meter download Pi for this, inside WSL (with a Linux shell) or on Windows, or both (Settings → AI apps → Delegated tasks, which also shows what AI Meter found on your PC; not yet in the Microsoft Store build). [Details](plugins/ai-meter/README.md), [managed Pi](docs/MCP.md#managed-pi). |
+| **Delegation (preview)** | A plugin for Claude Code and Codex hands self-contained tasks to a coding agent you already have (Pi or OpenCode) on a free model that AI Meter finds has room. Read-only by default; changes go to a new Git worktree. With no agent of your own, you can optionally let AI Meter download Pi for this, inside WSL (with a Linux shell) or on Windows, or both (Settings → MCP → Delegation agent, which also shows what AI Meter found on your PC; not yet in the Microsoft Store build). [Details](plugins/ai-meter/README.md), [managed Pi](docs/MCP.md#managed-pi). |
 | **Usage history** | Local quota cycles, spending, session tokens, models and tools, daily totals and consumption signals. Optional feedback records whether the result was worth the consumption. Open from the notification-area menu or Settings → Usage history. |
 
-<p align="center"><img src="docs/media/ai-apps.gif" alt="Settings, AI apps: switching on Claude Code and Codex, which then read AI Meter through MCP, and copying the command that adds AI Meter to Codex in WSL" width="720"></p>
+<p align="center"><img src="docs/media/ai-apps.gif" alt="Settings, MCP, Connected apps: switching on Claude Code and Codex, which then read AI Meter through MCP, and copying the command that adds AI Meter to Codex in WSL" width="720"></p>
+
+<details>
+<summary>See the delegation agent page</summary>
+<p align="center"><img src="docs/media/delegation-dark.png" alt="Settings, MCP, Delegation agent: what AI Meter found on the PC, Pi installed inside WSL and on offer for Windows, and the keys it may use" width="720"></p>
+</details>
 
 <details>
 <summary>See the connected apps page in the light theme</summary>
@@ -221,6 +226,7 @@ agents/*.json          built-in coding agent definitions: folders, keys and how 
 src/AgentDefinitions.cs loads agents/*.json and %APPDATA%\AIMeter\agents
 src/ManagedPi.cs       the optional copies of Pi (Windows, inside WSL) that Settings downloads for delegation: pinned release, SHA-256 check, their own key files
 tools/render-media.ps1 regenerates the README images (docs/media) from the real UI with demo data
+tools/render-mcp.ps1   renders the Delegation agent page (docs/media/delegation-*.png) from an isolated fixture (tools/McpPreview.cs)
 tools/render-store.ps1 renders the Microsoft Store screenshots in six languages (tools/StoreScreenshots.cs)
 src/Settings.cs        preferences and start with Windows
 src/PackageStartup.cs  start with Windows in the Microsoft Store package (StartupTask)

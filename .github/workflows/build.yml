@@ -230,6 +230,8 @@ jobs:
             docs/media/history-light.png
             docs/media/consumption-dark.png
             docs/media/consumption-light.png
+            docs/media/delegation-dark.png
+            docs/media/delegation-light.png
           body_path: RELEASE_NOTES.md
 
   # Microsoft Store submission with Microsoft's Store Developer CLI (msstore), for stable tags only. It stays off
