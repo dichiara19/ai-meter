@@ -9,7 +9,7 @@ namespace AIMeter
     internal partial class Controller
     {
         // The managed copies of Pi (ADR 0004, ADR 0005) as Settings drives them: download, removal and which keys they
-        // hold. Nothing here runs unless the user acts in Settings › AI apps › Delegated tasks; the one exception is
+        // hold. Nothing here runs unless the user acts in Settings › MCP › Delegation agent; the one exception is
         // SyncManagedPiKeys, which keeps the keys already chosen in step with AI Meter's own.
 
         /// <summary>A download is in progress, for the copy in ManagedPiBusyWhere: one at a time, whichever the place.</summary>

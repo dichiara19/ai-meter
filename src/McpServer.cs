@@ -822,7 +822,7 @@ namespace AIMeter
             {
                 Plan = true, Coordinator = Json.Str(args, "coordinator"), PlansAllowed = settings == null ? null : settings.PlansAllowed(),
             });
-            if (gate == "plan_off_in_settings") return error("Delegated tasks may not draw on the " + service + " plan: the user has not allowed it in AI Meter's Settings › AI apps › Delegated tasks.");
+            if (gate == "plan_off_in_settings") return error("Delegated tasks may not draw on the " + service + " plan: the user has not allowed it in AI Meter's Settings › MCP › Subscription plans.");
             if (gate == "coordinator_unknown") return error("Say which service the coordinator runs on (coordinator), so that its own plan is never used.");
             if (gate != null) return error("The coordinator runs on the " + service + " plan itself: a task there would save nothing (" + gate + ").");
             if (agent.Dispatch == null) return error(agent.Name + " is not supported for delegation yet: no way to start it has been verified.");
@@ -1048,7 +1048,7 @@ namespace AIMeter
                 // call it: a copy with keys must not read as one without.
                 d["services"] = scan.Found.Where(p => p.Managed && p.Where == where && p.Distro == distro && p.Services != null).SelectMany(p => p.Services).Distinct()
                     .OrderBy(s => s, StringComparer.Ordinal).Cast<object>().ToList();
-                d["set_up_in"] = "AI Meter › Settings › AI apps › Delegated tasks";
+                d["set_up_in"] = "AI Meter › Settings › MCP › Delegation agent";
                 d["note"] = note;
                 return d;
             };

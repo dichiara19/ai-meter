@@ -38,7 +38,7 @@ namespace AIMeter
         }
 
         /// <summary>
-        /// A hint whose first mention of another settings page, such as "AI apps", opens it. A translation that does
+        /// A hint whose first mention of another settings page, such as MCP, opens it. A translation that does
         /// not name the page as its navigation label does stays plain text.
         /// </summary>
         private void Hint(string text, string pageName, string pageId)

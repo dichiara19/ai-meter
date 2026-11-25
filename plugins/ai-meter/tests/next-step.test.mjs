@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { nextStep, refusedKeyStep } from "../scripts/lib/report.mjs";
 
-const SETTINGS = "AI Meter › Settings › AI apps › Delegated tasks";
+const SETTINGS = "AI Meter › Settings › MCP › Delegation agent";
 const copy = (where, fields = {}) => ({ name: "pi", where, ...(where === "wsl" ? { distro: "Ubuntu" } : {}), installed: false, reachable: true, version: "1.5.2", services: [], set_up_in: SETTINGS, ...fields });
 const own = { name: "opencode", where: "windows" };
 

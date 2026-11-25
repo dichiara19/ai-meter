@@ -53,8 +53,8 @@ namespace AIMeter
             var catalogues = Services().Where(CatalogueOnly).ToList();
             if (catalogues.Count > 0)
             {
-                Section(L.T("Model catalogues for AI apps"));
-                Hint(L.T("These services list their models but do not let a key read your limits, so they are not on the taskbar or in the panel. The apps you connect under AI apps use them to find free models and to delegate tasks."), L.T("AI apps"), "apps");
+                Section(L.T("Model catalogues"));
+                Hint(L.T("These services list their models but do not let a key read your limits, so they are not shown on the taskbar or in the panel. The apps you connect under MCP use them to find free models and to delegate tasks."), "MCP", "apps");
                 foreach (var s in catalogues) ServiceLink(s);
             }
             Hint(L.T("API keys can come from the programs that already use them, so you don't have to paste them again:"));

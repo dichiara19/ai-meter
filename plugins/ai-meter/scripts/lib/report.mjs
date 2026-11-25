@@ -118,7 +118,7 @@ export function candidates(found) {
   };
 }
 
-const SETTINGS = "AI Meter › Settings › AI apps › Delegated tasks";
+const SETTINGS = "AI Meter › Settings › MCP › Delegation agent";
 
 /**
  * The next step for the user when no candidate could run (ADR 0005 decision 5), as one short sentence for the

@@ -56,12 +56,13 @@ namespace AIMeter
         {
             try
             {
-                foreach (var row in L.ManagedPiStrings)
+                var rows = L.ManagedPiStrings.Concat(L.McpStrings).ToList();
+                foreach (var row in rows)
                     Assert(row.Length == 6 && row.All(text => !string.IsNullOrEmpty(text)), "A managed Pi string lacks a language: " + row[0]);
                 foreach (var language in new[] { "it", "es", "fr", "de", "pt" })
                 {
                     L.Init(language);
-                    foreach (var row in L.ManagedPiStrings)
+                    foreach (var row in rows)
                     {
                         string english = row[0], translated = L.T(english);
                         Assert(translated != english, "Missing managed Pi translation for " + language + ": " + english);

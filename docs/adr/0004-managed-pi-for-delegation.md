@@ -28,7 +28,7 @@ A request to a real model from the Windows build was not part of that test.
    - The managed Pi is an optional addition for services reached with a key. It is never used for a subscription plan.
    - In each place, a verified agent of the user's wins. The managed copy is a separate runtime that `list_candidates` offers only where no verified Pi of the user's is found, unless the user chooses otherwise in Settings. Both are named in the answer, so the choice is visible.
 2. **Installed only by an explicit action in Settings.**
-   - Settings › AI apps › Delegated tasks offers the download and its removal. No MCP read and no task installs, updates or removes anything (ADR 0001 decision 4 stands for those).
+   - Settings › MCP › Delegation agent offers the download and its removal. No MCP read and no task installs, updates or removes anything (ADR 0001 decision 4 stands for those).
    - AI Meter downloads one pinned Pi release from the project's official releases and checks it against a SHA-256 kept in AI Meter's own sources. A different file is discarded.
    - A newer Pi is adopted only by a new AI Meter version, after its dispatch is verified: Pi does not promise a stable event format.
    - The copy lives in AI Meter's data folder, outside `PATH`, and nothing else on the PC is changed.

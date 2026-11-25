@@ -1236,12 +1236,12 @@ test("a managed copy described without managed_config is skipped: its keys could
 
 test("with no candidate, the job's report and delegate_candidates carry the user's next step", async () => {
   const managed_runtimes = [
-    { name: "pi", where: "wsl", distro: "Ubuntu", installed: false, reachable: true, version: "1.5.2", services: [], set_up_in: "AI Meter › Settings › AI apps › Delegated tasks" },
-    { name: "pi", where: "windows", installed: false, reachable: true, version: "1.5.2", services: [], set_up_in: "AI Meter › Settings › AI apps › Delegated tasks" },
+    { name: "pi", where: "wsl", distro: "Ubuntu", installed: false, reachable: true, version: "1.5.2", services: [], set_up_in: "AI Meter › Settings › MCP › Delegation agent" },
+    { name: "pi", where: "windows", installed: false, reachable: true, version: "1.5.2", services: [], set_up_in: "AI Meter › Settings › MCP › Delegation agent" },
   ];
   const { workspace } = setUp({ candidates: [], managed_runtimes, environment: { wsl: "running", distro: "Ubuntu", git_for_windows: false } });
   const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
-  const expected = "No coding agent is set up on this PC for delegated tasks: the user can have AI Meter set up its own copy of Pi inside WSL (Ubuntu), in AI Meter › Settings › AI apps › Delegated tasks.";
+  const expected = "No coding agent is set up on this PC for delegated tasks: the user can have AI Meter set up its own copy of Pi inside WSL (Ubuntu), in AI Meter › Settings › MCP › Delegation agent.";
 
   assert.equal(job.status, "failed");
   assert.equal(report.full(job, jobs.root()).next_step, expected);

@@ -31,7 +31,7 @@ namespace AIMeter
         private DateTime lastCpuAt;
         private bool compact;
 
-        /// <summary>Current page: services, service:&lt;id&gt;, display, notifications, history, general or about.</summary>
+        /// <summary>Current page: services, service:&lt;id&gt;, display, notifications, history, apps (MCP), apps:&lt;page&gt;, general or about.</summary>
         private string current = "services";
 
         private static readonly string[][] Sections =
@@ -40,7 +40,7 @@ namespace AIMeter
             new[] { "display", "", "Where to see it" },
             new[] { "notifications", "", "Notifications" },
             new[] { "history", "", "Usage history" },
-            new[] { "apps", "", "AI apps" },
+            new[] { "apps", "", "MCP" },
             new[] { "general", "", "General" },
             new[] { "about", "", "About" },
         };
@@ -112,7 +112,7 @@ namespace AIMeter
             else if (current == "display") BuildDisplay();
             else if (current == "notifications") BuildNotifications();
             else if (current == "history") BuildHistory();
-            else if (current == "apps") BuildApps();
+            else if (current == "apps" || current.StartsWith("apps:", StringComparison.Ordinal)) BuildMcp(current.Length > 5 ? current.Substring(5) : "");
             else if (current == "general") BuildGeneral();
             else if (current == "about") BuildAbout();
             else BuildServices();
@@ -122,7 +122,7 @@ namespace AIMeter
         private void BuildNav()
         {
             nav.Children.Clear();
-            string section = current.StartsWith("service:", StringComparison.Ordinal) ? "services" : current;
+            string section = current.StartsWith("service:", StringComparison.Ordinal) ? "services" : current.StartsWith("apps:", StringComparison.Ordinal) ? "apps" : current;
             foreach (var s in Sections)
             {
                 string id = s[0];
@@ -175,7 +175,7 @@ namespace AIMeter
             page.Children.Add(h);
         }
 
-        /// <summary>The Services breadcrumb returns to the list, matching Windows Settings navigation.</summary>
+        /// <summary>A breadcrumb returns to its overview, as Services and MCP do, matching Windows Settings navigation.</summary>
         private void Breadcrumb(string parent, string parentId, string title)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 20) };

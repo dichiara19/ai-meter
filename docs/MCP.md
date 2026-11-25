@@ -6,7 +6,7 @@ The server changes nothing on your PC or your accounts, with one exception: the 
 
 ## Connecting an app
 
-Open **Settings → AI apps**. AI Meter lists the supported apps it finds on this PC, and those inside WSL while WSL is running. Turn an app on to connect it, then restart that app.
+Open **Settings → MCP → Connected apps**. AI Meter lists the supported apps it finds on this PC, and those inside WSL while WSL is running. Turn an app on to connect it, then restart that app.
 
 | App | File AI Meter edits | Entry |
 |---|---|---|
@@ -32,7 +32,7 @@ Antigravity CLI is listed when `~/.gemini/antigravity-cli` exists. Gemini CLI ha
 
 ## From the command line
 
-Claude Code, Codex, Antigravity CLI and Hermes can add AI Meter with their own `mcp add` command. Under **From the command line** in **Settings → AI apps**, the **Windows** and **WSL** buttons copy the command with your paths filled in. Paste it into the matching terminal, then restart the CLI.
+Claude Code, Codex, Antigravity CLI and Hermes can add AI Meter with their own `mcp add` command. Under **Command line** in **Settings → MCP → Connected apps**, the **Windows** and **WSL** buttons copy the command with your paths filled in. Paste it into the matching terminal, then restart the CLI.
 
 AI Meter writes the relay at every start, so the path in the command exists as soon as AI Meter has run once. In the examples below, replace `<you>` with your Windows user name.
 
@@ -178,7 +178,7 @@ Each model from `list_free_models` says how its price is known and what limits a
 
 Every candidate's pool can start a task now; a pool that cannot is in `excluded`. Candidates on a subscription plan come after free ones, unless the plan's room is about to be lost ([Subscription plans](#subscription-plans)). Among free candidates, AI Meter puts the most suitable first, by the first of these keys that differs:
 
-1. **The user's preference.** Models marked *Preferred* in Settings › AI apps › Delegated tasks come first, models marked *Avoided* last. An avoided model stays a candidate: it is used when nothing else starts, or when the coordinator pins it.
+1. **The user's preference.** Models marked *Preferred* in Settings › MCP › Model order come first, models marked *Avoided* last. An avoided model stays a candidate: it is used when nothing else starts, or when the coordinator pins it.
 2. **Room, in two bands.** Pools with at least 20% of their tightest limit left, or with unknown room, come before pools with less. Above that, room does not reorder models: a pool at 70% and one at 40% count the same.
 3. **The model's track record on this PC.** Over the last 30 days of released leases: completed tasks, minus failed or timed-out ones, minus leases that met a rate limit. The highest score comes first; a model never tried scores 0, so a model that keeps failing or being rate limited drops below untried ones. A cancelled lease counts only its rate limit, if it met one; an expired lease, never released, is not counted.
 4. **Reply size.** A model whose stated reply size is below 16,384 tokens comes after the others: that is too short for most coding tasks.
@@ -246,7 +246,7 @@ Many users also pay for a Claude or ChatGPT plan, whose 5-hour and weekly window
 | `reason` | Meaning |
 |---|---|
 | `plan_not_requested` | The request did not set `include_plan` |
-| `plan_off_in_settings` | The user has not allowed this plan in Settings › AI apps › Delegated tasks (off by default) |
+| `plan_off_in_settings` | The user has not allowed this plan in Settings › MCP › Subscription plans (off by default) |
 | `coordinator_unknown` | The request did not say which service the coordinator runs on, so its own plan could not be left out |
 | `same_plan_as_coordinator` | The coordinator runs on this plan: a task there would save nothing. AI Meter cannot tell two accounts of one service apart, and does not try |
 | `plan_usage_unknown` | No reading of the plan's windows, or one older than 15 minutes: room is never assumed |
@@ -395,7 +395,7 @@ A user with no agent of their own can let AI Meter keep a copy of Pi for delegat
 
 The Windows build is x64; on Windows on ARM it runs under emulation.
 
-**Who installs it.** Only the user, with the buttons in Settings › AI apps › Delegated tasks, which also remove each copy. No MCP tool installs, updates or removes anything, and none returns a key. A coordinator that finds a copy missing tells the user where to set it up (`runtimes.managed[].set_up_in`) and does not try to.
+**Who installs it.** Only the user, with the buttons in Settings › MCP › Delegation agent, which also remove each copy. No MCP tool installs, updates or removes anything, and none returns a key. A coordinator that finds a copy missing tells the user where to set it up (`runtimes.managed[].set_up_in`) and does not try to.
 - AI Meter downloads the pinned release from `github.com` (GitHub redirects to its release storage host), checks it against a SHA-256 kept in its own sources and discards any other file. The archive is hashed through one file handle held without sharing, with a new file and a new staging folder for each attempt; leftovers of earlier attempts are deleted and never promoted. A newer Pi is adopted only by a new AI Meter version, after the dispatch of both copies is verified.
 - The copy on Windows is unpacked to `managed\pi\<version>` under `%LOCALAPPDATA%\AIMeter` for the GitHub build: the local part of the profile, which stays on this PC, where `%APPDATA%` can be copied to a server and to other PCs with a roaming profile, and the key file is plain text. The Microsoft Store build uses `%USERPROFILE%\.aimeter`, because a packaged app's AppData is private to the package. It is outside `PATH`, and nothing else on the PC is changed.
 - **Inside WSL**, the archive is downloaded and checked on Windows, then the verified bytes are fed to the distribution's own `tar` through `wsl.exe`, which unpacks them with the files' permissions into a new staging folder; a rename promotes it. This is the one case in which AI Meter starts a program inside WSL, and only during an installation the user asked for (it makes the configuration folder private with `chmod` first); no MCP call and no task does it. The distribution must be running: AI Meter never starts WSL, and says so.
@@ -430,12 +430,12 @@ The Windows build is x64; on Windows on ARM it runs under emulation.
 "managed": [
   {
     "name": "pi", "where": "windows", "installed": true, "reachable": true, "version": "1.5.2", "services": ["deepseek", "openrouter"],
-    "set_up_in": "AI Meter › Settings › AI apps › Delegated tasks",
+    "set_up_in": "AI Meter › Settings › MCP › Delegation agent",
     "note": "An optional copy of Pi that AI Meter downloads when the user asks, for tasks on Windows folders started from Windows. Only the user can install it or give it a key, in Settings: tell them, do not try to."
   },
   {
     "name": "pi", "where": "wsl", "distro": "Ubuntu-24.04", "installed": false, "reachable": true, "version": "1.5.2", "services": [],
-    "set_up_in": "AI Meter › Settings › AI apps › Delegated tasks",
+    "set_up_in": "AI Meter › Settings › MCP › Delegation agent",
     "note": "An optional copy of Pi that AI Meter keeps inside WSL, for tasks started from Windows or from WSL, with a Linux shell. Only the user can install it or give it a key, in Settings, while WSL is running: tell them, do not try to."
   }
 ]

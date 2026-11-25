@@ -503,14 +503,14 @@ namespace AIMeter
             return n;
         }
 
-        // Settings → AI apps.
+        // Settings → MCP → Connected apps.
         // The page is the real one, listing sample clients from fixture folders: which apps it finds and what their
         // files contain come from the fixture, never from the PC that renders the images.
         private const string SampleHome = @"C:\Users\you", SampleWslHome = @"\\wsl.localhost\Ubuntu\home\you";
         private const string SampleRelay = @"C:\Users\you\AppData\Roaming\AIMeter\mcp.ps1";
         private const int AppsWidth = 1000, AppsHeight = 740;
 
-        /// <summary>Render the AI apps page in both themes and the frames of a GIF that connects two apps and copies a command.</summary>
+        /// <summary>Render the connected apps page (Settings › MCP) in both themes and the frames of a GIF that connects two apps and copies a command.</summary>
         private static int AppsMedia(string outDir, string framesDir)
         {
             string root = IOPath.Combine(IOPath.GetTempPath(), "aimeter-apps-" + Guid.NewGuid().ToString("N"));
@@ -537,7 +537,7 @@ namespace AIMeter
                 {
                     SetTheme(dark);
                     var content = AppsPage(controller, sample);
-                    Save(WindowShot(content, dark, AppsWidth, AppsHeight, "AI apps · Sample apps and paths"), IOPath.Combine(outDir, dark ? "ai-apps-dark.png" : "ai-apps-light.png"), 2);
+                    Save(WindowShot(content, dark, AppsWidth, AppsHeight, "MCP · Sample apps and paths"), IOPath.Combine(outDir, dark ? "ai-apps-dark.png" : "ai-apps-light.png"), 2);
                 }
                 SetTheme(true);
                 return AppsFrames(controller, sample, framesDir, () => McpClients.Connect(client("claude-code", "Windows"), SampleRelay),
@@ -554,7 +554,7 @@ namespace AIMeter
         private static FrameworkElement AppsPage(Controller controller, Action<FrameworkElement> sample)
         {
             var window = new SettingsWindow(controller);
-            window.Open("apps");
+            window.Open("apps:clients");
             var content = (FrameworkElement)window.Content;
             window.Content = null;
             content.Tag = window;
@@ -572,7 +572,7 @@ namespace AIMeter
             foreach (var f in Directory.GetFiles(dir, "f*.png")) File.Delete(f);
             var content = AppsPage(controller, sample);
             var window = (SettingsWindow)content.Tag;
-            var scene = WindowShot(content, true, AppsWidth, AppsHeight, "AI apps · Sample apps and paths");
+            var scene = WindowShot(content, true, AppsWidth, AppsHeight, "MCP · Sample apps and paths");
             var scroll = (ScrollViewer)typeof(SettingsWindow).GetField("scroll", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(window);
             var cursor = Cursor();
             scene.Children.Add(cursor);
@@ -610,7 +610,7 @@ namespace AIMeter
             move(centre(RowControl(content, "Codex", 0)), 10);
             hold(3); connectCodex(); rebuild(); hold(14);
 
-            // Scroll to "From the command line", as a mouse wheel would.
+            // Scroll to "Command line", as a mouse wheel would.
             move(new Point(mouse.X - 120, mouse.Y + 40), 6);
             scene.UpdateLayout();
             double end = scroll.ScrollableHeight;
