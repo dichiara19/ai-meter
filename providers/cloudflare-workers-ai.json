@@ -40,9 +40,24 @@
   "freeModels": {
     "url": "https://models.dev/api.json", "format": "models.dev", "provider": "cloudflare-workers-ai", "interval": 720, "timeout": 60,
     "free": {
-      "status": "confirmed_free", "kind": "free_tier", "source": "documented", "checked": "2026-11-06",
+      "status": "confirmed_free", "kind": "free_tier", "source": "documented", "checked": "2026-11-24",
       "reference": "https://developers.cloudflare.com/workers-ai/platform/pricing/",
-      "note": "Every model is priced in Neurons; the first 10,000 Neurons of each UTC day are free on the Workers Free and Paid plans. Beyond them the Free plan fails requests and the Paid plan bills $0.011 per 1,000, so a task stays free only within the budget claim_capacity returns."
+      "note": "Models are priced in Neurons; the first 10,000 Neurons of each UTC day are free on the Workers Free and Paid plans. Beyond them the Free plan fails requests and the Paid plan bills $0.011 per 1,000, so a task stays free only within the budget claim_capacity returns. The models Cloudflare keeps for the Workers Paid plan are not listed as free.",
+      "paidPlan": {
+        "models": [
+          "@cf/moonshotai/kimi-k2.6", "@cf/moonshotai/kimi-k2.7-code", "@cf/zai-org/glm-5.2", "@cf/zai-org/glm-5.3", "@cf/zai-org/glm-5.3-flash",
+          "@cf/deepseek-ai/deepseek-v4-flash-0731", "@cf/deepseek-ai/deepseek-v4.1-flash-1017", "@cf/deepseek-ai/deepseek-v4-pro-0813",
+          "@cf/thinkingmachines/inkling-2-small"
+        ],
+        "checked": "2026-11-24",
+        "reference": "https://developers.cloudflare.com/workers-ai/platform/pricing/",
+        "note": "Cloudflare offers this model only with the Workers Paid plan or prepaid AI Gateway credits; the Workers Free plan refuses it (403, code 5035). AI Meter cannot read the account's plan, so the model is not offered.",
+        "catalogue": {
+          "url": "https://api.cloudflare.com/client/v4/accounts/{key:account}/ai/models/search?per_page=100",
+          "headers": { "Authorization": "Bearer {token}" }, "timeout": 30,
+          "items": "result", "id": "name", "paid": "properties[property_id=require_workers_paid].value"
+        }
+      }
     },
     "pool": "cloudflare-workers-ai:neurons",
     "allowance": { "metric": "neurons_per_day", "unit": "neurons", "usdPerUnit": 0.000011, "reserve": 1000 },

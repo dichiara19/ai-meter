@@ -14,10 +14,11 @@ namespace AIMeter
     /// when it fails, keys copied only by the user's choice, and how the scan, dispatch and MCP tools offer the copy.
     /// Every test runs on a fake archive under the test folder, with no network and no key from this PC.
     /// </summary>
-    internal static class ManagedPiTests
+    internal static partial class ManagedPiTests
     {
         internal static void Register(Action<string, Action> test)
         {
+            RegisterWsl(test);
             test("The managed Pi installs from a verified archive, reporting progress and leaving no partial files", () => Isolated(InstallsVerifiedArchive));
             test("A wrong, oversized, escaping, incomplete or cancelled archive installs nothing and keeps an installed copy", () => Isolated(RefusesBadArchives));
             test("The managed Pi holds keys only for ticked services Pi knows, and Remove deletes keys, program and choices", () => Isolated(KeysFollowChoices));
@@ -55,12 +56,13 @@ namespace AIMeter
         {
             try
             {
-                foreach (var row in L.ManagedPiStrings)
+                var rows = L.ManagedPiStrings.Concat(L.McpStrings).ToList();
+                foreach (var row in rows)
                     Assert(row.Length == 6 && row.All(text => !string.IsNullOrEmpty(text)), "A managed Pi string lacks a language: " + row[0]);
                 foreach (var language in new[] { "it", "es", "fr", "de", "pt" })
                 {
                     L.Init(language);
-                    foreach (var row in L.ManagedPiStrings)
+                    foreach (var row in rows)
                     {
                         string english = row[0], translated = L.T(english);
                         Assert(translated != english, "Missing managed Pi translation for " + language + ": " + english);
@@ -104,6 +106,10 @@ namespace AIMeter
             bool findKeys = Settings.Current.FindKeys;
             var services = Settings.Current.ManagedPiServices;
             var locateGitBash = ManagedPi.LocateGitBash;
+            var runWsl = ManagedPi.RunWsl;
+            var wslPlaces = Probe.WslPlacesUp;
+            string wslDistro = Settings.Current.WslDistro, wslUser = Settings.Current.WslUser, prefer = Settings.Current.ManagedPiPrefer;
+            bool besideOwn = Settings.Current.ManagedPiBesideOwn;
             var saved = new Dictionary<string, string>();
             foreach (var id in Services)
                 foreach (var name in KeyVariables(Definitions.Get(id)))
@@ -119,6 +125,13 @@ namespace AIMeter
                 Settings.Current.FindKeys = false;
                 Settings.Current.ManagedPiServices = new List<string>();
                 ManagedPi.LocateGitBash = () => null;
+                // No WSL runs, whatever this PC has (an earlier test's collection may have seen it), and nothing is
+                // started inside it unless a test sets its own stand-in for wsl.exe.
+                Probe.WslPlacesUp = new WslPlace[0];
+                Settings.Current.WslDistro = "";
+                ManagedPi.RunWsl = (arguments, input) => { throw new Exception("A test started wsl.exe: " + string.Join(" ", arguments)); };
+                Settings.Current.ManagedPiPrefer = null;
+                Settings.Current.ManagedPiBesideOwn = false;
                 action();
             }
             finally
@@ -126,6 +139,12 @@ namespace AIMeter
                 foreach (var kv in saved) Environment.SetEnvironmentVariable(kv.Key, kv.Value);
                 Native.PackagedOverride = packaged;
                 ManagedPi.LocateGitBash = locateGitBash;
+                ManagedPi.RunWsl = runWsl;
+                Probe.WslPlacesUp = wslPlaces;
+                Settings.Current.WslDistro = wslDistro;
+                Settings.Current.WslUser = wslUser;
+                Settings.Current.ManagedPiPrefer = prefer;
+                Settings.Current.ManagedPiBesideOwn = besideOwn;
                 Settings.Current.FindKeys = findKeys;
                 Settings.Current.ManagedPiServices = services;
                 foreach (var id in Services)
@@ -170,39 +189,43 @@ namespace AIMeter
 
         private static readonly byte[] Good = Archive("pi.exe", "not really Pi", @"theme/dark.json", "{}");
 
-        /// <summary>The pinned version, with the archive's real digest and exact length.</summary>
-        private static ManagedPi.Release ReleaseOf(byte[] archive)
+        /// <summary>The pinned version, with the archive's real digest and exact length: the Windows build, or the Linux one.</summary>
+        private static ManagedPi.Release ReleaseOf(byte[] archive, bool linux = false)
         {
             string digest;
             using (var sha = SHA256.Create()) digest = BitConverter.ToString(sha.ComputeHash(archive)).Replace("-", "").ToLowerInvariant();
-            return new ManagedPi.Release { Version = ManagedPi.Pinned.Version, Url = "https://example.invalid/pi-windows-x64.zip", Sha256 = digest, ArchiveBytes = archive.Length };
+            return new ManagedPi.Release
+            {
+                Version = ManagedPi.Version, Url = "https://example.invalid/pi-" + (linux ? "linux-x64.tar.gz" : "windows-x64.zip"), Sha256 = digest, ArchiveBytes = archive.Length,
+                ArchiveKind = linux ? ManagedPi.TarGz : ManagedPi.Zip, ProgramName = linux ? "pi" : "pi.exe",
+            };
         }
 
         private static void Install(byte[] archive, ManagedPi.Release release, Func<bool> cancelled = null, List<long> progress = null)
         {
-            ManagedPi.Install(release, url => new MemoryStream(archive), read => { if (progress != null) progress.Add(read); }, cancelled);
+            ManagedPi.Windows.Install(release, url => new MemoryStream(archive), read => { if (progress != null) progress.Add(read); }, cancelled);
         }
 
         /// <summary>Files and folders under the copy's root named as a partial download or unpacking.</summary>
         private static List<string> Partials()
         {
-            if (!Directory.Exists(ManagedPi.Root)) return new List<string>();
-            return Directory.GetFileSystemEntries(ManagedPi.Root, "*", SearchOption.AllDirectories)
+            if (!Directory.Exists(ManagedPi.Windows.Root)) return new List<string>();
+            return Directory.GetFileSystemEntries(ManagedPi.Windows.Root, "*", SearchOption.AllDirectories)
                 .Where(p => p.EndsWith(".partial", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".new", StringComparison.OrdinalIgnoreCase)).ToList();
         }
 
         private static void InstallsVerifiedArchive()
         {
-            Assert(!ManagedPi.Installed && ManagedPi.Stamp == "", "A copy counted as installed before any installation.");
+            Assert(!ManagedPi.Windows.Installed && ManagedPi.Windows.Stamp == "", "A copy counted as installed before any installation.");
             var progress = new List<long>();
             Install(Good, ReleaseOf(Good), null, progress);
-            Assert(ManagedPi.Installed && File.ReadAllText(ManagedPi.ProgramPath) == "not really Pi", "The program was not unpacked where Installed looks.");
-            Assert(ManagedPi.ProgramPath == Path.Combine(ManagedPi.Root, ManagedPi.Pinned.Version, "pi.exe"), "The program is not in the pinned version's folder.");
-            Assert(File.Exists(Path.Combine(ManagedPi.Root, ManagedPi.Pinned.Version, @"theme\dark.json")), "A nested file was not unpacked.");
-            Assert(ManagedPi.Root.StartsWith(Settings.Folder, StringComparison.OrdinalIgnoreCase), "The copy is not under the shared folder.");
-            Assert(Partials().Count == 0 && !Directory.GetFiles(ManagedPi.Root).Any(), "A partial download or unpacking was left: " + string.Join(", ", Partials()));
+            Assert(ManagedPi.Windows.Installed && File.ReadAllText(ManagedPi.Windows.ProgramPath) == "not really Pi", "The program was not unpacked where Installed looks.");
+            Assert(ManagedPi.Windows.ProgramPath == Path.Combine(ManagedPi.Windows.Root, ManagedPi.Version, "pi.exe"), "The program is not in the pinned version's folder.");
+            Assert(File.Exists(Path.Combine(ManagedPi.Windows.Root, ManagedPi.Version, @"theme\dark.json")), "A nested file was not unpacked.");
+            Assert(ManagedPi.Windows.Root.StartsWith(Settings.Folder, StringComparison.OrdinalIgnoreCase), "The copy is not under the shared folder.");
+            Assert(Partials().Count == 0 && !Directory.GetFiles(ManagedPi.Windows.Root).Any(), "A partial download or unpacking was left: " + string.Join(", ", Partials()));
             Assert(progress.Count > 0 && progress.Last() == Good.Length, "Progress was not reported up to the archive's size.");
-            Assert(ManagedPi.Stamp == "0", "An installed copy without keys has the wrong stamp: " + ManagedPi.Stamp);
+            Assert(ManagedPi.Windows.Stamp == "0", "An installed copy without keys has the wrong stamp: " + ManagedPi.Windows.Stamp);
         }
 
         /// <summary>Install must throw the given exception type; returns its message.</summary>
@@ -216,7 +239,7 @@ namespace AIMeter
         private static void RefusesBadArchives()
         {
             string outside = Path.Combine(Settings.Folder, @"managed\evil.txt");
-            string beside = Path.Combine(ManagedPi.Root, "evil.txt");
+            string beside = Path.Combine(ManagedPi.Windows.Root, "evil.txt");
             var escaping = Archive("pi.exe", "x", @"..\..\evil.txt", "escaped");
             var besideRoot = Archive("pi.exe", "x", @"..\evil.txt", "escaped");
             var forward = Archive("pi.exe", "x", "../../evil.txt", "escaped");
@@ -228,8 +251,8 @@ namespace AIMeter
 
             Action<string> nothingLeft = what =>
             {
-                Assert(!ManagedPi.Installed, "Installed is true after " + what + ".");
-                Assert(!Directory.Exists(Path.Combine(ManagedPi.Root, ManagedPi.Pinned.Version)), "A version folder was left after " + what + ".");
+                Assert(!ManagedPi.Windows.Installed, "Installed is true after " + what + ".");
+                Assert(!Directory.Exists(Path.Combine(ManagedPi.Windows.Root, ManagedPi.Version)), "A version folder was left after " + what + ".");
                 Assert(Partials().Count == 0, "A partial file was left after " + what + ": " + string.Join(", ", Partials()));
                 Assert(!File.Exists(outside) && !File.Exists(beside), "An entry was written outside the unpacking folder after " + what + ".");
             };
@@ -259,13 +282,13 @@ namespace AIMeter
             Fails<ManagedPi.InstallException>(() => Install(noProgram, ReleaseOf(noProgram)), "an archive without pi.exe over a copy");
             Fails<ManagedPi.InstallException>(() => Install(escaping, ReleaseOf(escaping)), "an escaping entry over a copy");
             Fails<OperationCanceledException>(() => Install(Good, ReleaseOf(Good), () => true), "a cancelled download over a copy");
-            Assert(ManagedPi.Installed && File.ReadAllText(ManagedPi.ProgramPath) == "not really Pi", "A failed installation destroyed the installed copy.");
+            Assert(ManagedPi.Windows.Installed && File.ReadAllText(ManagedPi.Windows.ProgramPath) == "not really Pi", "A failed installation destroyed the installed copy.");
             Assert(Partials().Count == 0 && !File.Exists(outside) && !File.Exists(beside), "A failed installation over a copy left files.");
         }
 
         // ------------------------------------------------------------ keys
 
-        private static string KeyFile { get { return Path.Combine(ManagedPi.ConfigFolder, "auth.json"); } }
+        private static string KeyFile { get { return Path.Combine(ManagedPi.Windows.ConfigFolder, "auth.json"); } }
 
         private static void KeysFollowChoices()
         {
@@ -285,16 +308,16 @@ namespace AIMeter
 
             // Not installed: nothing is written, whatever is ticked.
             settings.ManagedPiServices = new List<string> { "openrouter" };
-            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && !Directory.Exists(ManagedPi.Root), "Keys were written for a copy that is not installed.");
+            Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && !Directory.Exists(ManagedPi.Windows.Root), "Keys were written for a copy that is not installed.");
 
             Install(Good, ReleaseOf(Good));
             Assert(ManagedPi.Sync(settings), "The key file could not be written.");
             Assert(File.ReadAllText(KeyFile) == "{\"openrouter\":{\"type\":\"api_key\",\"key\":\"" + RouterKey + "\"}}",
                 "The key file is not Pi's auth.json for OpenRouter: " + File.ReadAllText(KeyFile));
             string provider;
-            Assert(ManagedPi.KeyFor(router, out provider) == RouterKey && provider == "openrouter", "KeyFor does not give the copied key.");
-            Assert(ManagedPi.KeyFor(gemini, out provider) == null && provider == "google", "KeyFor gives a key that was not copied.");
-            Assert(ManagedPi.Stamp != "0" && ManagedPi.Stamp != "", "The stamp does not follow the key file.");
+            Assert(ManagedPi.Windows.KeyFor(router, out provider) == RouterKey && provider == "openrouter", "KeyFor does not give the copied key.");
+            Assert(ManagedPi.Windows.KeyFor(gemini, out provider) == null && provider == "google", "KeyFor gives a key that was not copied.");
+            Assert(ManagedPi.Windows.Stamp != "0" && ManagedPi.Windows.Stamp != "", "The stamp does not follow the key file.");
 
             // Gemini under Pi's provider google; Experiential Labs never, even when ticked.
             settings.ManagedPiServices = new List<string> { "openrouter", "gemini", "experientiallabs" };
@@ -303,7 +326,7 @@ namespace AIMeter
             Assert(keys.Keys.OrderBy(k => k, StringComparer.Ordinal).SequenceEqual(new[] { "google", "openrouter" }), "The key file's providers are wrong: " + string.Join(", ", keys.Keys));
             Assert(Json.Str(Json.Obj(keys, "google"), "key") == GeminiKey && Json.Str(Json.Obj(keys, "google"), "type") == "api_key", "Gemini's key is not under google.");
             Assert(!File.ReadAllText(KeyFile).Contains(LabsKey), "A key for a service Pi cannot call was copied.");
-            Assert(ManagedPi.KeyFor(labs, out provider) == null && provider == null, "KeyFor gives a key for a service Pi cannot call.");
+            Assert(ManagedPi.Windows.KeyFor(labs, out provider) == null && provider == null, "KeyFor gives a key for a service Pi cannot call.");
 
             // Unticking removes the entry, and the file once it is empty.
             settings.ManagedPiServices = new List<string> { "openrouter" };
@@ -311,7 +334,7 @@ namespace AIMeter
             Assert(!File.ReadAllText(KeyFile).Contains(GeminiKey) && File.ReadAllText(KeyFile).Contains(RouterKey), "Unticking Gemini did not remove only its key.");
             settings.ManagedPiServices = new List<string>();
             Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "Unticking every service left the key file.");
-            Assert(ManagedPi.Stamp == "0", "The stamp does not show that the keys are gone.");
+            Assert(ManagedPi.Windows.Stamp == "0", "The stamp does not show that the keys are gone.");
 
             // No key found at all (a discovered key out of sight, or the first moments after a start) is not the user
             // taking it back: the copy keeps its entry, the count stays and the service stays on offer. Removing the
@@ -323,7 +346,7 @@ namespace AIMeter
             long count = Revision();
             ApiKeys.Remove("openrouter");
             Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile) == held && Revision() == count, "A key AI Meter cannot find now was withdrawn from the copy.");
-            Assert(ManagedPi.KeyFor(router, out provider) == RouterKey && OffersManaged("openrouter"), "The copy's own key was refused while AI Meter finds none.");
+            Assert(ManagedPi.Windows.KeyFor(router, out provider) == RouterKey && OffersManaged("openrouter"), "The copy's own key was refused while AI Meter finds none.");
             Assert(!ManagedPi.ServicesWithKey().Any(d => d.Id == "openrouter"), "A service without a key can still be copied.");
 
             // Ticked with no key found and no entry yet: nothing is written.
@@ -333,15 +356,30 @@ namespace AIMeter
             settings.ManagedPiServices = new List<string> { "openrouter" };
             Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && Revision() == count, "A ticked service with no key wrote an entry.");
 
+            // Removing the key in AI Meter unticks the service and remembers it: a key entered again brings the tick
+            // back, unless the user set the switch themselves meanwhile.
+            settings.ManagedPiServicesAwaitingKey = new List<string>();
+            settings.ManagedPiServices = new List<string> { "openrouter", "gemini" };
+            Assert(!ManagedPi.WithdrawWithKey(settings, "nvidia") && settings.ManagedPiServicesAwaitingKey.Count == 0, "A service that was not ticked waits for a key.");
+            Assert(ManagedPi.WithdrawWithKey(settings, "openrouter") && settings.ManagedPiServices.SequenceEqual(new[] { "gemini" }), "Removing a key did not untick its service.");
+            Assert(ManagedPi.RestoreWithKey(settings, "openrouter") && settings.ManagedPiServices.Contains("openrouter") && settings.ManagedPiServicesAwaitingKey.Count == 0,
+                "A key entered again did not bring the tick back.");
+            Assert(!ManagedPi.RestoreWithKey(settings, "openrouter"), "The tick came back twice.");
+            ManagedPi.WithdrawWithKey(settings, "openrouter");
+            ManagedPi.Choose(settings, "openrouter", false);
+            Assert(!ManagedPi.RestoreWithKey(settings, "openrouter") && !settings.ManagedPiServices.Contains("openrouter"), "A switch the user turned off came back with a key.");
+            ManagedPi.WithdrawWithKey(settings, "gemini");
+
             // Remove deletes the keys, the program and the choices.
             ApiKeys.Save("openrouter", RouterKey);
             settings.ManagedPiServices = new List<string> { "openrouter", "gemini" };
             ManagedPi.Sync(settings);
             long before = Revision();
-            ManagedPi.Remove(settings);
+            ManagedPi.Windows.Remove(settings);
             AssertRemoved(before, "Remove");
             Assert(settings.ManagedPiServices != null && settings.ManagedPiServices.Count == 0, "Remove did not forget the ticked services.");
-            Assert(!ManagedPi.Installed && ManagedPi.Stamp == "", "The copy still counts as installed after Remove.");
+            Assert(settings.ManagedPiServicesAwaitingKey.Count == 0, "Remove did not forget the services waiting for a key.");
+            Assert(!ManagedPi.Windows.Installed && ManagedPi.Windows.Stamp == "", "The copy still counts as installed after Remove.");
             long removed = Revision();
             Assert(ManagedPi.Sync(settings), "A sync after Remove failed.");
             AssertRemoved(before, "a sync after Remove");
@@ -354,9 +392,9 @@ namespace AIMeter
         /// </summary>
         private static void AssertRemoved(long before, string what)
         {
-            Assert(!ManagedPi.Installed && !File.Exists(KeyFile) && !File.Exists(PendingKeyFile), "The copy or its keys outlived " + what + ".");
-            var left = Directory.Exists(ManagedPi.Root) ? Directory.GetFileSystemEntries(ManagedPi.Root, "*", SearchOption.AllDirectories).ToList() : new List<string>();
-            Assert(left.Count == 2 && left.Contains(ManagedPi.ConfigFolder) && left.Contains(RevisionFile),
+            Assert(!ManagedPi.Windows.Installed && !File.Exists(KeyFile) && !File.Exists(PendingKeyFile), "The copy or its keys outlived " + what + ".");
+            var left = Directory.Exists(ManagedPi.Windows.Root) ? Directory.GetFileSystemEntries(ManagedPi.Windows.Root, "*", SearchOption.AllDirectories).ToList() : new List<string>();
+            Assert(left.Count == 2 && left.Contains(ManagedPi.Windows.ConfigFolder) && left.Contains(RevisionFile),
                 "After " + what + " more than the count was left: " + string.Join(", ", left));
             long after = Revision();
             Assert(after % 2 == 0 && after > before, "After " + what + " the count is not even and above " + before + ": " + after);
@@ -433,8 +471,8 @@ namespace AIMeter
                 "The copy's accesses are not its copied keys: " + string.Join(", ", access.Select(a => a.Service + ":" + a.Provider)));
             foreach (var a in access)
             {
-                Assert(a.Runtime == "pi" && a.Where == "windows" && a.Program == ManagedPi.ProgramPath && a.ConfigFolder == ManagedPi.ConfigFolder
-                       && a.Version == ManagedPi.Pinned.Version, "The managed access for " + a.Service + " lacks its program, folder or version.");
+                Assert(a.Runtime == "pi" && a.Where == "windows" && a.Program == ManagedPi.Windows.ProgramPath && a.ConfigFolder == ManagedPi.Windows.ConfigFolder
+                       && a.Version == ManagedPi.Version, "The managed access for " + a.Service + " lacks its program, folder or version.");
                 Assert(a.Credential.StartsWith("cred_") && !a.Credential.Contains(RouterKey) && !a.Credential.Contains(GeminiKey), "A credential id shows the key.");
             }
             Assert(access.Single(a => a.Service == "openrouter").Credential == Candidates.Access("openrouter", "pi", "windows", RouterKey).Credential,
@@ -475,7 +513,7 @@ namespace AIMeter
             Assert(fromWsl.Count == 1 && !fromWsl[0].Access.Managed, "A caller in WSL was offered the managed copy.");
 
             // Not installed any more: gone from every scan.
-            ManagedPi.Remove(Settings.Current);
+            ManagedPi.Windows.Remove(Settings.Current);
             Assert(!HasManaged(ScanOf(home, true)) && !HasManaged(ScanOf(own, true, kinds, true)), "A removed copy was still offered.");
         }
 
@@ -492,7 +530,7 @@ namespace AIMeter
             return i < 0 || i + 1 >= arguments.Count ? null : arguments[i + 1];
         }
 
-        private static string ShellSettingsFile { get { return Path.Combine(ManagedPi.ConfigFolder, "settings.json"); } }
+        private static string ShellSettingsFile { get { return Path.Combine(ManagedPi.Windows.ConfigFolder, "settings.json"); } }
 
         /// <summary>A stand-in for Git for Windows' bash.exe under the test folder; returns its path.</summary>
         private static string FakeGitBash()
@@ -515,8 +553,8 @@ namespace AIMeter
 
             var modify = Dispatch.Describe(router, Model, Dispatch.Modify, workspace, "windows", null, router.Version);
             Assert(modify.Supported && modify.Managed && modify.VersionVerified, "The managed copy was not described: " + modify.Reason);
-            Assert(modify.Program == ManagedPi.ProgramPath && modify.WorkingDirectory == workspace && modify.Where == "windows", "The managed copy's program or folder is wrong.");
-            Assert(modify.Environment["PI_CODING_AGENT_DIR"] == ManagedPi.ConfigFolder && modify.Environment["PI_SKIP_VERSION_CHECK"] == "1" && modify.Environment["PI_TELEMETRY"] == "0",
+            Assert(modify.Program == ManagedPi.Windows.ProgramPath && modify.WorkingDirectory == workspace && modify.Where == "windows", "The managed copy's program or folder is wrong.");
+            Assert(modify.Environment["PI_CODING_AGENT_DIR"] == ManagedPi.Windows.ConfigFolder && modify.Environment["PI_SKIP_VERSION_CHECK"] == "1" && modify.Environment["PI_TELEMETRY"] == "0",
                 "The managed copy's environment is wrong.");
             string offline;
             Assert(modify.Environment.TryGetValue("PI_OFFLINE", out offline) && offline == "1", "The managed copy may download tools while it works (PI_OFFLINE).");
@@ -529,7 +567,7 @@ namespace AIMeter
             Assert(After(bash, "--tools") == "read,bash,edit,write" && After(bash, "--provider") == "openrouter" && After(bash, "--model") == Model,
                 "The git_bash alternative is wrong: " + string.Join(" ", bash));
 
-            var gemini = Dispatch.Describe(ManagedAccess(ScanOf(Home(), false), "gemini"), "gemini-2.5-flash", Dispatch.Modify, workspace, "windows", null, ManagedPi.Pinned.Version);
+            var gemini = Dispatch.Describe(ManagedAccess(ScanOf(Home(), false), "gemini"), "gemini-2.5-flash", Dispatch.Modify, workspace, "windows", null, ManagedPi.Version);
             Assert(After(gemini.Arguments, "--provider") == "google" && After(gemini.Alternatives["git_bash"], "--provider") == "google", "Gemini is not called through Pi's provider google.");
 
             var readOnly = Dispatch.Describe(router, Model, Dispatch.ReadOnly, workspace, "windows", null, router.Version);
@@ -586,6 +624,14 @@ namespace AIMeter
 
         private static bool IsManaged(Dictionary<string, object> runtime) { return runtime != null && runtime.ContainsKey("managed") && Json.Bool(runtime, "managed"); }
 
+        /// <summary>The entry of runtimes.managed for a place, or null; the list must hold one entry per place at most.</summary>
+        private static Dictionary<string, object> ManagedEntry(Dictionary<string, object> listed, string where)
+        {
+            var entries = Items(Json.Obj(listed, "runtimes"), "managed");
+            Assert(entries.Select(e => Json.Str(e, "where")).Distinct().Count() == entries.Count, "runtimes.managed lists a place twice.");
+            return entries.SingleOrDefault(e => Json.Str(e, "where") == where);
+        }
+
         private static void McpShowsManagedCopy()
         {
             NetworkBackoff.Clear();
@@ -598,12 +644,19 @@ namespace AIMeter
             string raw;
             var answers = new List<string>();
 
-            // Not installed: the block says so, with no services, and there is no candidate.
+            // Not installed: the entry says so, with no services, and there is no candidate. WSL is not running here, so
+            // the entry for the copy inside WSL is unreachable and not installed.
             var before = Call(server, "list_candidates", "{}", out raw);
-            var block = Json.Obj(Json.Obj(before, "runtimes"), "managed");
-            Assert(block != null && !Json.Bool(block, "installed") && Json.Str(block, "version") == ManagedPi.Pinned.Version && Items(before, "candidates").Count == 0,
+            var block = ManagedEntry(before, "windows");
+            Assert(block != null && !Json.Bool(block, "installed") && Json.Bool(block, "reachable") && Json.Str(block, "version") == ManagedPi.Version && Items(before, "candidates").Count == 0,
                 "runtimes.managed does not say the copy is not installed.");
             Assert(((IList)block["services"]).Count == 0 && Json.Str(block, "set_up_in") != null, "runtimes.managed lists services, or not where to set it up.");
+            var stopped = ManagedEntry(before, "wsl");
+            Assert(stopped != null && Json.Str(stopped, "distro") == "Ubuntu-24.04" && !Json.Bool(stopped, "reachable") && !Json.Bool(stopped, "installed") && ((IList)stopped["services"]).Count == 0,
+                "runtimes.managed does not list the copy inside a stopped WSL as unreachable: " + raw);
+            var environment = Json.Obj(Json.Obj(before, "runtimes"), "environment");
+            Assert(environment != null && Json.Str(environment, "wsl") == "stopped" && Json.Str(environment, "distro") == "Ubuntu-24.04" && Json.Bool(environment, "git_for_windows"),
+                "runtimes.environment does not say that WSL is stopped and Git for Windows found: " + raw);
 
             InstallWithKeys();
             var listed = Call(server, "list_candidates", "{}", out raw);
@@ -612,7 +665,7 @@ namespace AIMeter
             Assert(Json.Str(candidate, "service") == "openrouter" && IsManaged(Json.Obj(candidate, "runtime")) && Json.Str(Json.Obj(candidate, "runtime"), "where") == "windows",
                 "The candidate does not say it runs on the managed copy.");
             Assert(Items(Json.Obj(listed, "runtimes"), "found").Count(IsManaged) == 1, "runtimes.found does not list the managed copy.");
-            block = Json.Obj(Json.Obj(listed, "runtimes"), "managed");
+            block = ManagedEntry(listed, "windows");
             Assert(Json.Bool(block, "installed") && ((IList)block["services"]).Cast<string>().SequenceEqual(new[] { "gemini", "openrouter" }),
                 "runtimes.managed does not list the installed copy's services.");
             Assert(Json.Bool(Json.Obj(listed, "runtimes"), "key_discovery") == false, "The fixture should run with key discovery off.");
@@ -624,8 +677,9 @@ namespace AIMeter
             string candidateArgs = "{\"service\":\"openrouter\",\"model\":\"" + Model + "\",\"runtime\":\"pi\"";
             var described = Call(server, "describe_dispatch", candidateArgs + ",\"managed\":true,\"mode\":\"modify\",\"workspace\":\"C:\\\\w\"}", out raw);
             answers.Add(raw);
-            Assert(Json.Bool(described, "supported") && Json.Bool(described, "managed") && Json.Str(described, "program") == ManagedPi.ProgramPath, "describe_dispatch did not describe the copy: " + raw);
-            Assert(Json.Str(described, "commands") == "powershell" && Json.Str(Json.Obj(described, "environment"), "PI_CODING_AGENT_DIR") == ManagedPi.ConfigFolder,
+            Assert(Json.Bool(described, "supported") && Json.Bool(described, "managed") && Json.Str(described, "program") == ManagedPi.Windows.ProgramPath, "describe_dispatch did not describe the copy: " + raw);
+            Assert(Json.Str(described, "managed_config") == ManagedPi.Windows.ConfigFolder, "describe_dispatch does not name the copy's configuration folder as managed_config: " + raw);
+            Assert(Json.Str(described, "commands") == "powershell" && Json.Str(Json.Obj(described, "environment"), "PI_CODING_AGENT_DIR") == ManagedPi.Windows.ConfigFolder,
                 "describe_dispatch lacks the copy's shell or configuration folder.");
             var alternative = Items(described, "alternatives").Single();
             Assert(Json.Str(alternative, "shell") == "git_bash" && ((IList)alternative["arguments"]).Cast<string>().Contains("read,bash,edit,write"), "describe_dispatch lacks the git_bash alternative.");
@@ -656,7 +710,7 @@ namespace AIMeter
             string keyFile = File.ReadAllText(KeyFile);
             foreach (var answer in answers)
                 Assert(!answer.Contains(RouterKey) && !answer.Contains(GeminiKey) && !answer.Contains(keyFile) && !answer.Contains("api_key"), "An answer reveals a key or the key file.");
-            Assert(answers[2].Contains(Json.Serialize(ManagedPi.ConfigFolder).Trim('"')), "The configuration folder should be in the description.");
+            Assert(answers[2].Contains(Json.Serialize(ManagedPi.Windows.ConfigFolder).Trim('"')), "The configuration folder should be in the description.");
         }
 
         // ------------------------------------------------------------ hardening
@@ -664,16 +718,16 @@ namespace AIMeter
         private static void InstallClearsStalePartials()
         {
             // Left by an earlier attempt, or put there by another program: neither may be unpacked nor promoted.
-            string staleFolder = Path.Combine(ManagedPi.Root, ManagedPi.Pinned.Version + ".partial");
-            string staleArchive = Path.Combine(ManagedPi.Root, ManagedPi.Pinned.Version + ".zip.partial");
+            string staleFolder = Path.Combine(ManagedPi.Windows.Root, ManagedPi.Version + ".partial");
+            string staleArchive = Path.Combine(ManagedPi.Windows.Root, ManagedPi.Version + ".zip.partial");
             Directory.CreateDirectory(staleFolder);
             File.WriteAllText(Path.Combine(staleFolder, "planted.exe"), "planted");
             File.WriteAllBytes(staleArchive, Archive("pi.exe", "planted Pi"));
 
             Install(Good, ReleaseOf(Good));
-            Assert(ManagedPi.Installed && File.ReadAllText(ManagedPi.ProgramPath) == "not really Pi", "The verified archive was not the one installed.");
+            Assert(ManagedPi.Windows.Installed && File.ReadAllText(ManagedPi.Windows.ProgramPath) == "not really Pi", "The verified archive was not the one installed.");
             Assert(!Directory.Exists(staleFolder) && !File.Exists(staleArchive), "A stale partial folder or archive was left.");
-            Assert(!File.Exists(Path.Combine(Path.GetDirectoryName(ManagedPi.ProgramPath), "planted.exe")), "A stale partial folder's file reached the installed copy.");
+            Assert(!File.Exists(Path.Combine(Path.GetDirectoryName(ManagedPi.Windows.ProgramPath), "planted.exe")), "A stale partial folder's file reached the installed copy.");
             Assert(Partials().Count == 0, "A partial file was left: " + string.Join(", ", Partials()));
         }
 
@@ -687,7 +741,7 @@ namespace AIMeter
             string routerOnly = "{\"openrouter\":{\"type\":\"api_key\",\"key\":\"" + RouterKey + "\"}}";
 
             // Not installed: a key file left behind, and a half-written one, go at the next sync.
-            Directory.CreateDirectory(ManagedPi.ConfigFolder);
+            Directory.CreateDirectory(ManagedPi.Windows.ConfigFolder);
             File.WriteAllText(KeyFile, routerOnly);
             File.WriteAllText(PendingKeyFile, routerOnly);
             settings.ManagedPiServices = new List<string> { "openrouter" };
@@ -709,7 +763,7 @@ namespace AIMeter
             var managed = ScanOf(Home(), false).Access.Where(a => a.Managed).Select(a => a.Service).ToList();
             Assert(managed.SequenceEqual(new[] { "gemini" }), "An unticked service kept its access: " + string.Join(", ", managed));
             string provider;
-            Assert(ManagedPi.KeyFor(Definitions.Get("openrouter"), out provider) == null, "KeyFor gives the key of an unticked service.");
+            Assert(ManagedPi.Windows.KeyFor(Definitions.Get("openrouter"), out provider) == null, "KeyFor gives the key of an unticked service.");
 
             // Nothing ticked: the key file and a half-written one both go.
             File.WriteAllText(PendingKeyFile, "half");
@@ -720,20 +774,20 @@ namespace AIMeter
             settings.ManagedPiServices = new List<string> { "openrouter" };
             ManagedPi.Sync(settings);
             File.WriteAllText(PendingKeyFile, "half");
-            using (new FileStream(ManagedPi.ProgramPath, FileMode.Open, FileAccess.Read, FileShare.None))
-                Fails<ManagedPi.InstallException>(() => ManagedPi.Remove(settings), "the program in use");
+            using (new FileStream(ManagedPi.Windows.ProgramPath, FileMode.Open, FileAccess.Read, FileShare.None))
+                Fails<ManagedPi.InstallException>(() => ManagedPi.Windows.Remove(settings), "the program in use");
             Assert(!File.Exists(KeyFile) && !File.Exists(PendingKeyFile), "Remove left a key file when the program could not be deleted.");
-            Assert(File.Exists(ManagedPi.ProgramPath), "The test needs the program to have survived.");
+            Assert(File.Exists(ManagedPi.Windows.ProgramPath), "The test needs the program to have survived.");
             Assert(Revision() % 2 == 1, "A Remove that stopped half-way did not leave the count odd: " + Revision());
 
             // When the key file itself cannot be deleted, the copy and the choices stay as they were.
             settings.ManagedPiServices = new List<string> { "openrouter" };
             Assert(ManagedPi.Sync(settings) && Revision() % 2 == 0, "The key was not copied again after a failed Remove: " + Revision());
             using (new FileStream(KeyFile, FileMode.Open, FileAccess.Read, FileShare.None))
-                Fails<ManagedPi.InstallException>(() => ManagedPi.Remove(settings), "the key file in use");
-            Assert(File.Exists(ManagedPi.ProgramPath) && settings.ManagedPiServices.SequenceEqual(new[] { "openrouter" }), "Remove went on after the key file could not be deleted.");
+                Fails<ManagedPi.InstallException>(() => ManagedPi.Windows.Remove(settings), "the key file in use");
+            Assert(File.Exists(ManagedPi.Windows.ProgramPath) && settings.ManagedPiServices.SequenceEqual(new[] { "openrouter" }), "Remove went on after the key file could not be deleted.");
             long before = Revision();
-            ManagedPi.Remove(settings);
+            ManagedPi.Windows.Remove(settings);
             AssertRemoved(before, "Remove");
         }
 
@@ -742,7 +796,7 @@ namespace AIMeter
             NetworkBackoff.Clear();
             string workspace = @"C:\src\project";
             InstallWithKeys();
-            Assert(!File.Exists(ShellSettingsFile) && ManagedPi.BoundShells.Length == 0, "A shell was bound without Git Bash.");
+            Assert(!File.Exists(ShellSettingsFile) && ManagedPi.Windows.BoundShells.Length == 0, "A shell was bound without Git Bash.");
             var router = ManagedAccess(ScanOf(Home(), false), "openrouter");
             Assert(router.Shells.Length == 0, "The access has a shell without Git Bash.");
             var plain = Dispatch.Describe(router, Model, Dispatch.Modify, workspace, "windows", null, router.Version);
@@ -759,11 +813,11 @@ namespace AIMeter
             // Bound, then the bash.exe it names is deleted: no alternative from the next scan on.
             string fakeBash = FakeGitBash();
             ManagedPi.LocateGitBash = () => fakeBash;
-            Assert(ManagedPi.Sync(Settings.Current) && ManagedPi.BoundShells.SequenceEqual(new[] { "git_bash" }), "Git Bash was not bound by a sync.");
+            Assert(ManagedPi.Sync(Settings.Current) && ManagedPi.Windows.BoundShells.SequenceEqual(new[] { "git_bash" }), "Git Bash was not bound by a sync.");
             Assert(Dispatch.Describe(ManagedAccess(ScanOf(Home(), false), "openrouter"), Model, Dispatch.Modify, workspace, "windows", null, router.Version).Alternatives.ContainsKey("git_bash"),
                 "The git_bash alternative was not offered once bound.");
             File.Delete(fakeBash);
-            Assert(ManagedPi.BoundShells.Length == 0, "A bash.exe that is gone still counts as bound.");
+            Assert(ManagedPi.Windows.BoundShells.Length == 0, "A bash.exe that is gone still counts as bound.");
             var gone = ManagedAccess(ScanOf(Home(), false), "openrouter");
             var after = Dispatch.Describe(gone, Model, Dispatch.Modify, workspace, "windows", null, gone.Version);
             Assert(gone.Shells.Length == 0 && after.Alternatives.Count == 0 && after.Commands == "powershell", "The git_bash alternative outlived its bash.exe.");
@@ -772,13 +826,13 @@ namespace AIMeter
             // searching for another bash.exe, and no new task is offered the bash tool.
             ManagedPi.LocateGitBash = () => null;
             Assert(ManagedPi.Sync(Settings.Current) && Json.Str(Json.ParseFile(ShellSettingsFile), "shellPath") == fakeBash, "The binding was taken back when Git Bash was no longer found.");
-            Assert(ManagedPi.BoundShells.Length == 0, "A binding to a missing bash.exe counts as a shell.");
+            Assert(ManagedPi.Windows.BoundShells.Length == 0, "A binding to a missing bash.exe counts as a shell.");
 
             // Another Git Bash found later replaces the binding.
             string otherBash = FakeGitBash();
             ManagedPi.LocateGitBash = () => otherBash;
             Assert(ManagedPi.Sync(Settings.Current) && Json.Str(Json.ParseFile(ShellSettingsFile), "shellPath") == otherBash, "A Git Bash found later did not replace the binding.");
-            Assert(ManagedPi.BoundShells.SequenceEqual(new[] { "git_bash" }) && ManagedAccess(ScanOf(Home(), false), "openrouter").Shells.SequenceEqual(new[] { "git_bash" }),
+            Assert(ManagedPi.Windows.BoundShells.SequenceEqual(new[] { "git_bash" }) && ManagedAccess(ScanOf(Home(), false), "openrouter").Shells.SequenceEqual(new[] { "git_bash" }),
                 "The new binding is not offered.");
         }
 
@@ -835,9 +889,9 @@ namespace AIMeter
             var managed = Candidates.Access("openrouter", "pi", "windows", RouterKey);
             managed.Managed = true;
             managed.Provider = "openrouter";
-            managed.Program = ManagedPi.ProgramPath;
-            managed.Version = ManagedPi.Pinned.Version;
-            managed.ConfigFolder = ManagedPi.ConfigFolder;
+            managed.Program = ManagedPi.Windows.ProgramPath;
+            managed.Version = ManagedPi.Version;
+            managed.ConfigFolder = ManagedPi.Windows.ConfigFolder;
             scan.Access.Add(managed);
 
             foreach (var from in new[] { null, "windows" })
@@ -853,15 +907,15 @@ namespace AIMeter
             // Installed while not packaged, so that the folder lies under the test folder and looks installed.
             InstallWithKeys();
             string home = Home();
-            Assert(ManagedPi.Installed && HasManaged(ScanOf(home, false)), "The test needs an installed copy first.");
+            Assert(ManagedPi.Windows.Installed && HasManaged(ScanOf(home, false)), "The test needs an installed copy first.");
             var snap = Fixture();
             var server = new McpServer(() => snap, () => false, null, null, () => ScanOf(home, false), new LeaseBook(null));
             try
             {
                 Native.PackagedOverride = true;
                 Assert(!ManagedPi.Offered, "The Store build offers the managed copy.");
-                Assert(File.Exists(Path.Combine(Settings.Folder, "managed", "pi", ManagedPi.Pinned.Version, "pi.exe")), "The installed-looking folder is gone.");
-                Assert(!ManagedPi.Installed, "The Store build reports a copy on disk as installed.");
+                Assert(File.Exists(Path.Combine(Settings.Folder, "managed", "pi", ManagedPi.Version, "pi.exe")), "The installed-looking folder is gone.");
+                Assert(!ManagedPi.Windows.Installed, "The Store build reports a copy on disk as installed.");
                 Assert(!HasManaged(ScanOf(home, false)) && !HasManaged(ScanOf(home, true)), "The Store build's scan offers the managed copy.");
                 string raw;
                 var listed = Call(server, "list_candidates", "{}", out raw);
@@ -897,7 +951,7 @@ namespace AIMeter
                 ApiKeys.Save("openrouter", bad);
                 Assert(!ManagedPi.ServicesWithKey().Any(d => d.Id == "openrouter"), "A service whose key is not plain can be copied: " + shown);
                 Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "A key that is not plain was copied, or the earlier entry stayed: " + shown);
-                Assert(!OffersManaged("openrouter") && ManagedPi.KeyFor(router, out provider) == null, "A key that is not plain gives access: " + shown);
+                Assert(!OffersManaged("openrouter") && ManagedPi.Windows.KeyFor(router, out provider) == null, "A key that is not plain gives access: " + shown);
             }
 
             // Saved keys are trimmed, and eight characters are enough.
@@ -911,11 +965,11 @@ namespace AIMeter
             ApiKeys.Save("openrouter", RouterKey);
             Assert(ManagedPi.Sync(settings) && OffersManaged("openrouter"), "The key was not copied again.");
             ApiKeys.Save("openrouter", RouterKey + "-rotated");
-            Assert(File.ReadAllText(KeyFile).Contains(RouterKey) && !OffersManaged("openrouter") && ManagedPi.KeyFor(router, out provider) == null,
+            Assert(File.ReadAllText(KeyFile).Contains(RouterKey) && !OffersManaged("openrouter") && ManagedPi.Windows.KeyFor(router, out provider) == null,
                 "A key replaced in AI Meter still gives access through the file.");
             Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey + "-rotated") && OffersManaged("openrouter"), "The rotated key was not copied.");
             ApiKeys.Remove("openrouter");
-            Assert(OffersManaged("openrouter") && ManagedPi.KeyFor(router, out provider) == RouterKey + "-rotated", "The copy's own key was refused while AI Meter finds none.");
+            Assert(OffersManaged("openrouter") && ManagedPi.Windows.KeyFor(router, out provider) == RouterKey + "-rotated", "The copy's own key was refused while AI Meter finds none.");
             Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey + "-rotated"), "A sync withdrew a key AI Meter cannot find now.");
             ApiKeys.Save("openrouter", "!echo found-again-but-not-plain");
             Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile) && !OffersManaged("openrouter"), "A key found again but not plain did not remove the entry.");
@@ -942,11 +996,11 @@ namespace AIMeter
                     catch (Exception e) { failure = e; }
                 });
                 syncing.Start();
-                ManagedPi.Remove(settings);
+                ManagedPi.Windows.Remove(settings);
                 syncing.Join();
                 Assert(failure == null, "A sync beside Remove threw: " + (failure == null ? "" : failure.Message));
                 AssertRemoved(before, "Remove in round " + round);
-                Assert(settings.ManagedPiServices.Count == 0 && !ManagedPi.Installed, "Remove did not clear the choices or the copy in round " + round + ".");
+                Assert(settings.ManagedPiServices.Count == 0 && !ManagedPi.Windows.Installed, "Remove did not clear the choices or the copy in round " + round + ".");
                 removed = Revision();
                 Assert(ManagedPi.Sync(settings) && Revision() == removed, "A sync after Remove moved the count in round " + round + ".");
                 AssertRemoved(before, "a sync after Remove in round " + round);
@@ -1006,21 +1060,21 @@ namespace AIMeter
         private static void InstallOverOlderReleaseRestoresKeys()
         {
             var settings = Settings.Current;
-            string older = Path.Combine(ManagedPi.Root, "1.0.0");
+            string older = Path.Combine(ManagedPi.Windows.Root, "1.0.0");
             Directory.CreateDirectory(older);
             File.WriteAllText(Path.Combine(older, "pi.exe"), "older Pi");
-            Directory.CreateDirectory(ManagedPi.ConfigFolder);
+            Directory.CreateDirectory(ManagedPi.Windows.ConfigFolder);
             File.WriteAllText(KeyFile, "{\"openrouter\":{\"type\":\"api_key\",\"key\":\"" + RouterKey + "\"}}");
             ApiKeys.Save("openrouter", RouterKey);
             settings.ManagedPiServices = new List<string> { "openrouter" };
-            Assert(!ManagedPi.Installed && ManagedPi.OtherVersionInstalled == "1.0.0", "The older release does not look like one.");
+            Assert(!ManagedPi.Windows.Installed && ManagedPi.Windows.OtherVersionInstalled == "1.0.0", "The older release does not look like one.");
 
             // An older release is not the adopted one: its key file goes.
             Assert(ManagedPi.Sync(settings) && !File.Exists(KeyFile), "An older release kept its key file.");
 
             // As the controller does: install, then sync.
             Install(Good, ReleaseOf(Good));
-            Assert(!Directory.Exists(older) && ManagedPi.OtherVersionInstalled == null, "The older release was left.");
+            Assert(!Directory.Exists(older) && ManagedPi.Windows.OtherVersionInstalled == null, "The older release was left.");
             Assert(ManagedPi.Sync(settings) && File.ReadAllText(KeyFile).Contains(RouterKey) && OffersManaged("openrouter"), "The ticked service's key did not come back after the installation.");
         }
 
@@ -1052,7 +1106,7 @@ namespace AIMeter
             Assert(!File.Exists(PendingRevisionFile), "keys-revision.new was left behind.");
         }
 
-        private static string RevisionFile { get { return Path.Combine(ManagedPi.ConfigFolder, "keys-revision"); } }
+        private static string RevisionFile { get { return Path.Combine(ManagedPi.Windows.ConfigFolder, "keys-revision"); } }
         private static string PendingRevisionFile { get { return RevisionFile + ".new"; } }
 
         private static void RevisionSurvivesFailures()
@@ -1121,16 +1175,16 @@ namespace AIMeter
             InstallWithKeys();
             Assert(File.Exists(ShellSettingsFile), "The test needs the copy's settings file.");
             File.WriteAllText(PendingKeyFile, "half");
-            File.WriteAllText(Path.Combine(ManagedPi.Root, "stray.txt"), "x");
-            Directory.CreateDirectory(Path.Combine(ManagedPi.Root, "other"));
-            File.WriteAllText(Path.Combine(ManagedPi.Root, @"other\stray.txt"), "x");
-            File.WriteAllText(Path.Combine(ManagedPi.ConfigFolder, "stray.txt"), "x");
-            Directory.CreateDirectory(Path.Combine(ManagedPi.ConfigFolder, "sessions"));
-            File.WriteAllText(Path.Combine(ManagedPi.ConfigFolder, @"sessions\task.jsonl"), "x");
+            File.WriteAllText(Path.Combine(ManagedPi.Windows.Root, "stray.txt"), "x");
+            Directory.CreateDirectory(Path.Combine(ManagedPi.Windows.Root, "other"));
+            File.WriteAllText(Path.Combine(ManagedPi.Windows.Root, @"other\stray.txt"), "x");
+            File.WriteAllText(Path.Combine(ManagedPi.Windows.ConfigFolder, "stray.txt"), "x");
+            Directory.CreateDirectory(Path.Combine(ManagedPi.Windows.ConfigFolder, "sessions"));
+            File.WriteAllText(Path.Combine(ManagedPi.Windows.ConfigFolder, @"sessions\task.jsonl"), "x");
 
             // A count left odd goes to the next odd number first, then to the even one after it.
             File.WriteAllText(RevisionFile, "5");
-            ManagedPi.Remove(settings);
+            ManagedPi.Windows.Remove(settings);
             AssertRemoved(5, "Remove");
             Assert(Revision() == 8, "Remove from an odd count did not end at the even number after the next odd one: " + Revision());
 
@@ -1322,13 +1376,13 @@ namespace AIMeter
         private static void LocalSharedFolder()
         {
             Assert(Settings.LocalSharedFolder == Settings.Folder, "Under tests the local shared folder is not the test folder: " + Settings.LocalSharedFolder);
-            Assert(ManagedPi.Root.StartsWith(Settings.LocalSharedFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "The copy is not under the local shared folder.");
+            Assert(ManagedPi.Windows.Root.StartsWith(Settings.LocalSharedFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "The copy is not under the local shared folder.");
             try
             {
                 Native.PackagedOverride = true;
                 string store = Path.Combine(Probe.Home, ".aimeter");
                 Assert(Settings.LocalSharedFolder == store, "The Store build's local shared folder is not the profile's .aimeter: " + Settings.LocalSharedFolder);
-                Assert(ManagedPi.Root.StartsWith(store + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "The Store build's copy is not under the profile's .aimeter: " + ManagedPi.Root);
+                Assert(ManagedPi.Windows.Root.StartsWith(store + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "The Store build's copy is not under the profile's .aimeter: " + ManagedPi.Windows.Root);
             }
             finally { Native.PackagedOverride = false; }
         }
@@ -1342,28 +1396,28 @@ namespace AIMeter
             return File.ReadAllText(Path.Combine(repository, "agents", "pi-models", provider + ".json"));
         }
 
-        private static string ModelListPath(string provider) { return Path.Combine(ManagedPi.Root, "models", ManagedPi.Pinned.Version, provider + ".json"); }
+        private static string ModelListPath(string provider) { return Path.Combine(ManagedPi.Windows.Root, "models", ManagedPi.Version, provider + ".json"); }
 
         private static void ManagedModelLists()
         {
             Assert(Agents.Get("pi").PlaceFor(ManagedPi.Place).Providers.OrderBy(p => p, StringComparer.Ordinal).SequenceEqual(PiProviders),
                 "The managed place's providers are not the ones these tests expect.");
-            Assert(ManagedPi.ModelsFile("nvidia") == null, "A model list was named before the copy was installed.");
+            Assert(ManagedPi.Windows.ModelsFile("nvidia") == null, "A model list was named before the copy was installed.");
 
             // Written right after the installation, one per provider, as AI Meter carries them.
             Install(Good, ReleaseOf(Good));
             foreach (var provider in PiProviders)
             {
-                Assert(ManagedPi.ModelsFile(provider) == ModelListPath(provider), "The model list for " + provider + " is not where expected: " + (ManagedPi.ModelsFile(provider) ?? "null"));
+                Assert(ManagedPi.Windows.ModelsFile(provider) == ModelListPath(provider), "The model list for " + provider + " is not where expected: " + (ManagedPi.Windows.ModelsFile(provider) ?? "null"));
                 Assert(File.ReadAllText(ModelListPath(provider)) == RepositoryModelList(provider), "The model list for " + provider + " is not Pi's own.");
             }
-            Assert(ManagedPi.ModelsFile("experientiallabs") == null && ManagedPi.ModelsFile(null) == null && ManagedPi.ModelsFile("") == null,
+            Assert(ManagedPi.Windows.ModelsFile("experientiallabs") == null && ManagedPi.Windows.ModelsFile(null) == null && ManagedPi.Windows.ModelsFile("") == null,
                 "A model list was named for a provider the copy has none for.");
 
             // A list deleted, or changed in length, is written again at the next sync.
             File.Delete(ModelListPath("nvidia"));
             File.WriteAllText(ModelListPath("google"), "{}");
-            Assert(ManagedPi.ModelsFile("nvidia") == null, "A deleted list is still named.");
+            Assert(ManagedPi.Windows.ModelsFile("nvidia") == null, "A deleted list is still named.");
             Assert(ManagedPi.Sync(Settings.Current), "The sync failed.");
             Assert(File.ReadAllText(ModelListPath("nvidia")) == RepositoryModelList("nvidia") && File.ReadAllText(ModelListPath("google")) == RepositoryModelList("google"),
                 "A missing or changed model list was not written again.");
@@ -1381,9 +1435,9 @@ namespace AIMeter
 
             // Remove takes them away; a sync without a copy writes none.
             long before = Revision();
-            ManagedPi.Remove(Settings.Current);
+            ManagedPi.Windows.Remove(Settings.Current);
             AssertRemoved(before, "Remove");
-            Assert(ManagedPi.Sync(Settings.Current) && ManagedPi.ModelsFile("nvidia") == null && !Directory.Exists(Path.Combine(ManagedPi.Root, "models")),
+            Assert(ManagedPi.Sync(Settings.Current) && ManagedPi.Windows.ModelsFile("nvidia") == null && !Directory.Exists(Path.Combine(ManagedPi.Windows.Root, "models")),
                 "Model lists were written for a copy that is not installed.");
         }
 
@@ -1482,7 +1536,7 @@ namespace AIMeter
             try
             {
                 Program.Demo = true;
-                Assert(!ManagedPi.Offered && !ManagedPi.Installed, "With sample data the managed copy is offered or installed.");
+                Assert(!ManagedPi.Offered && !ManagedPi.Windows.Installed, "With sample data the managed copy is offered or installed.");
                 settings.ManagedPiServices = new List<string> { "openrouter" };
                 ApiKeys.Save("openrouter", RouterKey + "-rotated");
                 Assert(ManagedPi.Sync(settings), "Sync failed with sample data.");
@@ -1502,9 +1556,9 @@ namespace AIMeter
             Assert(settings.Save(), "The settings could not be saved before the test.");
             long before = Revision();
             using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None))
-                Fails<ManagedPi.InstallException>(() => ManagedPi.Remove(settings), "settings that could not be saved");
+                Fails<ManagedPi.InstallException>(() => ManagedPi.Windows.Remove(settings), "settings that could not be saved");
             AssertRemoved(before, "a Remove whose settings could not be saved");
-            Assert(settings.ManagedPiServices.Count == 0 && !ManagedPi.Installed, "Remove did not clear the choices in memory when the settings could not be saved.");
+            Assert(settings.ManagedPiServices.Count == 0 && !ManagedPi.Windows.Installed, "Remove did not clear the choices in memory when the settings could not be saved.");
         }
     }
 }

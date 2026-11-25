@@ -1,5 +1,6 @@
-// Keeping the managed Pi's keys out of the plugin's answers (ADR 0004). AI Meter's managed copy keeps the keys the user
-// gave it in auth.json, in its own configuration folder (PI_CODING_AGENT_DIR). Pi's tools are not confined to the
+// Keeping the managed Pi's keys out of the plugin's answers (ADR 0004, ADR 0005). Each managed copy, on Windows or
+// inside WSL, keeps the keys the user gave it in auth.json, in its own configuration folder, which AI Meter names as
+// the plugin can read it (managed_config, see configFolder). Pi's tools are not confined to the
 // task's folder, so a model can read that file and quote a key in its answer, its error or a tool result. That the
 // model's provider then sees the key cannot be prevented here; what the plugin can do is never relay it to the
 // coordinator. So once the agent may have run, the whole job is redacted before every save of job.json, from which
@@ -19,7 +20,7 @@
 // not recognised. Values shorter than MINIMUM_SECRET_CHARACTERS are ignored, so that a stray short value cannot blank
 // out ordinary text.
 //
-// The revision protocol (AI Meter writes <PI_CODING_AGENT_DIR>/keys-revision atomically; missing counts as 0): every
+// The revision protocol (AI Meter writes <managed_config>/keys-revision atomically; missing counts as 0): every
 // change of auth.json raises the count twice, to an odd number before the file is touched and to the next even number
 // once the change is complete. So an odd count means a change under way, or one that did not finish (AI Meter finishes
 // it at a later sync), and the file is never touched without the count first showing it. The plugin reads, in order:
@@ -43,23 +44,45 @@
 // no tool of this plugin returns their content; the report gives only their paths (report.mjs, mcp-server.mjs,
 // delegate.mjs).
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const REDACTED = "[key removed by AI Meter]";
 const MINIMUM_SECRET_CHARACTERS = 8;
 
+const isFolder = (path) => statSync(path).isDirectory();
+
+/**
+ * The managed copy's configuration folder as this plugin reads it: managed_config in AI Meter's description, a Windows
+ * path, a \\wsl.localhost\<distro>\... share (the copy inside WSL, read from Windows) or a Linux path (read from WSL),
+ * read with this platform's own file functions. PI_CODING_AGENT_DIR is not used: for the copy inside WSL started from
+ * Windows the variables travel inside wsl.exe's arguments, and the environment is empty. Throws when AI Meter names no
+ * folder, or the folder cannot be reached: a share of a WSL distribution that is not running would otherwise look like
+ * a copy without keys, while the agent, started through wsl.exe, would find them.
+ */
+function configFolder(plan, folderExists) {
+  const folder = plan.managed_config;
+  if (typeof folder !== "string" || !folder) throw new Error("AI Meter did not name the managed Pi's configuration folder (managed_config), so its keys could not be kept out of the report");
+  let reachable = false;
+  try {
+    reachable = folderExists(folder);
+  } catch {
+    // Not there, or not reachable: the same for this purpose.
+  }
+  if (!reachable) throw new Error("the managed Pi's configuration folder could not be reached, so its keys could not be kept out of the report");
+  return folder;
+}
+
 /**
  * The keys of AI Meter's managed copy that a plan's agent could read: for a plan with managed: true, the string value of
- * every `key` field in <PI_CODING_AGENT_DIR>/auth.json ({ "<provider>": { "type": "api_key", "key": "..." } }).
- * A plan that is not managed, and a managed copy without the file, give none. Throws when the keys cannot be known:
- * a managed plan that names no configuration folder, or a file that exists but cannot be read, is not JSON or is not
- * an object. The error never quotes the file (a JSON parser's message can).
+ * every `key` field in <managed_config>/auth.json ({ "<provider>": { "type": "api_key", "key": "..." } }).
+ * A plan that is not managed, and a managed copy whose folder has no key file, give none. Throws when the keys cannot be
+ * known: no configuration folder named or reachable (configFolder), or a file that exists but cannot be read, is not
+ * JSON or is not an object. The error never quotes the file (a JSON parser's message can).
  */
-export function managedSecrets(plan, read = readFileSync) {
+export function managedSecrets(plan, read = readFileSync, folderExists = isFolder) {
   if (!plan?.managed) return [];
-  const folder = plan.environment?.PI_CODING_AGENT_DIR;
-  if (!folder) throw new Error("AI Meter did not name the managed Pi's configuration folder, so its keys could not be kept out of the report");
+  const folder = configFolder(plan, folderExists);
   let auth;
   try {
     auth = JSON.parse(read(join(folder, "auth.json"), "utf8"));
@@ -73,14 +96,13 @@ export function managedSecrets(plan, read = readFileSync) {
 }
 
 /**
- * The managed copy's key-file revision, the number in <PI_CODING_AGENT_DIR>/keys-revision (the protocol is in the
- * header); a missing file counts as 0. 0 for a plan that is not managed. Throws when the file exists but cannot be read
- * or does not hold a non-negative integer.
+ * The managed copy's key-file revision, the number in <managed_config>/keys-revision (the protocol is in the header);
+ * a missing file counts as 0. 0 for a plan that is not managed. Throws when the folder is not named or reachable
+ * (configFolder), or the file exists but cannot be read or does not hold a non-negative integer.
  */
-export function keysRevision(plan, read = readFileSync) {
+export function keysRevision(plan, read = readFileSync, folderExists = isFolder) {
   if (!plan?.managed) return 0;
-  const folder = plan.environment?.PI_CODING_AGENT_DIR;
-  if (!folder) throw new Error("AI Meter did not name the managed Pi's configuration folder, so its keys could not be kept out of the report");
+  const folder = configFolder(plan, folderExists);
   let text;
   try {
     text = String(read(join(folder, "keys-revision"), "utf8")).trim();
@@ -97,9 +119,9 @@ export function keysRevision(plan, read = readFileSync) {
  * keys right now, so it is read again, tries times in all, waitMs apart (a couple of seconds by default); still odd,
  * it throws, and the candidate is skipped. read and sleep can be replaced for tests.
  */
-export async function settledRevision(plan, { read = readFileSync, tries = 5, waitMs = 500, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+export async function settledRevision(plan, { read = readFileSync, folderExists = isFolder, tries = 5, waitMs = 500, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
   for (let attempt = 1; ; attempt++) {
-    const revision = keysRevision(plan, read);
+    const revision = keysRevision(plan, read, folderExists);
     if (revision % 2 === 0) return revision;
     if (attempt >= tries) throw new Error("AI Meter was still changing the managed Pi's keys, so they could not be read before the task; try again shortly");
     await sleep(waitMs);

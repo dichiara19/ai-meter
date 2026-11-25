@@ -21,7 +21,7 @@ Spending that room safely crosses lines the free policies never came near:
 
 1. **Plan capacity is a separate consent, never a default.**
    - `list_candidates` takes `include_plan` and the plugin's `delegate` takes `allow_plan`. They sit next to `cost_policy`, which keeps governing free models, so a request can admit free models and plan capacity together.
-   - Each plan also needs the user's switch in Settings › AI apps › Delegated tasks, off by default. Without it the plan's models are excluded (`plan_off_in_settings`).
+   - Each plan also needs the user's switch in Settings › MCP › Subscription plans, off by default. Without it the plan's models are excluded (`plan_off_in_settings`).
    - The plugin's skill asks the user before the first plan task, as it does for best-effort and free-tier candidates.
 2. **What is allowed.** Claude Code (`claude -p`) on the Claude plan, and Codex (`codex exec`) on the ChatGPT plan, through the interfaces their vendors document for scripted use, with the agent's own sign-in. The plugin runs them like any agent (ADR 0002). AI Meter still hands no credential to any agent and returns no account identity.
 3. **No task draws on pay-as-you-go billing.** Each layer below blocks the cases it covers on its own:

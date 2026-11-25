@@ -3,14 +3,18 @@
 // scripts/lib/plan.mjs), and its work on Windows folders only (scripts/lib/workspace.mjs). Files are made up here.
 
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { environmentFor, holdsCredential, knowsPolicy, noCredentialsEnvironment } from "../scripts/lib/plan.mjs";
 import { keysRevision, settledRevision, uncoveredKeyChange, managedSecrets, mentions, redact, REDACTED, union } from "../scripts/lib/secrets.mjs";
 import { isInsideWsl, workspaceInsideWsl } from "../scripts/lib/workspace.mjs";
 
-const folder = join("config", "pi");
-const managed = { managed: true, environment: { PI_CODING_AGENT_DIR: folder } };
+// The configuration folder must exist (an unreachable one fails closed); its files are made up by the readers below.
+const folder = mkdtempSync(join(tmpdir(), "ai-meter-secrets-"));
+const empty = mkdtempSync(join(tmpdir(), "ai-meter-secrets-"));
+const managed = { managed: true, managed_config: folder, environment: {} };
 /** A reader that knows only auth.json in the managed folder, with these contents. */
 const authJson = (contents) => (path) => {
   if (path !== join(folder, "auth.json")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -24,13 +28,18 @@ test("the managed copy's keys are every key field in its auth.json, short values
 
 test("no keys for a plan that is not managed, or a managed copy without its key file", () => {
   const read = authJson({ openrouter: { key: "sk-or-v1-aaaaaaaa" } });
-  assert.deepEqual(managedSecrets({ environment: managed.environment }, read), []);
-  assert.deepEqual(managedSecrets({ managed: true, environment: { PI_CODING_AGENT_DIR: "elsewhere" } }, read), [], "a missing file");
+  assert.deepEqual(managedSecrets({ managed_config: folder }, read), []);
+  assert.deepEqual(managedSecrets({ managed: true, managed_config: empty }, read), [], "a folder without a key file");
 });
 
 test("keys that cannot be known stop the caller, without quoting the file", () => {
   const unknown = /could not be kept out of the report/;
   assert.throws(() => managedSecrets({ managed: true, environment: {} }, authJson({})), unknown, "no configuration folder named");
+  assert.throws(() => managedSecrets({ managed: true, environment: { PI_CODING_AGENT_DIR: folder } }, authJson({})), /managed_config/,
+    "PI_CODING_AGENT_DIR is not where to look: for the copy inside WSL started from Windows the environment is empty");
+  assert.throws(() => managedSecrets({ managed: true, managed_config: join(folder, "not-there") }, authJson({})), /could not be reached/,
+    "a folder that cannot be reached, as a stopped distribution's share, is not a copy without keys");
+  assert.throws(() => keysRevision({ managed: true, managed_config: "\\\\wsl.localhost\\Stopped\\home\\u\\pi" }, authJson({}), () => false), /could not be reached/);
   assert.throws(() => managedSecrets(managed, authJson('{ "a": { "key": "sk-or-v1-aaaaaaaa" ')), (error) => unknown.test(error.message) && !error.message.includes("sk-or"));
   for (const contents of ["null", "[]", '"text"']) assert.throws(() => managedSecrets(managed, authJson(contents)), unknown, contents);
   const denied = () => { throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }); };
@@ -44,8 +53,8 @@ test("the key revision is the number in keys-revision, 0 when it is missing, and
     return contents;
   };
   assert.equal(keysRevision(managed, revisionFile("12\r\n")), 12);
-  assert.equal(keysRevision({ managed: true, environment: { PI_CODING_AGENT_DIR: "elsewhere" } }, revisionFile("12")), 0, "a missing file counts as 0");
-  assert.equal(keysRevision({ environment: managed.environment }, revisionFile("x")), 0, "not the managed copy");
+  assert.equal(keysRevision({ managed: true, managed_config: empty }, revisionFile("12")), 0, "a missing file counts as 0");
+  assert.equal(keysRevision({ managed_config: folder }, revisionFile("x")), 0, "not the managed copy");
   for (const contents of ["", "seven", "-1", "1.5", "1e3"]) assert.throws(() => keysRevision(managed, revisionFile(contents)), /not a number/, JSON.stringify(contents));
   assert.throws(() => keysRevision(managed, revisionFile(Object.assign(new Error("EACCES"), { code: "EACCES" }))), /could not be read/);
 });

@@ -53,7 +53,14 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "no
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const [runtime, behaviour, signIn] = process.argv.slice(2);
+const [runtime, behaviour, signIn, ...assignments] = process.argv.slice(2);
+// NAME=value arguments after the shell stand for the variables wsl.exe -e env passes to the managed copy inside WSL.
+// FAKE_ENV_FILE receives the environment the agent was started with, before these: what wsl.exe itself would get.
+const started = { ...process.env };
+for (const assignment of assignments) {
+  const at = assignment.indexOf("=");
+  if (at > 0) process.env[assignment.slice(0, at)] = assignment.slice(at + 1);
+}
 const emit = (event) => process.stdout.write(JSON.stringify(event) + "\n");
 // File contents an agent writes, which the report must never carry, and a command's long output.
 const SECRET_CONTENT = "contents-the-report-must-not-carry";
@@ -66,7 +73,7 @@ if (runtime === "signin") {
   else process.stderr.write(signIn === "plan" ? "Logged in using ChatGPT\n" : "Logged in using an API key - sk-proj-***test\n");
   process.exit(0);
 }
-if (process.env.FAKE_ENV_FILE) writeFileSync(process.env.FAKE_ENV_FILE, JSON.stringify(process.env));
+if (process.env.FAKE_ENV_FILE) writeFileSync(process.env.FAKE_ENV_FILE, JSON.stringify(started));
 
 let task = "";
 process.stdin.setEncoding("utf8");

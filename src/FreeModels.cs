@@ -24,13 +24,19 @@ namespace AIMeter
     internal sealed class FreeStatus
     {
         public string Status;       // "confirmed_free", "paid" or "unknown".
-        public string Kind;         // "zero_price", "free_tier", "promotional_credit" or "local"; null when unknown.
+        public string Kind;         // "zero_price", "free_tier", "promotional_credit", "local" or, for a paid model, "paid_plan"; null when unknown.
         public string Source;       // "catalogue" (prices in the list), "documented" or "configured".
         public string Reference;    // Address of the documentation, for documented facts.
         public DateTime? CheckedAt; // When the documentation was last checked.
         public string Note;         // Why the status is unknown, in English, for agents.
 
         public bool Confirmed { get { return Status == "confirmed_free"; } }
+
+        /// <summary>The kind of a paid model that a service with a free tier offers only on its paid plan.</summary>
+        public const string PaidPlan = "paid_plan";
+
+        /// <summary>Why delegation leaves out a model that is not confirmed free: the plan it needs, or a price nobody states.</summary>
+        public string ExclusionReason { get { return Kind == PaidPlan ? "paid_plan_required" : "price_not_confirmed"; } }
 
         public static readonly FreeStatus ZeroPrice = new FreeStatus { Status = "confirmed_free", Kind = "zero_price", Source = "catalogue" };
     }

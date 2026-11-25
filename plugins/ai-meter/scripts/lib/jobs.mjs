@@ -315,7 +315,8 @@ async function choose(job, signal) {
       if (refusedPools.has(c.pool)) continue;
       // AI Meter is asked about the snapshot or worktree, which is on Windows even for a repository in WSL; start() judged
       // the repository on every spelling of its path (inside_wsl), and the path as given is checked again here.
-      if (which.managed && (job.inside_wsl || isInsideWsl(job.workspace))) {
+      // Only the Windows copy (ADR 0004): the copy inside WSL works on repositories in WSL and on Windows folders alike.
+      if (which.managed && which.where === "windows" && (job.inside_wsl || isInsideWsl(job.workspace))) {
         job.skipped.push({ ...which, reason: "the managed Pi works on Windows folders only; this repository is inside WSL" });
         continue;
       }
@@ -448,7 +449,9 @@ async function runAgent(job, chosen, task, signal, guard) {
     windowsHide: true,
     detached: OWN_PROCESS_GROUP,   // Its own process group, so that its children can be stopped with it.
   });
-  if (shell.name) job.shell = shell.name;
+  // The shell commands run through (git_bash or powershell for the Windows copy, bash for the copy inside WSL); a task
+  // that runs no command records none.
+  if (shell.name && shell.name !== "none") job.shell = shell.name;
   job.agent_pid = child.pid;
   job.version = plan.version;
   job.notes = plan.notes;

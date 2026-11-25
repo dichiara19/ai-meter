@@ -10,7 +10,13 @@ namespace AIMeter
 {
     internal partial class SettingsWindow
     {
-        // ------------------------------------------------------------ AI apps connected through MCP
+        // ------------------------------------------------------------ MCP: connected apps and delegation
+        //
+        // One overview ("apps") that links to a page per purpose, as Services links to each service:
+        //   apps:clients  the apps that may read AI Meter's data, and how to connect one by hand;
+        //   apps:agent    the coding agent that runs delegated tasks (SettingsWindow.ManagedPi.cs);
+        //   apps:models   which free models delegated tasks try first;
+        //   apps:plans    whether delegated tasks may draw on a subscription plan.
 
         /// <summary>
         /// The clients the page lists, installed or not. tools\MediaRenderer.cs points it at fixture folders, so the
@@ -19,37 +25,102 @@ namespace AIMeter
         internal static Func<List<McpClients.Client>> KnownApps =
             () => McpClients.Known(Probe.Home, Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Probe.WslHomeUp);
 
-        private void BuildApps()
+        /// <summary>Build the overview, or the page named after "apps:"; a page this build does not offer falls back to the overview.</summary>
+        private void BuildMcp(string subpage)
         {
-            Header(L.T("AI apps"));
-            Hint(L.T("Connected apps and coding agents can ask AI Meter, through MCP, how much room your limits have, which sessions are running, which models are free and what you spent today. They only read: AI Meter never shares keys or tokens."));
+            if (subpage == "clients") BuildMcpClients();
+            else if (subpage == "agent" && DelegationAgentOffered) BuildDelegationAgent();
+            else if (subpage == "models") BuildDelegationModels();
+            else if (subpage == "plans" && PlanAgents.Count > 0) BuildDelegationPlans();
+            else BuildMcpOverview();
+        }
 
-            var clients = KnownApps().Where(c => c.Installed).ToList();
+        /// <summary>The agents that can run a delegated task on the user's subscription plan (ADR 0003).</summary>
+        private static List<RuntimeKind> PlanAgents { get { return Agents.All.Where(k => k.Plan != null && k.Dispatch != null).ToList(); } }
+
+        private void BuildMcpOverview()
+        {
+            Header("MCP");
+            Hint(L.T("Through MCP, the AI apps and coding agents you connect can read your limits, running sessions, free models and today's spending from AI Meter. Access is read-only: keys and tokens are never shared."));
+
+            Section(L.T("Connection"));
+            Group(
+                Link(Ui.Glyph("", 20, "Text"), L.T("Connected apps"), ConnectedAppsStatus(), null, () => Open("apps:clients")),
+                Row(Ui.Glyph("", 20, "Text"), L.T("Share session titles"), L.T("Titles often repeat your first request. When off, apps see only each session's agent, status, model and provider."),
+                    Toggle(S.McpTitles, v => { S.McpTitles = v; S.Save(); })));
+
+            Section(L.T("Delegation"));
+            Hint(L.T("A connected coding agent can hand tasks over to free models. AI Meter chooses the model and keeps each task within your limits."));
             var rows = new List<FrameworkElement>();
-            foreach (var client in clients)
+            if (DelegationAgentOffered)
+                rows.Add(Link(Ui.Glyph("", 20, "Text"), L.T("Delegation agent"), DelegationAgentStatus(), null, () => Open("apps:agent")));
+            rows.Add(Link(Ui.Glyph("", 20, "Text"), L.T("Model order"), ModelOrderStatus(), null, () => Open("apps:models")));
+            if (PlanAgents.Count > 0)
+                rows.Add(Link(Ui.Glyph("", 20, "Text"), L.T("Subscription plans"), PlansStatus(), null, () => Open("apps:plans")));
+            Group(rows.ToArray());
+        }
+
+        /// <summary>The installed apps with whether each is connected; an app whose file cannot be read counts as not connected.</summary>
+        private static List<Tuple<McpClients.Client, bool>> InstalledApps()
+        {
+            return KnownApps().Where(c => c.Installed).Select(c =>
             {
-                var c = client;
                 bool connected = false;
                 try { connected = McpClients.IsConnected(c); }
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
-                string detail = c.ConfigPath + (c.Note == null ? "" : "\n" + L.T(c.Note));
-                rows.Add(Row(Ui.Glyph(c.Wsl ? "" : "", 20, "Text"), c.Wsl ? c.Name + " · WSL" : c.Name, detail,
-                    Toggle(connected, v => ConnectApp(c, v))));
-            }
-            if (rows.Count == 0) rows.Add(Row(null, L.T("No supported apps found"), L.T("Use the configuration below in any app that can start a local MCP server."), null));
-            Group(rows.ToArray());
-            Hint(L.T("Restart an app after connecting it, so it loads AI Meter's tools. Apps in WSL are listed while WSL is running."));
+                return Tuple.Create(c, connected);
+            }).ToList();
+        }
 
-            Group(
-                Row(Ui.Glyph("", 20, "Text"), L.T("Other apps"), L.T("Copy the configuration for apps that are not listed, such as the ChatGPT app when it accepts local servers."),
-                    CopyButton(L.T("Copy configuration"), () => McpClients.Snippet(McpRelay.Write()))),
-                Row(Ui.Glyph("", 20, "Text"), L.T("Share session titles"), L.T("Titles often repeat your first request. When off, apps see only the agent, status, model and provider of each session."),
-                    Toggle(S.McpTitles, v => { S.McpTitles = v; S.Save(); })));
+        private static string AppName(McpClients.Client c) { return c.Wsl ? c.Name + " · WSL" : c.Name; }
+
+        private static string ConnectedAppsStatus()
+        {
+            var connected = InstalledApps().Where(a => a.Item2).Select(a => AppName(a.Item1)).ToList();
+            return connected.Count == 0 ? L.T("No app connected") : string.Join(", ", connected);
+        }
+
+        private string ModelOrderStatus()
+        {
+            int preferred = S.DelegationModels.Values.Count(v => v == Candidates.Preferred), avoided = S.DelegationModels.Values.Count(v => v == Candidates.Avoided);
+            return preferred + avoided == 0 ? L.T("Default order") : L.F("{0} preferred, {1} avoided", preferred, avoided);
+        }
+
+        private string PlansStatus()
+        {
+            var on = PlanAgents.Select(k => k.Plan.Service).Distinct().Where(s => { bool v; return S.DelegationPlans.TryGetValue(s, out v) && v; }).Select(PlanName).ToList();
+            return on.Count == 0 ? L.T("Off") : string.Join(", ", on);
+        }
+
+        private string PlanName(string service)
+        {
+            var provider = LastState(service);
+            return provider != null ? provider.Name : service == "openai" ? "ChatGPT" : service == "claude" ? "Claude" : service;
+        }
+
+        // ------------------------------------------------------------ apps:clients
+        private void BuildMcpClients()
+        {
+            Breadcrumb("MCP", "apps", L.T("Connected apps"));
+            Hint(L.T("Choose the apps that may read AI Meter's data. Restart an app after connecting it. Apps in WSL are listed while WSL is running."));
+            var rows = new List<FrameworkElement>();
+            foreach (var app in InstalledApps())
+            {
+                var c = app.Item1;
+                string detail = c.ConfigPath + (c.Note == null ? "" : "\n" + L.T(c.Note));
+                rows.Add(Row(Ui.Glyph(c.Wsl ? "" : "", 20, "Text"), AppName(c), detail, Toggle(app.Item2, v => ConnectApp(c, v))));
+            }
+            if (rows.Count == 0) rows.Add(Row(null, L.T("No supported app found"), L.T("Connect an app manually with the configuration below."), null));
+            Group(rows.ToArray());
+
+            Section(L.T("Manual setup"));
+            Group(Row(Ui.Glyph("", 20, "Text"), L.T("MCP configuration"), L.T("For an app that is not listed and can start a local MCP server."),
+                CopyButton(L.T("Copy configuration"), () => McpClients.Snippet(McpRelay.Write()))));
 
             // Agents can also add AI Meter themselves; the buttons copy each agent's own "mcp add" command.
-            Header(L.T("From the command line"));
-            Hint(L.T("Prefer a terminal? Copy the command for your CLI, paste it into PowerShell on Windows or into a WSL shell, then restart the CLI."));
+            Section(L.T("Command line"));
+            Hint(L.T("Copy the command for your CLI, run it in PowerShell or in a WSL shell, then restart the CLI."));
             Group(McpClients.CommandLineClients.Select(cli =>
             {
                 string id = cli[0];
@@ -57,9 +128,9 @@ namespace AIMeter
                     Pair(CopyButton("Windows", () => McpClients.Command(id, McpRelay.Write(), false)),
                          CopyButton("WSL", () => McpClients.Command(id, McpRelay.Write(), true))));
             }).ToArray());
-
-            BuildDelegationModels();
         }
+
+        // ------------------------------------------------------------ apps:models
 
         /// <summary>
         /// The user's choice for each free model with tool support, which comes first in the order of delegation
@@ -67,8 +138,8 @@ namespace AIMeter
         /// </summary>
         private void BuildDelegationModels()
         {
-            Header(L.T("Delegated tasks"));
-            Hint(L.T("Coding agents that delegate tasks through AI Meter try preferred models first and avoided ones last. The others follow how they did on this PC, then their size and context."));
+            Breadcrumb("MCP", "apps", L.T("Model order"));
+            Hint(L.T("Delegated tasks try preferred models first and avoided models last. The others are ordered by their results on this PC, then by size and context."));
             var rows = new List<FrameworkElement>();
             var listed = new HashSet<string>();
             var snap = C.Last;
@@ -85,12 +156,13 @@ namespace AIMeter
                         rows.Add(Row(null, m.Name, string.Join(" · ", facts), PreferenceCombo(key)));
                     }
             foreach (var key in S.DelegationModels.Keys.Where(k => !listed.Contains(k)).OrderBy(k => k, StringComparer.Ordinal).ToList())
-                rows.Add(Row(null, key.Substring(key.IndexOf('|') + 1), L.T("Not in the current model lists"), PreferenceCombo(key)));
+                rows.Add(Row(null, key.Substring(key.IndexOf('|') + 1), L.T("No longer in the model lists"), PreferenceCombo(key)));
             if (rows.Count == 0)
-                rows.Add(Row(null, L.T("No free models with tool support yet"), L.T("They appear here once a service with free models is on and its model list has been read."), null));
+                rows.Add(Row(null, L.T("No free model with tool support"), L.T("Models appear once a service with free models is on and its model list has been read."), null));
             Group(rows.ToArray());
-            BuildDelegationPlans();
         }
+
+        // ------------------------------------------------------------ apps:plans
 
         /// <summary>
         /// Whether delegated tasks may draw on each subscription plan a supported agent can run on (ADR 0003), off by
@@ -98,19 +170,15 @@ namespace AIMeter
         /// </summary>
         private void BuildDelegationPlans()
         {
-            var kinds = Agents.All.Where(k => k.Plan != null && k.Dispatch != null).ToList();
-            if (kinds.Count == 0) { BuildManagedPi(); return; }
-            Hint(L.T("Delegated tasks can also run in Claude Code or Codex on your own plan, never on paid usage. A plan is used only if you turn it on here and an AI app asks for it; it is skipped while extra usage or credits are on, and below what you keep of each window."));
+            Breadcrumb("MCP", "apps", L.T("Subscription plans"));
+            Hint(L.T("Delegated tasks can also run in Claude Code or Codex on your subscription, never on pay-as-you-go usage. A plan is used only when it is on here and the app requests it. It is skipped while extra usage or credits are active, and once a window reaches the reserve set below."));
             var rows = new List<FrameworkElement>();
-            var snap = C.Last;
-            foreach (var kind in kinds)
+            foreach (var kind in PlanAgents)
             {
                 string service = kind.Plan.Service;
-                var provider = snap == null ? null : snap.Providers.FirstOrDefault(p => p.Id == service);
-                string plan = provider != null ? provider.Name : service == "openai" ? "ChatGPT" : service == "claude" ? "Claude" : service;
                 bool on;
                 S.DelegationPlans.TryGetValue(service, out on);
-                rows.Add(Row(null, L.F("{0} plan", plan), L.F("Tasks run in {0} with its own sign-in.", kind.Name), Toggle(on, v =>
+                rows.Add(Row(null, L.F("{0} plan", PlanName(service)), L.F("Tasks run in {0}, signed in with your account.", kind.Name), Toggle(on, v =>
                 {
                     var next = new Dictionary<string, bool>(S.DelegationPlans);
                     next[service] = v;
@@ -119,11 +187,10 @@ namespace AIMeter
                     Rebuild();
                 })));
                 if (!on) continue;
-                rows.Add(Row(null, L.T("Reserve in the 5-hour window"), L.T("Delegated tasks leave this share of the window for you."), ReserveCombo(service, UsageWindow.ShortFiveHours)));
-                rows.Add(Row(null, L.T("Reserve in the weekly window"), L.T("Delegated tasks leave this share of the window for you."), ReserveCombo(service, UsageWindow.ShortWeek)));
+                rows.Add(Row(null, L.T("5-hour reserve"), L.T("Share of the window kept for your own use."), ReserveCombo(service, UsageWindow.ShortFiveHours)));
+                rows.Add(Row(null, L.T("Weekly reserve"), L.T("Share of the window kept for your own use."), ReserveCombo(service, UsageWindow.ShortWeek)));
             }
             Group(rows.ToArray());
-            BuildManagedPi();
         }
 
         /// <summary>The share of a plan window kept for the user. The settings get a new dictionary, as MCP threads read the current one.</summary>

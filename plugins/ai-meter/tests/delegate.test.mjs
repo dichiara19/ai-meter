@@ -25,6 +25,9 @@ function setUp(scenario) {
   process.env.AI_METER_RELAY = JSON.stringify([process.execPath, join(here, "fixtures", "fake-meter.mjs")]);
   process.env.FAKE_METER_SCENARIO = JSON.stringify(scenario);
   process.env.FAKE_METER_LOG = join(folder, "meter.jsonl");
+  // The managed copies' configuration folder, unless a test names its own: empty, so they hold no keys.
+  process.env.FAKE_PI_CONFIG = join(folder, "managed-pi");
+  mkdirSync(process.env.FAKE_PI_CONFIG);
   // CI's Linux runner is not WSL; the place only picks describe_dispatch's "from" and how agents are stopped.
   process.env.AI_METER_PLACE = process.platform === "win32" ? "windows" : "wsl";
   // Delegation needs a Git repository; this one is apart from the jobs folder, as a user's checkout would be.
@@ -783,7 +786,7 @@ test("a managed Pi candidate is described as managed, and a read-only task says 
   assert.equal(calls().find((c) => c.tool === "describe_dispatch").arguments.managed, true);
   assert.equal(calls().find((c) => c.tool === "claim_capacity").arguments.managed, true, "the claim names the managed copy too: AI Meter takes a call without it for the user's own Pi");
   assert.deepEqual(job.candidate, { service: "openrouter", model: "a:free", runtime: "pi", where: "windows", managed: true, pool: "openrouter:free" });
-  assert.equal(job.shell, "none");
+  assert.equal(job.shell, undefined, "a task that runs no command records no shell");
   assert.equal(job.summary.answer, "echo via none: x", "the described arguments were used");
   assert.equal(report.full(job, jobs.root()).candidate.shell, undefined);
 });
@@ -830,7 +833,7 @@ for (const bound of [true, false]) {
     assert.equal(job.summary.answer, "echo via " + shell + ": x", "the arguments for that shell were used");
     assert.equal(report.full(job, jobs.root()).candidate.shell, shell, "the report says where commands ran");
     const env = JSON.parse(readFileSync(envFile, "utf8"));
-    assert.equal(env.PI_CODING_AGENT_DIR, "C:\\AIMeter\\pi\\config");
+    assert.equal(env.PI_CODING_AGENT_DIR, process.env.FAKE_PI_CONFIG);
     const paths = Object.keys(env).filter((key) => key.toLowerCase() === "path");
     assert.equal(paths.length, 1, "one PATH variable");
     // Git's bin folder goes first on PATH only when the plugin finds Git for Windows too, which depends on this machine:
@@ -895,7 +898,7 @@ test("the managed Pi starts without the coordinator's credentials, but with PATH
   const env = JSON.parse(readFileSync(envFile, "utf8"));
   for (const name of ["OPENROUTER_API_KEY", "GITHUB_TOKEN", "MY_SERVICE_BASE_URL"]) assert.equal(env[name], undefined, name + " must not reach the agent");
   assert.equal(env.AI_METER_HARMLESS, "kept", "everything else stays");
-  assert.equal(env.PI_CODING_AGENT_DIR, "C:\\AIMeter\\pi\\config");
+  assert.equal(env.PI_CODING_AGENT_DIR, process.env.FAKE_PI_CONFIG);
   assert.equal(env.PI_OFFLINE, "1");
   assert.ok(Object.keys(env).some((key) => key.toLowerCase() === "path"), "PATH stays");
 });
@@ -1132,6 +1135,118 @@ test("a modify job's Git description never carries a key: commit subjects and fi
   const saved = readFileSync(join(jobs.root(), job.id, "job.json"), "utf8");
   const shown = JSON.stringify(report.full(job, jobs.root()));
   assert.ok(!saved.includes(keys[0]) && !shown.includes(keys[0]));
+});
+
+// The managed copy inside WSL (ADR 0005), in distribution Ubuntu.
+const managedWslPi = { service: "openrouter", model: "a:free", runtime: { name: "pi", where: "wsl", distro: "Ubuntu", managed: true }, pool: "openrouter:free" };
+
+/** Run fn with WSL_DISTRO_NAME set to distro (or unset), as a coordinator in that distribution would; restored after. */
+async function inDistribution(distro, fn) {
+  const before = process.env.WSL_DISTRO_NAME;
+  if (distro) process.env.WSL_DISTRO_NAME = distro;
+  else delete process.env.WSL_DISTRO_NAME;
+  try {
+    return await fn();
+  } finally {
+    if (before === undefined) delete process.env.WSL_DISTRO_NAME;
+    else process.env.WSL_DISTRO_NAME = before;
+  }
+}
+
+test("from Windows, the copy inside WSL starts with an empty environment, and its keys are read from managed_config", async () => {
+  const { folder, workspace, calls } = setUp({ candidates: [managedWslPi] });
+  process.env.AI_METER_PLACE = "windows";
+  const { config, keys } = managedConfig(folder);
+  const envFile = join(folder, "env.json");
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedWslPi], pi_config: config, env_file: envFile, behaviour: { pi: "leak" } });
+  process.env.GITHUB_TOKEN = "ghp_coordinator";
+  let job;
+  try {
+    job = await inDistribution(null, () => jobs.wait(jobs.start({ task: "x", workspace }).id, 20));
+  } finally {
+    delete process.env.GITHUB_TOKEN;
+  }
+
+  assert.equal(job.status, "completed", job.error || "");
+  for (const tool of ["describe_dispatch", "claim_capacity"]) assert.equal(calls().find((c) => c.tool === tool).arguments.managed, true, tool);
+  const described = calls().find((c) => c.tool === "describe_dispatch").arguments;
+  assert.deepEqual([described.where, described.distro, described.from], ["wsl", "Ubuntu", "windows"]);
+  assert.deepEqual(job.candidate, { service: "openrouter", model: "a:free", runtime: "pi", where: "wsl", distro: "Ubuntu", managed: true, pool: "openrouter:free" });
+  assert.equal(job.shell, undefined, "read_only runs no command");
+  assert.equal(job.summary.answer, "The keys are: [key removed by AI Meter] and [key removed by AI Meter].", "keys found through managed_config, not the environment");
+  const saved = readFileSync(join(jobs.root(), job.id, "job.json"), "utf8");
+  for (const key of keys) assert.ok(!saved.includes(key));
+  // What wsl.exe itself is started with: no credentials, and none of the copy's variables, which travel in its arguments.
+  const env = JSON.parse(readFileSync(envFile, "utf8"));
+  assert.equal(env.GITHUB_TOKEN, undefined);
+  assert.equal(env.PI_CODING_AGENT_DIR, undefined);
+  assert.ok(Object.keys(env).some((key) => key.toLowerCase() === "path"));
+});
+
+test("from Windows, a modify task on the copy inside WSL runs bash, and the revision rule still holds", async () => {
+  const { folder } = setUp({ candidates: [managedWslPi] });
+  process.env.AI_METER_PLACE = "windows";
+  const { config, keys } = managedConfig(folder);
+  const repository = committedRepository(folder);
+
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedWslPi], pi_config: config });
+  const job = await inDistribution(null, () => jobs.wait(jobs.start({ task: "x", workspace: repository, mode: "modify" }).id, 20));
+  assert.equal(job.status, "completed", job.error || "");
+  assert.equal(job.shell, "bash");
+  assert.equal(job.summary.answer, "echo via bash: x");
+  assert.equal(report.full(job, jobs.root()).candidate.shell, "bash");
+
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedWslPi], pi_config: config, behaviour: { pi: "flip" } });
+  assertWithheld(await inDistribution(null, () => jobs.wait(jobs.start({ task: "x", workspace: repository }).id, 20)), keys, /changed more than once/);
+});
+
+test("from WSL, the copy in the coordinator's distribution is used, and one in another distribution is skipped", async () => {
+  const { folder, workspace } = setUp({ candidates: [managedWslPi] });
+  process.env.AI_METER_PLACE = "wsl";
+  const envFile = join(folder, "env.json");
+  process.env.FAKE_METER_SCENARIO = JSON.stringify({ candidates: [managedWslPi], env_file: envFile });
+  const job = await inDistribution("Ubuntu", () => jobs.wait(jobs.start({ task: "x", workspace }).id, 20));
+  assert.equal(job.status, "completed", job.error || "");
+  assert.equal(JSON.parse(readFileSync(envFile, "utf8")).PI_CODING_AGENT_DIR, process.env.FAKE_PI_CONFIG, "from WSL its variables are in its environment");
+
+  const other = await inDistribution("Debian", () => jobs.wait(jobs.start({ task: "x", workspace }).id, 20));
+  assert.equal(other.status, "failed");
+  assert.match(other.skipped[0].reason, /in WSL distribution Ubuntu, and this plugin runs in Debian/);
+});
+
+test("for a repository inside WSL, the Windows copy is skipped and the copy inside WSL is used", async () => {
+  const { workspace, calls } = setUp({ candidates: [managedPi, managedWslPi] });
+  const job = await inDistribution(null, () => runWritten({ workspace, inside_wsl: true }));
+
+  assert.equal(job.status, "completed", job.error || "");
+  assert.deepEqual(job.skipped, [wslSkip]);
+  assert.equal(job.candidate.where, "wsl");
+  assert.deepEqual(calls().filter((c) => c.tool === "describe_dispatch").map((c) => c.arguments.where), ["wsl"], "the Windows copy is never described");
+});
+
+test("a managed copy described without managed_config is skipped: its keys could not be found", async () => {
+  const { workspace, calls } = setUp({ candidates: [managedWslPi], no_managed_config: true });
+  process.env.AI_METER_PLACE = "windows";
+  const job = await inDistribution(null, () => jobs.wait(jobs.start({ task: "x", workspace }).id, 20));
+
+  assert.equal(job.status, "failed");
+  assert.match(job.skipped[0].reason, /did not name the managed Pi's configuration folder \(managed_config\)/);
+  assert.equal(calls().filter((c) => c.tool === "claim_capacity").length, 0);
+});
+
+test("with no candidate, the job's report and delegate_candidates carry the user's next step", async () => {
+  const managed_runtimes = [
+    { name: "pi", where: "wsl", distro: "Ubuntu", installed: false, reachable: true, version: "1.5.2", services: [], set_up_in: "AI Meter › Settings › MCP › Delegation agent" },
+    { name: "pi", where: "windows", installed: false, reachable: true, version: "1.5.2", services: [], set_up_in: "AI Meter › Settings › MCP › Delegation agent" },
+  ];
+  const { workspace } = setUp({ candidates: [], managed_runtimes, environment: { wsl: "running", distro: "Ubuntu", git_for_windows: false } });
+  const job = await jobs.wait(jobs.start({ task: "x", workspace }).id, 20);
+  const expected = "No coding agent is set up on this PC for delegated tasks: the user can have AI Meter set up its own copy of Pi inside WSL (Ubuntu), in AI Meter › Settings › MCP › Delegation agent.";
+
+  assert.equal(job.status, "failed");
+  assert.equal(report.full(job, jobs.root()).next_step, expected);
+  const { withMeter } = await import("../scripts/lib/meter.mjs");
+  assert.equal(report.candidates(await withMeter((meter) => meter.call("list_candidates", { tools: true }))).next_step, expected);
 });
 
 test("an agent that is not the managed copy is never redacted, whatever its answer", async () => {

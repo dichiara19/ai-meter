@@ -55,7 +55,14 @@ namespace AIMeter
         public void EnterApiKey(ServiceDefinition d, string slot)
         {
             var w = new ApiKeyWindow(d, slot);
-            w.Saved += () => { RefreshNow(); SyncManagedPiKeys(); if (settingsWindow != null) settingsWindow.Build(); };
+            w.Saved += () =>
+            {
+                RefreshNow();
+                // A service that was ticked until its key was removed gets its tick back with the new key.
+                if (slot == null && ManagedPi.RestoreWithKey(Settings, d.Id)) ApplyManagedPiChoices();
+                else SyncManagedPiKeys();
+                if (settingsWindow != null) settingsWindow.Build();
+            };
             w.Show();
             w.Activate();
         }
@@ -74,8 +81,8 @@ namespace AIMeter
         public void RemoveApiKey(ServiceDefinition d)
         {
             ApiKeys.Remove(d.Id);
-            // Taking the key away from AI Meter takes it away from the managed Pi too.
-            if (Settings.ManagedPiServices.Contains(d.Id)) SetManagedPiService(d.Id, false);
+            // Taking the key away from AI Meter takes it away from the managed Pi too, until a key is entered again.
+            if (ManagedPi.WithdrawWithKey(Settings, d.Id)) ApplyManagedPiChoices();
             RefreshNow();
         }
 

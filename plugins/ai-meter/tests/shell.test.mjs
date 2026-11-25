@@ -67,6 +67,11 @@ test("the PATH variable keeps the spelling the environment already uses, and nam
   assert.deepEqual(shellFor(modify, withoutPath, only("C:\\Program Files\\Git\\bin\\bash.exe")).environment, { PATH: "C:\\Program Files\\Git\\bin" });
 });
 
+test("the managed copy inside WSL is started as described, with bash for modify, whatever Git for Windows offers", () => {
+  const inWsl = { managed: true, where: "wsl", commands: "bash", arguments: ["-e", "env", "pi"], alternatives: [{ shell: "git_bash", arguments: ["unexpected"] }] };
+  assert.deepEqual(shellFor(inWsl, windows, only("C:\\Program Files\\Git\\bin\\bash.exe")), { name: "bash", arguments: inWsl.arguments, environment: {} });
+});
+
 test("a read-only managed task, and any other dispatch, are started as described", () => {
   const readOnly = { managed: true, commands: "none", arguments: ["--tools", "read,grep,find,ls"] };
   const exists = only("C:\\Program Files\\Git\\bin\\bash.exe");

@@ -48,8 +48,9 @@ namespace AIMeter
             foreach (var p in snap.Providers.Where(x => x.Catalogue != null && (req.Service == null || string.Equals(x.Id, req.Service, StringComparison.OrdinalIgnoreCase))))
             {
                 // Sorted so that the agent whose reason is reported does not depend on the scan's order.
-                // The managed copy serves a coordinator on Windows only (ADR 0004 decision 4).
-                var access = runtimes.Access.Where(a => a.Service == p.Id && !(a.Managed && req.From == "wsl")).OrderBy(a => a.Runtime, StringComparer.Ordinal)
+                // The managed copy on Windows serves a coordinator on Windows only (ADR 0004 decision 4); the copy
+                // inside WSL serves both (ADR 0005 decision 2).
+                var access = runtimes.Access.Where(a => a.Service == p.Id && !(a.Managed && a.Where == "windows" && req.From == "wsl")).OrderBy(a => a.Runtime, StringComparer.Ordinal)
                     .ThenBy(a => a.Where, StringComparer.Ordinal).ThenBy(a => a.Distro, StringComparer.Ordinal).ThenBy(a => a.Managed ? 1 : 0).ToList();
                 foreach (var m in p.Catalogue.Models)
                 {
@@ -129,9 +130,11 @@ namespace AIMeter
         /// 6. the largest context window;
         /// 7. the output speed measured here, fastest first, then models never timed;
         /// 8. service and model id;
-        /// then, for the same model, an agent of the user's before the copy AI Meter keeps (ADR 0004: the user's agent
-        /// wins, whichever agent it is), the agent that sends fewer tokens per request, the agent in the place the
-        /// plugin runs (Requirements.From), and agent id, place and distribution. Each candidate keeps its Rank, which list_candidates explains.
+        /// then, for the same model, an agent of the user's before a copy AI Meter keeps (ADR 0004: the user's agent
+        /// wins, whichever agent it is), between the copies the one in the place the user prefers
+        /// (Requirements.ManagedPiPrefer, ADR 0005), the agent that sends fewer tokens per request, the agent in the
+        /// place the plugin runs (Requirements.From), and agent id, place and distribution. Each candidate keeps its
+        /// Rank, which list_candidates explains.
         /// </summary>
         private static List<Candidate> Ordered(List<Candidate> candidates, Requirements req, LeaseBook leases, DateTime now)
         {
@@ -146,11 +149,18 @@ namespace AIMeter
                 .ThenBy(c => c.Rank.Record.TokensPerSecond.HasValue ? 0 : 1).ThenByDescending(c => c.Rank.Record.TokensPerSecond ?? 0)
                 .ThenBy(c => c.Provider.Id, StringComparer.Ordinal).ThenBy(c => c.Model.Id, StringComparer.Ordinal)
                 .ThenBy(c => c.Access.Managed ? 1 : 0)
+                .ThenBy(c => c.Access.Managed && c.Access.Where != PreferredManagedPlace(req.ManagedPiPrefer) ? 1 : 0)
                 .ThenBy(c => c.Rank.RequestTokens.HasValue ? 0 : 1).ThenBy(c => c.Rank.RequestTokens ?? 0)
                 .ThenBy(c => c.Rank.SamePlace == false ? 1 : 0)
                 .ThenBy(c => c.Access.Runtime, StringComparer.Ordinal).ThenBy(c => c.Access.Where, StringComparer.Ordinal)
                 .ThenBy(c => c.Access.Distro, StringComparer.Ordinal).ToList();
         }
+
+        /// <summary>
+        /// The place whose managed copy comes first for the same model (Settings.ManagedPiPrefer): "windows" when the
+        /// user chose it, otherwise "wsl", where the copy has a Linux shell (ADR 0005 decision 2).
+        /// </summary>
+        internal static string PreferredManagedPlace(string setting) { return setting == "windows" ? "windows" : "wsl"; }
 
         /// <summary>The values Ordered sorts a candidate by. A best-effort candidate's context and reply size may be the agent's.</summary>
         private static Rank RankOf(Candidate c, Requirements req, LeaseBook leases, DateTime now)
@@ -191,7 +201,7 @@ namespace AIMeter
             unverified = new List<string>();
             if (m.Free != null && !m.Free.Confirmed)
             {
-                if (m.Free.Status != "unknown") return "price_not_confirmed";
+                if (m.Free.Status != "unknown") return m.Free.ExclusionReason;
                 unverified.Add("price");
             }
             if (known == null) return "not_in_agent_list";
@@ -221,7 +231,7 @@ namespace AIMeter
         {
             if (IsFreeTier(m) && !req.FreeTier) return "free_tier_not_allowed";
             bool confirmed = m.Free == null || m.Free.Confirmed;
-            if (!confirmed && !(req.CostPolicy == FreeOrUnconfirmed && m.Free.Status == "unknown")) return "price_not_confirmed";
+            if (!confirmed && !(req.CostPolicy == FreeOrUnconfirmed && m.Free.Status == "unknown")) return m.Free.ExclusionReason;
             return Needs(m, req);
         }
 
@@ -511,9 +521,10 @@ namespace AIMeter
             var places = Probe.WslPlacesUp.ToList();
             bool findKeys = Settings.Current != null && Settings.Current.FindKeys;
             bool managedBesideOwn = Settings.Current != null && Settings.Current.ManagedPiBesideOwn;
-            // The managed copy's state is part of the inputs: installing it or changing its keys in Settings shows at once.
+            // The managed copies' state is part of the inputs: installing one or changing their keys in Settings shows at once.
             string managedServices = Settings.Current == null ? "" : string.Join(",", Settings.Current.ManagedPiServices);
-            string inputs = Probe.Home + "|" + findKeys + "|" + managedBesideOwn + "|" + ManagedPi.Stamp + "|" + managedServices + "|" + string.Join("|", places.Select(p => p.Distro + "=" + p.Home));
+            string managedStamps = string.Join(",", ManagedPi.Reachable(places).Select(c => c.Where + "=" + c.Stamp));
+            string inputs = Probe.Home + "|" + findKeys + "|" + managedBesideOwn + "|" + managedStamps + "|" + managedServices + "|" + string.Join("|", places.Select(p => p.Distro + "=" + p.Home));
             lock (ScanLock)
             {
                 if (lastScan != null && lastScanInputs == inputs && DateTime.UtcNow - lastScanAt < ScanReuse) return lastScan;
@@ -528,6 +539,15 @@ namespace AIMeter
             return scan;
         }
 
+        /// <summary>
+        /// The last scan ScanRuntimes made, however old, or null before the first: for Settings, which must not read
+        /// every agent's files, in WSL too, on the interface thread.
+        /// </summary>
+        internal static RuntimeScan LastScan
+        {
+            get { lock (ScanLock) return lastScan; }
+        }
+
         private static readonly TimeSpan ScanReuse = TimeSpan.FromSeconds(15);
         private static readonly object ScanLock = new object();
         private static RuntimeScan lastScan;
@@ -535,8 +555,9 @@ namespace AIMeter
         private static DateTime lastScanAt;
 
         /// <summary>
-        /// ScanRuntimes over the given homes: windowsHome (null to skip Windows, and with it the managed copy) and
-        /// running distributions. managedBesideOwn offers the managed copy also where the user's own is usable.
+        /// ScanRuntimes over the given homes: windowsHome (null to skip Windows, and with it the managed copy there) and
+        /// running distributions, among which the one AI Meter is set to holds the managed copy inside WSL.
+        /// managedBesideOwn offers a managed copy also where the user's own is usable.
         /// </summary>
         internal static RuntimeScan Scan(string windowsHome, IEnumerable<WslPlace> wsl, IList<RuntimeKind> kinds, bool findKeys, bool managedBesideOwn = false)
         {
@@ -587,36 +608,45 @@ namespace AIMeter
                     Locate(access, f.Item1, f.Item2, f.Item3, dirs[f.Item2]);
                     scan.Access.Add(access);
                 }
-            // Last, so that it knows which services the user's own Pi can already call.
-            if (windowsHome != null) AddManaged(scan, kinds, managedBesideOwn);
+            // Last, so that they know which services the user's own Pi can already call.
+            foreach (var copy in ManagedPi.Reachable(wsl).Where(c => c.InsideWsl || windowsHome != null)) AddManaged(scan, kinds, managedBesideOwn, copy);
             return scan;
         }
 
         /// <summary>
-        /// Add the copy of Pi that AI Meter keeps (ADR 0004), when it is installed: a runtime on Windows of its own,
-        /// with the services whose key the user copied into it. Those keys are the user's explicit choice, so they do
-        /// not depend on key discovery. The user's own Pi wins: for a service it can call from Windows with its own
-        /// key, the copy is not offered, unless the user asked for both (besideOwn).
+        /// Add a copy of Pi that AI Meter keeps (ADR 0004, ADR 0005), when it is installed: a runtime of its own, on
+        /// Windows or inside WSL, with the services whose key the user copied into it. Those keys are the user's
+        /// explicit choice, so they do not depend on key discovery. The user's own Pi in the same place wins: for a
+        /// service it can call there with its own key, the copy is not offered, unless the user asked for both
+        /// (besideOwn). Inside WSL the program, home and configuration folder are Linux paths, as the agent sees them;
+        /// the model lists are paths AI Meter can read.
         /// </summary>
-        private static void AddManaged(RuntimeScan scan, IList<RuntimeKind> kinds, bool besideOwn)
+        private static void AddManaged(RuntimeScan scan, IList<RuntimeKind> kinds, bool besideOwn, ManagedPi.Copy copy)
         {
             var kind = kinds.FirstOrDefault(k => k.Id == ManagedPi.RuntimeId);
-            if (kind == null || kind.PlaceFor(ManagedPi.Place) == null || !ManagedPi.Installed) return;
-            var ownServices = new HashSet<string>(scan.Access.Where(a => a.Runtime == kind.Id && a.Where == "windows" && !a.Plan).Select(a => a.Service));
-            scan.Found.Add(new RuntimePlace { Runtime = kind.Id, Where = "windows", Managed = true });
-            foreach (var d in Definitions.All.Where(x => x.UsesKey && (besideOwn || !ownServices.Contains(x.Id))))
+            if (kind == null || kind.PlaceFor(copy.PlaceKey) == null || !copy.Installed) return;
+            var ownServices = new HashSet<string>(scan.Access.Where(a => a.Runtime == kind.Id && a.Where == copy.Where && a.Distro == copy.Distro && !a.Plan && !a.Managed)
+                .Select(a => a.Service));
+            var place = new RuntimePlace { Runtime = kind.Id, Where = copy.Where, Distro = copy.Distro, Managed = true, Services = new List<string>() };
+            scan.Found.Add(place);
+            foreach (var d in Definitions.All.Where(x => x.UsesKey))
             {
                 string provider;
-                string key = ManagedPi.KeyFor(d, out provider);
+                string key = copy.KeyFor(d, out provider);
                 if (key == null) continue;
-                var access = Access(d.Id, kind.Id, "windows", key);
+                place.Services.Add(d.Id);
+                if (!besideOwn && ownServices.Contains(d.Id)) continue;
+                var access = Access(d.Id, kind.Id, copy.Where, key);
                 access.Managed = true;
                 access.Provider = provider;
-                access.Program = ManagedPi.ProgramPath;
-                access.Version = ManagedPi.Pinned.Version;
-                access.ConfigFolder = ManagedPi.ConfigFolder;
-                access.Shells = ManagedPi.BoundShells;
-                access.ModelsFile = ManagedPi.ModelsFile(provider);
+                access.Distro = copy.Distro;
+                access.Program = copy.AgentPath(copy.ProgramPath);
+                access.Home = copy.LinuxHome;
+                access.Version = ManagedPi.Version;
+                access.ConfigFolder = copy.AgentPath(copy.ConfigFolder);
+                access.ConfigFolderFromWindows = copy.ConfigFolder;
+                access.Shells = copy.BoundShells;
+                access.ModelsFile = copy.ModelsFile(provider);
                 access.ModelsFormat = ManagedPi.ModelsFormat;
                 scan.Access.Add(access);
             }
@@ -707,6 +737,11 @@ namespace AIMeter
         public string From;
         /// <summary>Also accept capacity included in a subscription plan (ADR 0003). Off by default.</summary>
         public bool Plan;
+        /// <summary>
+        /// For the same model, the place whose managed copy comes first (Settings.ManagedPiPrefer): "windows", or "wsl"
+        /// for anything else (Candidates.PreferredManagedPlace).
+        /// </summary>
+        public string ManagedPiPrefer;
         /// <summary>The service the coordinator itself runs on ("claude", "openai"…): its plan is never offered. Null when not said.</summary>
         public string Coordinator;
         /// <summary>The plans the user allowed in Settings (Settings.DelegationPlans), by service id; null or empty allows none.</summary>
@@ -741,21 +776,30 @@ namespace AIMeter
         public string Home;
         /// <summary>The agent draws on a subscription plan through its own sign-in, not on a key (ADR 0003).</summary>
         public bool Plan;
-        /// <summary>The agent is the copy AI Meter keeps (ADR 0004), not an installation of the user's; ConfigFolder is its own configuration folder.</summary>
+        /// <summary>
+        /// The agent is a copy AI Meter keeps (ADR 0004, ADR 0005), not an installation of the user's. ConfigFolder is
+        /// its own configuration folder as the agent sees it (a Linux path inside WSL); ConfigFolderFromWindows is the
+        /// same folder as Windows reads it (through the distribution's file share for the copy inside WSL).
+        /// </summary>
         public bool Managed;
-        public string ConfigFolder;
-        /// <summary>For the managed copy: the shells it is bound to besides its PowerShell tool (ManagedPi.BoundShells).</summary>
+        public string ConfigFolder, ConfigFolderFromWindows;
+        /// <summary>For the managed copy on Windows: the shells it is bound to besides its PowerShell tool (ManagedPi.Copy.BoundShells).</summary>
         public string[] Shells = new string[0];
     }
 
     /// <summary>
-    /// An agent set up in one place: "windows", or "wsl" with its distribution. Managed marks the copy AI Meter keeps
-    /// on Windows, a runtime apart from the user's own installation there.
+    /// An agent set up in one place: "windows", or "wsl" with its distribution. Managed marks a copy AI Meter keeps,
+    /// on Windows or inside WSL, a runtime apart from the user's own installation there.
     /// </summary>
     internal sealed class RuntimePlace
     {
         public string Runtime, Where, Distro;
         public bool Managed;
+        /// <summary>
+        /// For a managed copy, every service it holds a key for, also those it is not offered for because the user's
+        /// own Pi in the same place can call them; null for the user's own agents.
+        /// </summary>
+        public List<string> Services;
     }
 
     /// <summary>

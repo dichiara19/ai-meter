@@ -221,7 +221,12 @@ Output:
   - `describe_dispatch` takes `managed` (boolean) to choose between the user's own installation and the copy AI Meter keeps, and, for the copy, returns `managed: true`, `commands` (`none`, `bash` or `powershell`: what the agent runs commands with) and `alternatives` (`[{ shell, arguments }]`: `git_bash`, `modify` only, returned only while the copy's own settings name a `bash.exe` that exists, because AI Meter binds the shell there and the plugin decides nothing by its own search);
   - an agent definition may have the dispatch place `managed`, with `providers`, `alternatives`, `commands`, its own `output` and `notes`, and the `{config}` placeholder.
 
-  Nothing in MCP installs it, updates it or returns a key; the key file is the user's choice in Settings. It is offered for Windows folders and Windows coordinators only, never for a plan, and not for free-tier models. The reference is [docs/MCP.md, *Managed Pi*](../MCP.md#managed-pi).
+  Nothing in MCP installs it, updates it or returns a key; the key file is the user's choice in Settings. On Windows it is offered for Windows folders and Windows coordinators only; never for a plan, and not for free-tier models. The reference is [docs/MCP.md, *Managed Pi*](../MCP.md#managed-pi).
+- **Managed Pi inside WSL ([ADR 0005](../adr/0005-managed-pi-inside-wsl.md)).** A second copy of the same release, in the WSL distribution AI Meter is set to, with these changes to the contract, all additive except the shape of `runtimes.managed`:
+  - a managed candidate's `runtime.where` may be `wsl` (with `distro`); `describe_dispatch` and `claim_capacity` take `where` and `distro` with `managed: true` to pick the copy (the preferred one when `where` is omitted), and the order puts, for the same model, the user's agents first, then the managed copy in the preferred place (`ManagedPiPrefer`: inside WSL unless the user chose Windows), then the rest as before;
+  - `describe_dispatch` adds `managed_config` for a managed copy: its configuration folder as the plugin can read it from where it runs (a Windows path; a `\wsl.localhost\…` share path from Windows for the copy inside WSL; a Linux path from WSL). The copy inside WSL has `commands` `none`/`bash`, no `alternatives` and `environment_policy: "no_credentials"`;
+  - **`runtimes.managed` is now an array**, one entry per place (`name`, `where`, `distro`, `installed`, `reachable`, `version`, `services`, `set_up_in`, `note`), and `runtimes.environment` is new (`wsl`: `running`, `stopped` or `none`; `distro`; `git_for_windows`);
+  - a coordinator in WSL is offered the copy in its own distribution and never the copy on Windows; a coordinator on Windows is offered both; the agent definition gains the place `managed_wsl`.
 
 ### 3.2 Leases
 

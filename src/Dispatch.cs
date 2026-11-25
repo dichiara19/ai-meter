@@ -35,17 +35,21 @@ namespace AIMeter
             if (from != "windows" && from != "wsl") return plan.Refuse("from must be windows or wsl");
             var kind = Agents.Get(access.Runtime);
             if (kind == null) return plan.Refuse("unknown runtime " + access.Runtime);
-            // The copy AI Meter keeps has a dispatch entry of its own, verified apart from the user's installation.
+            // A copy AI Meter keeps has a dispatch entry of its own per place, verified apart from the user's installation.
             plan.Managed = access.Managed;
-            var place = kind.PlaceFor(access.Managed ? ManagedPi.Place : access.Where);
+            var place = kind.PlaceFor(access.Managed ? (access.Where == "wsl" ? ManagedPi.PlaceInWsl : ManagedPi.Place) : access.Where);
             if (place == null)
-                return plan.Refuse(access.Managed ? access.Runtime + " has no managed copy in its definition"
+                return plan.Refuse(access.Managed ? access.Runtime + " has no managed copy " + (access.Where == "wsl" ? "inside WSL" : "on Windows") + " in its definition"
                     : access.Runtime + " has not been verified " + (access.Where == "wsl" ? "in WSL" : "on Windows") + " yet");
             if (from == "wsl" && access.Where == "windows") return plan.Refuse("starting a Windows agent from WSL has not been verified yet");
             if (access.Where == "wsl" && string.IsNullOrEmpty(distro)) return plan.Refuse("no WSL distribution is known");
-            if (access.Managed && InsideWsl(workspace))
-                return plan.Refuse("the managed copy of " + kind.Name + " works on Windows folders only; a folder inside WSL needs an agent installed there");
+            if (access.Managed && access.Where == "windows" && InsideWsl(workspace))
+                return plan.Refuse("the managed copy of " + kind.Name + " on Windows works on Windows folders only; a folder inside WSL needs an agent installed there");
             if (access.Managed && string.IsNullOrEmpty(access.ConfigFolder)) return plan.Refuse("the managed copy's configuration folder is not known");
+            // The copy's configuration folder as the plugin reads it, for the key file and its count: from Windows, the
+            // copy inside WSL is read through the distribution's file share.
+            if (access.Managed) plan.ManagedConfig = from == "windows" && access.Where == "wsl" ? access.ConfigFolderFromWindows : access.ConfigFolder;
+            if (access.Managed && string.IsNullOrEmpty(plan.ManagedConfig)) return plan.Refuse("the managed copy's configuration folder is not known from Windows");
             plan.VersionVerified = place.Verifies(version);
             string folder = string.IsNullOrEmpty(workspace) ? "{workspace}" : workspace;
             string unsafeValue = Unsafe("model", model) ?? Unsafe("provider", access.Provider) ?? Unsafe("workspace", workspace) ?? Unsafe("distribution", distro) ??
@@ -71,8 +75,9 @@ namespace AIMeter
             plan.Notes.AddRange(place.Notes);
             string commands;
             if (place.Commands.TryGetValue(plan.Mode, out commands)) plan.Commands = commands;
-            // Argument lists for another shell, which a plugin may use instead. For the managed copy only a shell it is
+            // Argument lists for another shell, which a plugin may use instead. For a managed copy only a shell it is
             // bound to is offered: its bash tool must never be left to search for a bash.exe (ADR 0004 decision 5).
+            // The copy inside WSL has none: bash is its own tool there.
             foreach (var alternative in place.Alternatives.OrderBy(a => a.Key, StringComparer.Ordinal))
             {
                 if (access.Managed && !access.Shells.Contains(alternative.Key)) continue;
@@ -238,8 +243,14 @@ namespace AIMeter
             /// <summary>For a plan agent: the sign-in check to pass before starting it, and "included_in_plan".</summary>
             public SignInCheck SignIn;
             public string Billing;
-            /// <summary>The agent is the copy AI Meter keeps (ADR 0004).</summary>
+            /// <summary>The agent is a copy AI Meter keeps (ADR 0004, ADR 0005).</summary>
             public bool Managed;
+            /// <summary>
+            /// For a managed copy: its configuration folder as the plugin can read it from where it runs, which holds the
+            /// key file and its count of changes (docs/MCP.md, "Managed Pi"): a Windows path for the copy on Windows; for
+            /// the copy inside WSL, the Linux path from WSL and the distribution's file share from Windows.
+            /// </summary>
+            public string ManagedConfig;
             /// <summary>What the agent runs commands with when started with Arguments: "none", "bash" or "powershell"; null when the definition does not say.</summary>
             public string Commands;
             /// <summary>Argument lists for another shell, by the shell's name ("git_bash"), in place of Arguments.</summary>
