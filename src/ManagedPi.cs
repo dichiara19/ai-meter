@@ -285,6 +285,23 @@ namespace AIMeter
             /// </summary>
             public void Install(Action<long> progress, Func<bool> cancelled) { Install(Release, OpenArchive, progress, cancelled); }
 
+            /// <summary>
+            /// Rename the folder just unpacked to its place, trying again for a few seconds when Windows refuses: a
+            /// program that scans new files, such as an antivirus with real-time protection, can hold one of them open
+            /// for a moment, and a folder with an open file cannot be renamed (#105). After the last attempt the
+            /// refusal is thrown, and the installation fails with its message.
+            /// </summary>
+            private static void Promote(string unpacked, string folder)
+            {
+                for (int attempt = 1; ; attempt++)
+                {
+                    try { MoveFolder(unpacked, folder); return; }
+                    catch (IOException) { if (attempt >= PromoteAttempts) throw; }
+                    catch (UnauthorizedAccessException) { if (attempt >= PromoteAttempts) throw; }
+                    System.Threading.Thread.Sleep(PromoteWaitMilliseconds);
+                }
+            }
+
             /// <summary>Install with the release and the source given, so that tests need no network.</summary>
             internal void Install(Release release, Func<string, Stream> open, Action<long> progress, Func<bool> cancelled)
             {
@@ -327,7 +344,7 @@ namespace AIMeter
                     // The complete folder takes its place in one step, so a copy is never seen half unpacked. Inside WSL
                     // the step is a rename through the file share, within one folder.
                     if (Directory.Exists(FolderOf(release))) Directory.Delete(FolderOf(release), true);
-                    Directory.Move(unpacked, FolderOf(release));
+                    Promote(unpacked, FolderOf(release));
                     foreach (var other in Probe.SafeDirs(Root).Where(d => !SamePath(d, FolderOf(release)) && !SamePath(d, ConfigFolder))) TryDelete(other);
                     lock (ConfigLock)
                     {
@@ -967,6 +984,11 @@ namespace AIMeter
         }
 
         internal static Func<IList<string>, Stream, int> RunWsl = RunWslProcess;
+
+        /// <summary>How a staging folder is renamed to its place, and how long a refused rename is tried again (Copy.Promote); tests replace them.</summary>
+        internal static Action<string, string> MoveFolder = Directory.Move;
+        internal const int PromoteAttempts = 20;
+        internal static int PromoteWaitMilliseconds = 250;
 
         /// <summary>How long one program inside WSL may run: unpacking the 125 MB build takes seconds.</summary>
         private const int WslTimeoutMs = 5 * 60 * 1000;

@@ -20,6 +20,7 @@ namespace AIMeter
         {
             RegisterWsl(test);
             test("The managed Pi installs from a verified archive, reporting progress and leaving no partial files", () => Isolated(InstallsVerifiedArchive));
+            test("A rename of the unpacked folder that Windows refuses for a moment is tried again, and one that lasts fails cleanly", () => Isolated(RenameRefusedForAMoment));
             test("A wrong, oversized, escaping, incomplete or cancelled archive installs nothing and keeps an installed copy", () => Isolated(RefusesBadArchives));
             test("The managed Pi holds keys only for ticked services Pi knows, and Remove deletes keys, program and choices", () => Isolated(KeysFollowChoices));
             test("The scan offers the managed Pi only when installed, with its copied keys, after the user's own Pi", () => Isolated(ScanOffersManagedCopy));
@@ -226,6 +227,41 @@ namespace AIMeter
             Assert(Partials().Count == 0 && !Directory.GetFiles(ManagedPi.Windows.Root).Any(), "A partial download or unpacking was left: " + string.Join(", ", Partials()));
             Assert(progress.Count > 0 && progress.Last() == Good.Length, "Progress was not reported up to the archive's size.");
             Assert(ManagedPi.Windows.Stamp == "0", "An installed copy without keys has the wrong stamp: " + ManagedPi.Windows.Stamp);
+        }
+
+        /// <summary>
+        /// A scanner can hold a file of the folder just unpacked for a moment, and Windows then refuses to rename the
+        /// folder (#105): the rename is tried again, and only a refusal that lasts fails the installation, leaving
+        /// nothing half installed.
+        /// </summary>
+        private static void RenameRefusedForAMoment()
+        {
+            var move = ManagedPi.MoveFolder;
+            int wait = ManagedPi.PromoteWaitMilliseconds;
+            try
+            {
+                ManagedPi.PromoteWaitMilliseconds = 0;
+                int calls = 0;
+                ManagedPi.MoveFolder = (from, to) =>
+                {
+                    if (++calls <= 3) throw calls % 2 == 0 ? (Exception)new IOException("in use") : new UnauthorizedAccessException("denied");
+                    move(from, to);
+                };
+                Install(Good, ReleaseOf(Good), null, null);
+                Assert(calls == 4 && ManagedPi.Windows.Installed && Partials().Count == 0, "A rename refused three times did not end in an installed copy: " + calls + " attempts.");
+
+                ManagedPi.Windows.Remove(Settings.Current);
+                calls = 0;
+                ManagedPi.MoveFolder = (from, to) => { calls++; throw new UnauthorizedAccessException("still denied"); };
+                string message = Fails<ManagedPi.InstallException>(() => Install(Good, ReleaseOf(Good), null, null), "a rename that is always refused");
+                Assert(calls == ManagedPi.PromoteAttempts && message == "still denied", "A lasting refusal was not tried " + ManagedPi.PromoteAttempts + " times or lost its message: " + calls + ", " + message);
+                Assert(!ManagedPi.Windows.Installed && Partials().Count == 0, "A refused rename left a copy or a staging folder behind.");
+            }
+            finally
+            {
+                ManagedPi.MoveFolder = move;
+                ManagedPi.PromoteWaitMilliseconds = wait;
+            }
         }
 
         /// <summary>Install must throw the given exception type; returns its message.</summary>
