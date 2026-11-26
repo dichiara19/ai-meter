@@ -192,6 +192,13 @@ namespace AIMeter
             var small = new LocalModel { Name = "b", Server = "x", Where = "Windows", Vram = 8 * gb, FileSize = 8 * gb + (100L << 20), Swapped = 10L << 20, VramOrigin = MemoryOrigin.Unknown };
             Assert(Ui.LocalFacts(small).Count == 2 && Ui.LocalPlacement(small).SequenceEqual(new[] { "Video memory: 8.0 GB", "Model file: 8.1 GB" }), "Noise was stated, or a figure of unknown origin was given one.");
             Assert(Ui.PlacementParts(small).Count(x => x.Bytes > 0) == 1, "A model in one memory gets a bar of several parts.");
+
+            // Memory shared with the card: summed over the model's processes, and bounded by the PC's memory, not by the
+            // process's resident memory (10.88 GB shared by a process with 10.85 GB resident was seen, the rest in swap).
+            var shared = new Dictionary<uint, long> { { 1, 10 * gb }, { 2, gb }, { 3, 159 * gb } };
+            Assert(LocalProvider.SharedWithCard(shared, new uint[] { 1, 2, 9 }, 32 * gb) == 11 * gb, "Shared memory is not summed over the processes.");
+            Assert(LocalProvider.SharedWithCard(shared, new uint[] { 3 }, 32 * gb) == 0 && LocalProvider.SharedWithCard(shared, new uint[] { 9 }, 32 * gb) == 0
+                && LocalProvider.SharedWithCard(shared, new uint[] { 1 }, 0) == 0, "A figure larger than the PC's memory, or one with nothing to bound it, was kept.");
         }
 
         private static void OutsideRam()

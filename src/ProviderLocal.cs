@@ -30,6 +30,7 @@ namespace AIMeter
         private readonly Dictionary<int, uint> wslServers = new Dictionary<int, uint>();        // Port to the process serving it in WSL.
         private readonly Dictionary<int, DateTime> wslMisses = new Dictionary<int, DateTime>();   // Ports whose process was not found, and when.
         private readonly Dictionary<string, long> fileSizes = new Dictionary<string, long>();    // Model file to its size, while its model is loaded.
+        private long physicalMemory;   // This PC's memory, read once: the bound of what a process can share with the card.
 
         /// <summary>Programs that host a model server, and the default ports of the most common servers.</summary>
         private static readonly string[] KnownProcesses = { "ollama", "llama-server", "llama-swap", "lm studio", "llmster", "koboldcpp", "local-ai", "localai", "vllm" };
@@ -55,6 +56,8 @@ namespace AIMeter
         public override ProviderState Collect(Probe p)
         {
             Discover(p);
+            long inUse;
+            if (physicalMemory == 0) HostMemory.Windows(out inUse, out physicalMemory);
             var models = new List<LocalModel>();
             bool running = false;
             swapPorts.Clear();
@@ -570,19 +573,20 @@ namespace AIMeter
                 if (s.Kind != "lmstudio") m.Ram = WorkingSet(pids);   // The Electron app's RAM does not belong to the model.
                 if (m.Vram > 0) m.VramOrigin = MemoryOrigin.Measured;
                 if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Measured;
-                m.GpuShared = SharedWithCard(shared, pids, m.Ram);
+                m.GpuShared = SharedWithCard(shared, pids, physicalMemory);
             }
         }
 
         /// <summary>
-        /// System memory the processes share with the graphics card. It is part of their own memory, so a figure larger
-        /// than that is a driver's nonsense and counts as unknown.
+        /// System memory the processes share with the graphics card. A driver can report nonsense for a process (159 GB
+        /// seen on a 32 GB PC): a figure larger than the PC's memory counts as unknown. The process's own resident
+        /// memory is no bound: pinned memory it has partly swapped out is still shared.
         /// </summary>
-        private static long SharedWithCard(Dictionary<uint, long> shared, IEnumerable<uint> pids, long limit)
+        internal static long SharedWithCard(Dictionary<uint, long> shared, IEnumerable<uint> pids, long physicalMemory)
         {
             long total = 0, v;
             foreach (var pid in pids) if (shared.TryGetValue(pid, out v)) total += v;
-            return total > 0 && total <= limit ? total : 0;
+            return total > 0 && total <= physicalMemory ? total : 0;
         }
 
         /// <summary>
@@ -663,7 +667,7 @@ namespace AIMeter
         /// Video memory used in WSL is all charged to vmmemWSL (and vmwp): it cannot be split between Linux processes.
         /// It is assigned to the model if that is the only one in WSL without its own figure.
         /// </summary>
-        private static void ShareWslMemory(Probe p, List<LocalModel> models)
+        private void ShareWslMemory(Probe p, List<LocalModel> models)
         {
             var unknown = models.Where(m => m.Where == "WSL" && m.Vram == 0).ToList();
             if (unknown.Count != 1 || models.Any(m => m.Where == "WSL" && m.Vram > 0)) return;
@@ -673,7 +677,7 @@ namespace AIMeter
             foreach (var pid in machine) if (gpu.TryGetValue(pid, out v)) total += v;
             unknown[0].Vram = total;
             if (total > 0) unknown[0].VramOrigin = MemoryOrigin.Measured;
-            unknown[0].GpuShared = SharedWithCard(GpuMemory.SharedByProcess, machine, unknown[0].Ram);
+            unknown[0].GpuShared = SharedWithCard(GpuMemory.SharedByProcess, machine, physicalMemory);
         }
 
         // ================================================================ local HTTP
