@@ -201,8 +201,8 @@ namespace AIMeter
         public long GpuUsed, GpuTotal;    // GPU memory in bytes, for local providers only.
         public long RamUsed, RamTotal;    // System memory of this PC in bytes, for local providers only.
         /// <summary>
-        /// Memory of the WSL virtual machine, while a model server runs in it: in use and in total as Linux sees it,
-        /// and what the machine holds on Windows. Bytes; zero means unknown.
+        /// Memory of the WSL virtual machine: what it holds on Windows and, while the distribution runs, what is in
+        /// use and the total (its ceiling) as Linux sees them. Bytes; zero means unknown.
         /// </summary>
         public long WslUsed, WslTotal, WslHeld;
         public Tip Tip;           // Active tip, evaluated for each snapshot.
@@ -264,7 +264,7 @@ namespace AIMeter
                 }
                 if (p.Catalogue != null) foreach (var m in p.Catalogue.Models) sb.Append(m.Id).Append(m.Expires);
                 foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
-                if (p.Models != null) sb.Append(p.GpuUsed >> 28).Append(p.RamUsed >> 28).Append(p.WslUsed >> 28);
+                if (p.Models != null) sb.Append(p.GpuUsed >> 28).Append(p.RamUsed >> 28).Append(p.WslUsed >> 28).Append(p.WslHeld >> 28);
                 if (p.Models != null)
                     foreach (var m in p.Models)
                     {

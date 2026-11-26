@@ -13,6 +13,7 @@ namespace AIMeter
             test("A process in WSL is found by the port or the model file its command line names", FindsTheServer);
             test("Memory figures of /proc are read in bytes, and a missing one is unknown", ReadsProcFields);
             test("A model's system memory is stated inside the PC's and WSL's totals", MemoryLines);
+            test("Each memory's bar is split into what holds it, and WSL's share is part of the PC's", MemoryParts);
             test("Every supported language words system and WSL memory", Translations);
         }
 
@@ -92,9 +93,57 @@ namespace AIMeter
             Assert(Ui.SystemMemoryLines(p).Count == 1 && Ui.WslMemoryLines(p).Count == 1, "Unknown memory was stated as a figure.");
         }
 
+        private static void MemoryParts()
+        {
+            long gb = 1L << 30;
+            var p = new ProviderState
+            {
+                Id = "local", Running = true, GpuUsed = 7 * gb, GpuTotal = 8 * gb, RamUsed = 28 * gb, RamTotal = 32 * gb, WslUsed = 13 * gb, WslTotal = 16 * gb, WslHeld = 12 * gb,
+                Models = new List<LocalModel>
+                {
+                    new LocalModel { Name = "a", Where = "WSL", Ram = 11 * gb, Vram = 6 * gb },
+                    new LocalModel { Name = "b", Where = "Windows", Ram = 2 * gb },
+                },
+            };
+            // Windows without its model, the model on Windows, the model in WSL, the rest of WSL, then WSL's room:
+            // 4 GB to its ceiling of 16, all of which the PC still has free.
+            var system = Ui.SystemMemoryParts(p);
+            Assert(system.Select(x => x.Bytes / gb).SequenceEqual(new long[] { 14, 2, 11, 1, 4 }), "The PC's memory is not split into Windows, WSL and the models of each.");
+            Assert(system.Where(x => !x.Room).Sum(x => x.Bytes) == p.RamUsed && system.Count(x => x.Room) == 1, "The segments in use do not add up to the memory in use.");
+            Assert(system.Where(x => x.Name != null).Select(x => x.Name).SequenceEqual(new[] { "Windows 16 GB", "models 13 GB", "WSL 12/16 GB" }), "The legend does not name Windows, the models and WSL with its ceiling.");
+            p.RamUsed = 30 * gb;
+            Assert(Ui.SystemMemoryParts(p).Single(x => x.Room).Bytes == 2 * gb, "WSL's room exceeds what the PC has free.");
+            p.RamUsed = 28 * gb;
+            Assert(system.Single(x => x.Wsl).Name.StartsWith("WSL"), "The WSL logo is not on WSL's entry.");
+            Assert(Ui.WslMemoryParts(p).Select(x => x.Bytes / gb).SequenceEqual(new long[] { 11, 2 }), "WSL's own memory is not split into its models and the rest.");
+            Assert(Ui.VideoMemoryParts(p).Select(x => x.Bytes / gb).SequenceEqual(new long[] { 6, 1 }), "Video memory is not split into the models and other programs.");
+            // The models keep one colour in every bar; little memory left colours the value, like a limit running out.
+            Assert(system[1].Brush == system[2].Brush && system[2].Brush == Ui.VideoMemoryParts(p)[0].Brush && system[2].Brush == Ui.WslMemoryParts(p)[0].Brush, "The models change colour between bars.");
+            Assert(Ui.MemoryLevel(28 * gb, 32 * gb) == "Critical" && Ui.MemoryLevel(20 * gb, 32 * gb) == "Caution" && Ui.MemoryLevel(8 * gb, 32 * gb) == "Text" && Ui.MemoryLevel(0, 0) == "Text", "A nearly full memory does not warn, or an unknown one does.");
+
+            // A model larger than what Windows counts for WSL (paged out) cannot push the bar past what is in use.
+            p.WslHeld = 5 * gb;
+            system = Ui.SystemMemoryParts(p);
+            Assert(system.All(x => x.Bytes >= 0) && system.Where(x => !x.Room).Sum(x => x.Bytes) == p.RamUsed && system[2].Bytes == 5 * gb, "A model larger than its place's share was not cut to it.");
+
+            // Without WSL and without models there is one segment and one legend entry.
+            var alone = new ProviderState { Id = "local", RamUsed = 8 * gb, RamTotal = 32 * gb, Models = new List<LocalModel>() };
+            system = Ui.SystemMemoryParts(alone);
+            Assert(system.Count(x => x.Bytes > 0) == 1 && system.Count(x => x.Name != null) == 1 && system[0].Brush != system[2].Brush, "A PC without WSL or models shows more than Windows.");
+
+            // The bar: one column per holder that holds something, and one for what is free.
+            var segments = (System.Windows.Controls.Grid)Ui.SegmentedBar(system, alone.RamTotal, 5).Children[1];
+            Assert(segments.Children.Count == 1 && segments.ColumnDefinitions.Count == 2 && segments.ColumnDefinitions[1].Width.Value == 24 * gb, "The bar does not leave the free part empty.");
+            // WSL's room is an outline, not a fill: it is free memory.
+            p.WslHeld = 12 * gb;
+            segments = (System.Windows.Controls.Grid)Ui.SegmentedBar(Ui.SystemMemoryParts(p), p.RamTotal, 5).Children[1];
+            var room = (System.Windows.Controls.Border)segments.Children[4];
+            Assert(segments.Children.Count == 5 && room.Background == null && room.BorderThickness.Left == 1, "WSL's room is drawn as memory in use.");
+        }
+
         private static void Translations()
         {
-            var keys = new[] { "System memory", "System memory: {0}", "WSL memory", "WSL memory: {0}", "Local models: {0}", "Held on Windows: {0}" };
+            var keys = new[] { "System memory", "System memory: {0}", "Inside WSL", "WSL memory: {0}", "Local models: {0}", "Held on Windows: {0}", "models {0}" };
             try
             {
                 foreach (var lang in new[] { "it", "es", "fr", "de", "pt" })

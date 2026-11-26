@@ -468,10 +468,8 @@ namespace AIMeter
             stack.Children.Add(head);
 
             // GPU memory is the capacity constraint for local models.
-            if (p.Running && p.GpuTotal > 0) stack.Children.Add(MemoryRow("Video memory", p.GpuUsed, p.GpuTotal, LocalMemoryLines(p).Take(1)));
             // System memory holds what does not fit there; a model in WSL is bounded by the virtual machine's own.
-            if (p.Running && p.RamTotal > 0) stack.Children.Add(MemoryRow("System memory", p.RamUsed, p.RamTotal, SystemMemoryLines(p)));
-            if (p.Running && p.WslTotal > 0) stack.Children.Add(MemoryRow("WSL memory", p.WslUsed, p.WslTotal, WslMemoryLines(p)));
+            if (p.Running) foreach (var row in MemoryMap(p)) stack.Children.Add(row);
 
             foreach (var m in p.Models) stack.Children.Add(LocalModelBlock(m));
 
@@ -506,15 +504,6 @@ namespace AIMeter
                 stack.Children.Add(none);
             }
             return Card(stack, new Thickness(14, 12, 14, 12));
-        }
-
-        /// <summary>A memory of the PC as a limit row: free or in use out of the total, with what explains it in the tooltip.</summary>
-        private static FrameworkElement MemoryRow(string label, long used, long total, IEnumerable<string> lines)
-        {
-            var w = new UsageWindow { Label = label, Used = Math.Min(100, used * 100.0 / total), RightText = GpuMemory.Value(used, total, ValueStyle.Long) };
-            var row = UsageRow(w, null, "Info");
-            row.ToolTip = string.Join("\n", lines);
-            return row;
         }
 
         /// <summary>One loaded model: memory, server facts, context in use and the CLI sessions attached to it.</summary>

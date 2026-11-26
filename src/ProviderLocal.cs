@@ -55,7 +55,7 @@ namespace AIMeter
         {
             Discover(p);
             var models = new List<LocalModel>();
-            bool running = false, runningInWsl = false;
+            bool running = false;
             swapPorts.Clear();
             // llama-swap first: the llama-server instances it starts must not be counted a second time.
             foreach (var srv in servers.Values.OrderBy(x => x.Kind == "llamaswap" ? 0 : 1).ToList())
@@ -71,7 +71,6 @@ namespace AIMeter
                 }
                 srv.Failures = 0;
                 running = true;
-                if (srv.Where == "WSL") runningInWsl = true;
                 foreach (var m in found)
                 {
                     m.Where = srv.Where;
@@ -93,9 +92,10 @@ namespace AIMeter
                 st.GpuTotal = GpuMemory.Total;
                 st.GpuUsed = st.GpuTotal > 0 ? GpuMemory.Used : 0;
                 HostMemory.Windows(out st.RamUsed, out st.RamTotal);
-            }
-            if (runningInWsl && p.WslUp && HostMemory.Wsl(p.WslRoot, out st.WslUsed, out st.WslTotal))
+                // What the WSL virtual machine holds is part of the PC's memory in use, whether or not a server runs in it.
                 st.WslHeld = WorkingSet(p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem").Select(kv => kv.Key));
+                if (p.WslUp) HostMemory.Wsl(p.WslRoot, out st.WslUsed, out st.WslTotal);
+            }
             if (S.LocalAgents)
             {
                 // CLI sessions belong under the model they use, if it is loaded here.
