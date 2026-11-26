@@ -14,21 +14,23 @@ namespace AIMeter
     /// </summary>
     internal static class HostMemory
     {
+        /// <summary>MEMORYSTATUSEX. A class, passed by reference as Windows expects, so that it is never compared or copied by value.</summary>
         [StructLayout(LayoutKind.Sequential)]
-        private struct MemoryStatus
+        private sealed class MemoryStatus
         {
-            public uint Length, Load;
+            public uint Length = (uint)Marshal.SizeOf(typeof(MemoryStatus));
+            public uint Load;
             public ulong TotalPhysical, AvailablePhysical, TotalPageFile, AvailablePageFile, TotalVirtual, AvailableVirtual, AvailableExtended;
         }
 
-        [DllImport("kernel32.dll")] private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
+        [DllImport("kernel32.dll")] private static extern bool GlobalMemoryStatusEx([In, Out] MemoryStatus status);
 
         /// <summary>Physical memory of this PC, in use and in total. False when Windows does not answer.</summary>
         public static bool Windows(out long used, out long total)
         {
-            var status = new MemoryStatus { Length = (uint)Marshal.SizeOf(typeof(MemoryStatus)) };
+            var status = new MemoryStatus();
             used = total = 0;
-            if (!GlobalMemoryStatusEx(ref status)) return false;
+            if (!GlobalMemoryStatusEx(status)) return false;
             total = (long)status.TotalPhysical;
             used = total - (long)status.AvailablePhysical;
             return true;

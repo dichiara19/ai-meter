@@ -88,8 +88,12 @@ namespace AIMeter
 
             var st = new ProviderState { Id = "local", Name = L.T("Local models"), Models = models, Running = running };
             // GPU counters are read here, on the collection thread, and only when a server is active.
-            if (running) { st.GpuTotal = GpuMemory.Total; st.GpuUsed = st.GpuTotal > 0 ? GpuMemory.Used : 0; }
-            if (running) HostMemory.Windows(out st.RamUsed, out st.RamTotal);
+            if (running)
+            {
+                st.GpuTotal = GpuMemory.Total;
+                st.GpuUsed = st.GpuTotal > 0 ? GpuMemory.Used : 0;
+                HostMemory.Windows(out st.RamUsed, out st.RamTotal);
+            }
             if (runningInWsl && p.WslUp && HostMemory.Wsl(p.WslRoot, out st.WslUsed, out st.WslTotal))
                 st.WslHeld = WorkingSet(p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem").Select(kv => kv.Key));
             if (S.LocalAgents)

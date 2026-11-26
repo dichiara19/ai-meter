@@ -65,6 +65,9 @@ namespace AIMeter
             Assert(!HostMemory.Wsl(root, out used, out total) && used == 0 && total == 0, "A distribution without meminfo gave figures.");
             File.WriteAllText(Path.Combine(root, "proc", "meminfo"), "MemTotal:       16000000 kB\nMemFree:         1000000 kB\nMemAvailable:    4000000 kB\n");
             Assert(HostMemory.Wsl(root, out used, out total) && total == 16000000L * 1024 && used == 12000000L * 1024, "Memory in use in WSL is not the total less what is available.");
+
+            // This PC's own memory, from Windows: more than a gigabyte, and some of it in use.
+            Assert(HostMemory.Windows(out used, out total) && total > (1L << 30) && used > 0 && used < total, "Windows did not report this PC's memory.");
         }
 
         private static void MemoryLines()
