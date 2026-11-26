@@ -468,14 +468,10 @@ namespace AIMeter
             stack.Children.Add(head);
 
             // GPU memory is the capacity constraint for local models.
-            if (p.Running && p.GpuTotal > 0)
-            {
-                double free = 100 - Math.Min(100, p.GpuUsed * 100.0 / p.GpuTotal);
-                var w = new UsageWindow { Label = "Video memory", Used = 100 - free, RightText = GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long) };
-                var row = UsageRow(w, null, "Info");
-                row.ToolTip = L.F("Video memory: {0}", GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long));
-                stack.Children.Add(row);
-            }
+            if (p.Running && p.GpuTotal > 0) stack.Children.Add(MemoryRow("Video memory", p.GpuUsed, p.GpuTotal, LocalMemoryLines(p).Take(1)));
+            // System memory holds what does not fit there; a model in WSL is bounded by the virtual machine's own.
+            if (p.Running && p.RamTotal > 0) stack.Children.Add(MemoryRow("System memory", p.RamUsed, p.RamTotal, SystemMemoryLines(p)));
+            if (p.Running && p.WslTotal > 0) stack.Children.Add(MemoryRow("WSL memory", p.WslUsed, p.WslTotal, WslMemoryLines(p)));
 
             foreach (var m in p.Models) stack.Children.Add(LocalModelBlock(m));
 
@@ -512,12 +508,22 @@ namespace AIMeter
             return Card(stack, new Thickness(14, 12, 14, 12));
         }
 
+        /// <summary>A memory of the PC as a limit row: free or in use out of the total, with what explains it in the tooltip.</summary>
+        private static FrameworkElement MemoryRow(string label, long used, long total, IEnumerable<string> lines)
+        {
+            var w = new UsageWindow { Label = label, Used = Math.Min(100, used * 100.0 / total), RightText = GpuMemory.Value(used, total, ValueStyle.Long) };
+            var row = UsageRow(w, null, "Info");
+            row.ToolTip = string.Join("\n", lines);
+            return row;
+        }
+
         /// <summary>One loaded model: memory, server facts, context in use and the CLI sessions attached to it.</summary>
         private static FrameworkElement LocalModelBlock(LocalModel m)
         {
             var block = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
             var top = new DockPanel();
-            string mem = m.Vram > 0 ? GpuMemory.Format(m.Vram) : m.Ram > 0 ? GpuMemory.Format(m.Ram) : null;
+            // Everything the model holds, in video and system memory; the facts below say how much is where.
+            string mem = m.Vram + m.Ram > 0 ? GpuMemory.Format(m.Vram + m.Ram) : null;
             if (mem != null)
             {
                 var r = Text(mem, 13, "Text", FontWeights.SemiBold);
@@ -534,7 +540,7 @@ namespace AIMeter
             top.Children.Add(title);
             block.Children.Add(top);
 
-            var facts = LocalFacts(m).Where(f => !f.Contains("VRAM") || mem == null).ToList();
+            var facts = LocalFacts(m).Where(f => !f.Contains("VRAM") || m.Ram > 0).ToList();
             if (m.Detail != null) facts.Insert(1, m.Detail);
             var meta = Text(string.Join(" · ", facts), 11.5, "Text3");
             meta.Margin = new Thickness(18, 1, 0, 0);

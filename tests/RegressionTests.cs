@@ -69,6 +69,7 @@ namespace AIMeter
             PlanTests.Register(Test);
             UpdateTests.Register(Test);
             ValueTests.Register(Test);
+            LocalMemoryTests.Register(Test);
             LogoTests.Register(Test);
             TouchTests.Register(Test);
             FullScreenTests.Register(Test);

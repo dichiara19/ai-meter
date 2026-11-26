@@ -27,6 +27,8 @@ namespace AIMeter
         private Dictionary<uint, uint> parents = new Dictionary<uint, uint>();
         private readonly CodingAgents agents;
         private readonly HashSet<int> swapPorts = new HashSet<int>();   // Ports of the llama-server instances started by llama-swap.
+        private readonly Dictionary<int, uint> wslServers = new Dictionary<int, uint>();        // Port to the process serving it in WSL.
+        private readonly Dictionary<int, DateTime> wslMisses = new Dictionary<int, DateTime>();   // Ports whose process was not found, and when.
 
         /// <summary>Programs that host a model server, and the default ports of the most common servers.</summary>
         private static readonly string[] KnownProcesses = { "ollama", "llama-server", "llama-swap", "lm studio", "llmster", "koboldcpp", "local-ai", "localai", "vllm" };
@@ -53,7 +55,7 @@ namespace AIMeter
         {
             Discover(p);
             var models = new List<LocalModel>();
-            bool running = false;
+            bool running = false, runningInWsl = false;
             swapPorts.Clear();
             // llama-swap first: the llama-server instances it starts must not be counted a second time.
             foreach (var srv in servers.Values.OrderBy(x => x.Kind == "llamaswap" ? 0 : 1).ToList())
@@ -69,16 +71,27 @@ namespace AIMeter
                 }
                 srv.Failures = 0;
                 running = true;
-                foreach (var m in found) { m.Where = srv.Where; if (m.Server == null) m.Server = ServerName(srv.Kind); }
+                if (srv.Where == "WSL") runningInWsl = true;
+                foreach (var m in found)
+                {
+                    m.Where = srv.Where;
+                    if (m.Server == null) m.Server = ServerName(srv.Kind);
+                    // A llama-swap model is held by its own server; while that one's port is unknown, so is its process.
+                    if (m.Port == 0 && srv.Kind != "llamaswap") m.Port = srv.Port;
+                }
                 if (srv.Kind == "ollama" && srv.Where == "Windows") OllamaActivity(p, found);
                 AttachMemory(p, srv, found);
                 models.AddRange(found);
             }
+            AttachWslMemory(p, models);
             ShareWslMemory(p, models);
 
             var st = new ProviderState { Id = "local", Name = L.T("Local models"), Models = models, Running = running };
             // GPU counters are read here, on the collection thread, and only when a server is active.
             if (running) { st.GpuTotal = GpuMemory.Total; st.GpuUsed = st.GpuTotal > 0 ? GpuMemory.Used : 0; }
+            if (running) HostMemory.Windows(out st.RamUsed, out st.RamTotal);
+            if (runningInWsl && p.WslUp && HostMemory.Wsl(p.WslRoot, out st.WslUsed, out st.WslTotal))
+                st.WslHeld = WorkingSet(p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem").Select(kv => kv.Key));
             if (S.LocalAgents)
             {
                 // CLI sessions belong under the model they use, if it is loaded here.
@@ -368,6 +381,8 @@ namespace AIMeter
                 Detail = JPath.Truthy(JPath.Get(props, "is_sleeping")) ? L.T("sleeping") : JPath.Str(JPath.Get(props, "model_ftype")),
                 Context = (int)(JPath.Num(JPath.Get(props, "default_generation_settings.n_ctx")) ?? 0),
                 Slots = (int)(JPath.Num(JPath.Get(props, "total_slots")) ?? 0),
+                Port = port,
+                File = JPath.Str(JPath.Get(props, "model_path")),
             };
             if (JPath.Get(props, "endpoint_slots") is bool && !(bool)JPath.Get(props, "endpoint_slots")) return m;
             var slots = Get(port, slotsPath) as IList;
@@ -428,7 +443,7 @@ namespace AIMeter
                 int target = proxy.Success ? int.Parse(proxy.Groups[2].Value, CultureInfo.InvariantCulture) : 0;
                 if (target > 0) swapPorts.Add(target);
                 if (state == "ready" && target > 0) m = LlamaCpp(target, "/props", "/slots");
-                if (m == null) m = new LocalModel();
+                if (m == null) m = new LocalModel { Port = target };
                 m.Name = JPath.Str(JPath.Get(x, "name")) ?? id;
                 m.Server = "llama-swap";
                 if (state == "starting") m.Detail = L.T("loading");
@@ -507,31 +522,80 @@ namespace AIMeter
         }
 
         // ================================================================ memory
-        /// <summary>Video and system memory of servers on Windows, from process counters (when the server does not report it).</summary>
+        /// <summary>
+        /// Video and system memory of the models of a server on Windows, from the counters of the process that holds
+        /// each one, when the server reports neither. A process holding several models cannot be split between them.
+        /// </summary>
         private void AttachMemory(Probe p, Server s, List<LocalModel> models)
         {
-            if (s.Where != "Windows" || models.Count == 0 || models.Any(m => m.Vram > 0)) return;
-            // The server and the processes it started (llama-swap's llama-server, LM Studio engines).
-            var pids = new HashSet<uint> { s.Pid };
-            bool grew = true;
-            while (grew)
-            {
-                grew = false;
-                foreach (var kv in parents) if (pids.Contains(kv.Value) && pids.Add(kv.Key)) grew = true;
-            }
-            if (s.Kind == "lmstudio") foreach (var kv in p.Procs) if (kv.Value == "lm studio.exe") pids.Add(kv.Key);
-            long vram = 0, ram = 0;
+            if (s.Where != "Windows") return;
             var gpu = GpuMemory.ByProcess;
+            foreach (var m in AloneOnPort(models))
+            {
+                if (m.Vram > 0 || m.Ram > 0) continue;   // The server's own figures stand.
+                uint holder = s.Pid;
+                if (m.Port != s.Port && !winPorts.TryGetValue(m.Port, out holder)) continue;
+                // The process and those it started (llama-swap's llama-server, LM Studio engines).
+                var pids = new HashSet<uint> { holder };
+                bool grew = true;
+                while (grew)
+                {
+                    grew = false;
+                    foreach (var kv in parents) if (pids.Contains(kv.Value) && pids.Add(kv.Key)) grew = true;
+                }
+                if (s.Kind == "lmstudio") foreach (var kv in p.Procs) if (kv.Value == "lm studio.exe") pids.Add(kv.Key);
+                long vram = 0, v;
+                foreach (var pid in pids) if (gpu.TryGetValue(pid, out v)) vram += v;
+                m.Vram = vram;
+                if (s.Kind != "lmstudio") m.Ram = WorkingSet(pids);   // The Electron app's RAM does not belong to the model.
+            }
+        }
+
+        /// <summary>The models that are the only one on their port: the memory of that port's process is theirs.</summary>
+        private static List<LocalModel> AloneOnPort(IEnumerable<LocalModel> models)
+        {
+            return models.Where(m => m.Port > 0).GroupBy(m => m.Port).Where(g => g.Count() == 1).Select(g => g.First()).ToList();
+        }
+
+        /// <summary>Memory the processes hold in RAM (working set); those that have ended count nothing.</summary>
+        private static long WorkingSet(IEnumerable<uint> pids)
+        {
+            long total = 0;
             foreach (var pid in pids)
             {
-                long v;
-                if (gpu.TryGetValue(pid, out v)) vram += v;
-                if (s.Kind == "lmstudio") continue;   // The Electron app's RAM does not belong to the model.
-                try { using (var proc = Process.GetProcessById((int)pid)) ram += proc.WorkingSet64; }
+                try { using (var process = Process.GetProcessById((int)pid)) total += process.WorkingSet64; }
                 catch (ArgumentException) { }
                 catch (InvalidOperationException) { }
             }
-            if (models.Count == 1) { models[0].Vram = vram; if (models[0].Ram == 0 && vram == 0) models[0].Ram = ram; }
+            return total;
+        }
+
+        /// <summary>
+        /// System memory of the models in WSL whose server reports none: the resident memory of the process serving
+        /// each one, read from /proc as a file. /proc is listed only to find a process, and not again for a port that
+        /// had none until a minute has passed (five on battery).
+        /// </summary>
+        private void AttachWslMemory(Probe p, List<LocalModel> models)
+        {
+            var unknown = AloneOnPort(models.Where(m => m.Where == "WSL")).Where(m => m.Vram == 0 && m.Ram == 0).ToList();
+            foreach (var port in wslServers.Keys.Where(k => unknown.All(m => m.Port != k)).ToList()) wslServers.Remove(port);
+            foreach (var port in wslMisses.Keys.Where(k => unknown.All(m => m.Port != k)).ToList()) wslMisses.Remove(port);
+            if (!p.WslUp) return;
+            foreach (var m in unknown)
+            {
+                uint pid;
+                if (wslServers.TryGetValue(m.Port, out pid) && !HostMemory.Serves(HostMemory.CommandLine(p.WslRoot, pid), m.Port, m.File)) wslServers.Remove(m.Port);
+                if (!wslServers.TryGetValue(m.Port, out pid))
+                {
+                    DateTime missedAt;
+                    if (wslMisses.TryGetValue(m.Port, out missedAt) && (DateTime.Now - missedAt).TotalSeconds < (p.SavingPower ? 300 : 60)) continue;
+                    pid = HostMemory.FindServer(p.WslRoot, m.Port, m.File);
+                    if (pid == 0) { wslMisses[m.Port] = DateTime.Now; continue; }
+                    wslMisses.Remove(m.Port);
+                    wslServers[m.Port] = pid;
+                }
+                m.Ram = HostMemory.Resident(p.WslRoot, pid);
+            }
         }
 
         /// <summary>

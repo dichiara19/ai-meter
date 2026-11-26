@@ -250,8 +250,37 @@ namespace AIMeter
             if (p.Models == null || p.Models.Count == 0) return L.T("Local models: none loaded");
             var lines = new List<string> { L.N(p.Models.Count, "{0} local model loaded", "{0} local models loaded") };
             foreach (var m in p.Models) lines.Add("• " + m.Name + " · " + string.Join(" · ", LocalFacts(m)));
-            if (p.GpuTotal > 0) lines.Add(L.F("Video memory: {0}", GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long)));
+            lines.AddRange(LocalMemoryLines(p));
             return string.Join("\n", lines);
+        }
+
+        /// <summary>The memories local models live in, one line each: the card, this PC and the WSL virtual machine.</summary>
+        public static List<string> LocalMemoryLines(ProviderState p)
+        {
+            var lines = new List<string>();
+            if (p.GpuTotal > 0) lines.Add(L.F("Video memory: {0}", GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long)));
+            if (p.RamTotal > 0) lines.Add(SystemMemoryLines(p)[0]);
+            if (p.WslTotal > 0) lines.Add(WslMemoryLines(p)[0]);
+            return lines;
+        }
+
+        /// <summary>System memory of this PC, then how much of it the local models hold, wherever they run.</summary>
+        public static List<string> SystemMemoryLines(ProviderState p)
+        {
+            var lines = new List<string> { L.F("System memory: {0}", GpuMemory.Value(p.RamUsed, p.RamTotal, ValueStyle.Long)) };
+            long models = p.Models.Sum(m => m.Ram);
+            if (models > 0) lines.Add(L.F("Local models: {0}", GpuMemory.Format(models)));
+            return lines;
+        }
+
+        /// <summary>Memory inside WSL, then what its models hold and what the virtual machine holds on Windows.</summary>
+        public static List<string> WslMemoryLines(ProviderState p)
+        {
+            var lines = new List<string> { L.F("WSL memory: {0}", GpuMemory.Value(p.WslUsed, p.WslTotal, ValueStyle.Long)) };
+            long models = p.Models.Where(m => m.Where == "WSL").Sum(m => m.Ram);
+            if (models > 0) lines.Add(L.F("Local models: {0}", GpuMemory.Format(models)));
+            if (p.WslHeld > 0) lines.Add(L.F("Held on Windows: {0}", GpuMemory.Format(p.WslHeld)));
+            return lines;
         }
 
         /// <summary>Format a local model's server, location, memory and context for compact card text.</summary>
