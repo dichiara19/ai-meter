@@ -14,6 +14,8 @@ namespace AIMeter
             test("Memory figures of /proc are read in bytes, and a missing one is unknown", ReadsProcFields);
             test("A model's system memory is stated inside the PC's and WSL's totals", MemoryLines);
             test("Each memory's bar is split into what holds it, and WSL's share is part of the PC's", MemoryParts);
+            test("A model partly on disk, in swap or shared with the card says so, with how each figure is known", Placement);
+            test("What WSL uses outside RAM is stated only when it is worth it", OutsideRam);
             test("Every supported language words system and WSL memory", Translations);
         }
 
@@ -63,9 +65,25 @@ namespace AIMeter
             string root = Path.Combine(Settings.TestFolder, "wsl-meminfo");
             Directory.CreateDirectory(Path.Combine(root, "proc"));
             long used, total;
-            Assert(!HostMemory.Wsl(root, out used, out total) && used == 0 && total == 0, "A distribution without meminfo gave figures.");
-            File.WriteAllText(Path.Combine(root, "proc", "meminfo"), "MemTotal:       16000000 kB\nMemFree:         1000000 kB\nMemAvailable:    4000000 kB\n");
-            Assert(HostMemory.Wsl(root, out used, out total) && total == 16000000L * 1024 && used == 12000000L * 1024, "Memory in use in WSL is not the total less what is available.");
+            Assert(HostMemory.Wsl(root) == null, "A distribution without meminfo gave figures.");
+            File.WriteAllText(Path.Combine(root, "proc", "meminfo"), "MemTotal:       16000000 kB\nMemFree:         1000000 kB\nMemAvailable:    4000000 kB\nSwapTotal:       8000000 kB\nSwapFree:        5000000 kB\n");
+            var wsl = HostMemory.Wsl(root);
+            Assert(wsl.Total == 16000000L * 1024 && wsl.Used == 12000000L * 1024, "Memory in use in WSL is not the total less what is available.");
+            Assert(wsl.Touched == 15000000L * 1024 && wsl.SwapUsed == 3000000L * 1024 && wsl.SwapTotal == 8000000L * 1024, "What WSL asked Windows for, or its swap, was not read.");
+
+            // A process: resident memory, the part mapped from files and what was swapped out.
+            Directory.CreateDirectory(Path.Combine(root, "proc", "7"));
+            File.WriteAllText(Path.Combine(root, "proc", "7", "status"), "VmRSS:\t 9000 kB\nRssAnon:\t 6000 kB\nRssFile:\t 3000 kB\nVmSwap:\t 500 kB\n");
+            var process = HostMemory.Process(root, 7);
+            Assert(process.Resident == 9000L * 1024 && process.Mapped == 3000L * 1024 && process.Swapped == 500L * 1024, "A process's memory was not split.");
+            Assert(HostMemory.Process(root, 8).Resident == 0, "A process that ended gave figures.");
+
+            // A model file, as its server names it: under the WSL root for a Linux path, never outside it.
+            Directory.CreateDirectory(Path.Combine(root, "models"));
+            File.WriteAllBytes(Path.Combine(root, "models", "m.gguf"), new byte[1234]);
+            Assert(HostMemory.FileSize("/models/m.gguf", root) == 1234 && HostMemory.FileSize(Path.Combine(root, "models", "m.gguf"), null) == 1234, "A model file's size was not read.");
+            Assert(HostMemory.FileSize("/models/../models/m.gguf", root) == 0 && HostMemory.FileSize("models/m.gguf", root) == 0 && HostMemory.FileSize("m.gguf", null) == 0
+                && HostMemory.FileSize("/models/none.gguf", root) == 0 && HostMemory.FileSize(null, root) == 0, "A path that is relative, climbs or names nothing gave a size.");
 
             // This PC's own memory, from Windows: more than a gigabyte, and some of it in use.
             Assert(HostMemory.Windows(out used, out total) && total > (1L << 30) && used > 0 && used < total, "Windows did not report this PC's memory.");
@@ -141,9 +159,64 @@ namespace AIMeter
             Assert(segments.Children.Count == 5 && room.Background == null && room.BorderThickness.Left == 1, "WSL's room is drawn as memory in use.");
         }
 
+        private static void Placement()
+        {
+            long gb = 1L << 30;
+            // A 20 GB file: 8 GB in video memory, 6 GB in system memory (4 of them mapped from the file), so 6 GB still on disk.
+            var m = new LocalModel
+            {
+                Name = "a", Server = "llama.cpp", Where = "WSL", Vram = 8 * gb, Ram = 6 * gb, RamMapped = 4 * gb, FileSize = 20 * gb, Swapped = gb, GpuShared = 2 * gb,
+                VramOrigin = MemoryOrigin.Measured, RamOrigin = MemoryOrigin.Reported,
+            };
+            Assert(m.OnDisk == 6 * gb, "What is neither in video nor in system memory is not on disk.");
+            var facts = Ui.LocalFacts(m);
+            Assert(facts.Contains("~6.0 GB on disk") && facts.Contains("1.0 GB in swap"), "The facts do not say what is on disk and in swap.");
+            Assert(Ui.LocalPlacement(m).SequenceEqual(new[]
+            {
+                "Video memory: 8.0 GB, measured from the process", "System memory: 6.0 GB, reported by the server", "Mapped from files: 4.0 GB",
+                "Shared with the graphics card: 2.0 GB", "In swap: 1.0 GB", "Model file: 20 GB", "Still on disk: about 6.0 GB (estimate)",
+            }), "The placement does not state each figure with how it is known.");
+            Assert(Ui.PlacementParts(m).Select(x => x.Bytes / gb).SequenceEqual(new long[] { 8, 6, 7 }) && Ui.PlacementParts(m)[2].Room, "The model's bar is not video memory, system memory, then what is outside memory.");
+            Assert(Ui.PlacementParts(m).Select(x => x.Name).SequenceEqual(new[] { "8.0 GB VRAM", "6.0 GB RAM", "~6.0 GB on disk · 1.0 GB in swap" }), "The bar's legend does not state each place.");
+            Assert(Ui.LocalFacts(m, false).SequenceEqual(new[] { "llama.cpp (WSL)" }), "The facts repeat the memory the bar's legend states.");
+            // In system memory and on disk only: the legend still names each part by its own figure.
+            var onHost = new LocalModel { Name = "c", Server = "x", Where = "Windows", Ram = 4 * gb, FileSize = 9 * gb };
+            Assert(Ui.PlacementParts(onHost).Select(x => x.Name).SequenceEqual(new[] { null, "4.0 GB RAM", "~5.0 GB on disk" }), "A model without video memory names its parts wrongly.");
+
+            // More in memory than the file holds (a second copy of the weights): nothing is on disk, never a negative figure.
+            m.Ram = 14 * gb;
+            Assert(m.OnDisk == 0 && !Ui.LocalFacts(m).Any(f => f.Contains("on disk")), "A model larger in memory than its file is stated as on disk.");
+            // Unknown memory, or an unknown file: no estimate at all.
+            Assert(new LocalModel { FileSize = 20 * gb }.OnDisk == 0 && new LocalModel { Vram = 8 * gb }.OnDisk == 0, "An estimate was made from an unknown figure.");
+            // A few megabytes are noise, not a place.
+            var small = new LocalModel { Name = "b", Server = "x", Where = "Windows", Vram = 8 * gb, FileSize = 8 * gb + (100L << 20), Swapped = 10L << 20, VramOrigin = MemoryOrigin.Unknown };
+            Assert(Ui.LocalFacts(small).Count == 2 && Ui.LocalPlacement(small).SequenceEqual(new[] { "Video memory: 8.0 GB", "Model file: 8.1 GB" }), "Noise was stated, or a figure of unknown origin was given one.");
+            Assert(Ui.PlacementParts(small).Count(x => x.Bytes > 0) == 1, "A model in one memory gets a bar of several parts.");
+        }
+
+        private static void OutsideRam()
+        {
+            long gb = 1L << 30;
+            var p = new ProviderState { Id = "local", WslTotal = 16 * gb, WslUsed = 14 * gb, WslTouched = 15 * gb, WslHeld = 5 * gb, WslSwapUsed = 3 * gb, Models = new List<LocalModel>() };
+            Assert(p.WslOutside == 10 * gb, "What WSL uses outside RAM is not what it asked for less what the machine holds.");
+            Assert(Ui.WslOutsideNotes(p).SequenceEqual(new[] { "~10 GB compressed or paged out by Windows", "3.0 GB in swap" }), "WSL's memory outside RAM is not stated.");
+            Assert(Ui.WslMemoryLines(p).Contains("~10 GB compressed or paged out by Windows"), "The tooltip lacks WSL's memory outside RAM.");
+
+            // The usual case: the machine holds what Linux asked for, give or take, and nothing is said.
+            p.WslHeld = 15 * gb - (900L << 20);
+            p.WslSwapUsed = 0;
+            Assert(Ui.WslOutsideNotes(p).Count == 0, "A rounding difference was stated as memory paged out.");
+            p.WslHeld = 16 * gb;
+            Assert(p.WslOutside == 0, "A machine holding more than Linux asked for gave a negative figure.");
+            p.WslHeld = 0;
+            Assert(p.WslOutside == 0, "An estimate was made without knowing what the machine holds.");
+        }
+
         private static void Translations()
         {
-            var keys = new[] { "System memory", "System memory: {0}", "Inside WSL", "WSL memory: {0}", "Local models: {0}", "Held on Windows: {0}", "models {0}" };
+            var keys = new[] { "System memory", "System memory: {0}", "Inside WSL", "WSL memory: {0}", "Local models: {0}", "Held on Windows: {0}", "models {0}",
+                "~{0} on disk", "{0} in swap", "Mapped from files: {0}", "Shared with the graphics card: {0}", "In swap: {0}", "Model file: {0}",
+                "Still on disk: about {0} (estimate)", "{0}, reported by the server", "{0}, measured from the process", "~{0} compressed or paged out by Windows" };
             try
             {
                 foreach (var lang in new[] { "it", "es", "fr", "de", "pt" })

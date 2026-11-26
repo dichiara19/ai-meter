@@ -1113,6 +1113,12 @@ namespace AIMeter
             return list;
         }
 
+        /// <summary>How a memory figure is known, in the answer's words; "unknown" for a figure whose source was not recorded.</summary>
+        private static string Origin(MemoryOrigin origin)
+        {
+            return origin == MemoryOrigin.Reported ? "reported" : origin == MemoryOrigin.Measured ? "measured" : origin == MemoryOrigin.Estimated ? "estimated" : "unknown";
+        }
+
         private static List<object> LocalModels(IEnumerable<ProviderState> providers)
         {
             var list = new List<object>();
@@ -1121,8 +1127,13 @@ namespace AIMeter
                 {
                     var d = new Dictionary<string, object> { { "name", m.Name }, { "server", m.Server }, { "where", m.Where } };
                     if (m.Detail != null) d["detail"] = m.Detail;
-                    if (m.Vram > 0) d["gpu_memory_bytes"] = m.Vram;
-                    if (m.Ram > 0) d["memory_bytes"] = m.Ram;
+                    if (m.Vram > 0) { d["gpu_memory_bytes"] = m.Vram; d["gpu_memory_origin"] = Origin(m.VramOrigin); }
+                    if (m.Ram > 0) { d["memory_bytes"] = m.Ram; d["memory_origin"] = Origin(m.RamOrigin); }
+                    if (m.RamMapped > 0) d["memory_mapped_bytes"] = m.RamMapped;
+                    if (m.GpuShared > 0) d["gpu_shared_bytes"] = m.GpuShared;
+                    if (m.Swapped > 0) d["swapped_bytes"] = m.Swapped;
+                    if (m.FileSize > 0) d["file_bytes"] = m.FileSize;
+                    if (m.FileSize > 0 && m.Vram + m.Ram > 0) d["on_disk_bytes_estimate"] = m.OnDisk;
                     if (m.Context > 0) d["context_tokens"] = m.Context;
                     if (m.Slots > 0) { d["busy_requests"] = m.Busy; d["slots"] = m.Slots; }
                     list.Add(d);

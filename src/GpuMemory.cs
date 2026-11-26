@@ -14,14 +14,21 @@ namespace AIMeter
     /// </summary>
     internal static class GpuMemory
     {
-        private static IntPtr query, counter;
+        private static IntPtr query, counter, sharedCounter;
         private static DateTime readAt = DateTime.MinValue;
         private static Dictionary<uint, long> byPid = new Dictionary<uint, long>();
+        private static Dictionary<uint, long> sharedByPid = new Dictionary<uint, long>();
         private static long used;
         private static long total = -1;
 
         /// <summary>Video memory in use per process (bytes), read at most every 15 seconds.</summary>
         public static Dictionary<uint, long> ByProcess { get { Refresh(); return byPid; } }
+
+        /// <summary>
+        /// System memory each process shares with a graphics card (bytes): memory the card reads in place, or what did
+        /// not fit in video memory. A driver can report a nonsense figure for a process: the caller bounds it.
+        /// </summary>
+        public static Dictionary<uint, long> SharedByProcess { get { Refresh(); return sharedByPid; } }
 
         /// <summary>Video memory in use across the whole primary card (bytes).</summary>
         public static long Used { get { Refresh(); return used; } }
@@ -62,35 +69,46 @@ namespace AIMeter
                 {
                     if (PdhOpenQuery(null, IntPtr.Zero, out query) != 0) { query = IntPtr.Zero; return; }
                     if (PdhAddEnglishCounter(query, @"\GPU Process Memory(*)\Dedicated Usage", IntPtr.Zero, out counter) != 0) return;
+                    // Without this counter only the shared figures are missing.
+                    if (PdhAddEnglishCounter(query, @"\GPU Process Memory(*)\Shared Usage", IntPtr.Zero, out sharedCounter) != 0) sharedCounter = IntPtr.Zero;
                 }
                 if (PdhCollectQueryData(query) != 0) return;
-                uint size = 0, count;
-                PdhGetRawCounterArray(counter, ref size, out count, IntPtr.Zero);
-                if (size == 0) return;
-                IntPtr buf = Marshal.AllocHGlobal((int)size);
-                try
-                {
-                    if (PdhGetRawCounterArray(counter, ref size, out count, buf) != 0) return;
-                    int step = Marshal.SizeOf(typeof(RawItem));
-                    for (int k = 0; k < count; k++)
-                    {
-                        var item = (RawItem)Marshal.PtrToStructure(buf + k * step, typeof(RawItem));
-                        string name = Marshal.PtrToStringUni(item.Name) ?? "";   // pid_1234_luid_0x…_phys_0[#n]
-                        int us = name.IndexOf('_', 4);
-                        uint pid;
-                        if (!name.StartsWith("pid_", StringComparison.OrdinalIgnoreCase) || us < 0 || !uint.TryParse(name.Substring(4, us - 4), out pid)) continue;
-                        long v;
-                        map.TryGetValue(pid, out v);
-                        map[pid] = v + item.Raw.First;
-                    }
-                }
-                finally { Marshal.FreeHGlobal(buf); }
+                map = ReadByProcess(counter);
+                sharedByPid = sharedCounter == IntPtr.Zero ? new Dictionary<uint, long>() : ReadByProcess(sharedCounter);
                 // Card usage: the sum of the processes (overestimates memory shared between processes).
-                used = Math.Min(map.Values.Sum(), Total > 0 ? Total : long.MaxValue);
+                if (map.Count > 0) used = Math.Min(map.Values.Sum(), Total > 0 ? Total : long.MaxValue);
             }
             catch (DllNotFoundException) { }
             catch (EntryPointNotFoundException) { }
             finally { if (map.Count > 0) byPid = map; }
+        }
+
+        /// <summary>One counter of "GPU Process Memory" summed per process over its cards; empty when it cannot be read.</summary>
+        private static Dictionary<uint, long> ReadByProcess(IntPtr handle)
+        {
+            var map = new Dictionary<uint, long>();
+            uint size = 0, count;
+            PdhGetRawCounterArray(handle, ref size, out count, IntPtr.Zero);
+            if (size == 0) return map;
+            IntPtr buf = Marshal.AllocHGlobal((int)size);
+            try
+            {
+                if (PdhGetRawCounterArray(handle, ref size, out count, buf) != 0) return map;
+                int step = Marshal.SizeOf(typeof(RawItem));
+                for (int k = 0; k < count; k++)
+                {
+                    var item = (RawItem)Marshal.PtrToStructure(buf + k * step, typeof(RawItem));
+                    string name = Marshal.PtrToStringUni(item.Name) ?? "";   // pid_1234_luid_0x…_phys_0[#n]
+                    int us = name.IndexOf('_', 4);
+                    uint pid;
+                    if (!name.StartsWith("pid_", StringComparison.OrdinalIgnoreCase) || us < 0 || !uint.TryParse(name.Substring(4, us - 4), out pid)) continue;
+                    long v;
+                    map.TryGetValue(pid, out v);
+                    map[pid] = v + item.Raw.First;
+                }
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+            return map;
         }
         /// <summary>From the video driver configuration (the same source as System Information).</summary>
         private static long ReadTotal()

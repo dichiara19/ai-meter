@@ -205,6 +205,14 @@ namespace AIMeter
         /// use and the total (its ceiling) as Linux sees them. Bytes; zero means unknown.
         /// </summary>
         public long WslUsed, WslTotal, WslHeld;
+        public long WslTouched;                 // Memory Linux has asked Windows for: its total less what it never used.
+        public long WslSwapUsed, WslSwapTotal;   // Swap inside WSL.
+
+        /// <summary>
+        /// An estimate of the memory WSL uses that Windows no longer keeps in RAM, compressed or paged out: what Linux
+        /// has asked for, less what the virtual machine holds. Zero when either is unknown.
+        /// </summary>
+        public long WslOutside { get { return WslTouched > 0 && WslHeld > 0 ? Math.Max(0, WslTouched - WslHeld) : 0; } }
         public Tip Tip;           // Active tip, evaluated for each snapshot.
         /// <summary>Lists models only, with no readable usage or limits (ServiceDefinition.CatalogueOnly): for AI apps, not for surfaces.</summary>
         public bool CatalogueOnly;
@@ -217,6 +225,12 @@ namespace AIMeter
     }
 
     /// <summary>A model loaded by a local server on Windows or WSL.</summary>
+    /// <summary>
+    /// How a memory figure is known (ADR 0006): what the server says of itself, what the system counts for its process,
+    /// or an estimate of AI Meter's own.
+    /// </summary>
+    internal enum MemoryOrigin { Unknown, Reported, Measured, Estimated }
+
     internal sealed class LocalModel
     {
         public string Name;
@@ -224,6 +238,11 @@ namespace AIMeter
         public string Where;       // "Windows" or "WSL".
         public string Detail;      // Parameter count and quantisation, when known.
         public long Vram, Ram;     // GPU and system memory in bytes; zero means unknown.
+        public MemoryOrigin VramOrigin, RamOrigin;
+        public long RamMapped;     // The part of Ram mapped from files, such as a model file its server maps; zero means none or unknown.
+        public long Swapped;       // Memory of its process moved to swap; zero means none or unknown.
+        public long GpuShared;     // System memory its process shares with the graphics card; zero means none or unknown.
+        public long FileSize;      // Size of the model file; zero means unknown.
         public int Context;        // Loaded context size in tokens; zero means unknown.
         public int ContextUsed;    // Tokens in the largest active request; zero means unknown.
         public int Busy, Slots;    // Active requests and available slots; zero means unknown.
@@ -232,6 +251,12 @@ namespace AIMeter
         public List<Session> Sessions = new List<Session>();   // CLI sessions using this model.
 
         public string Key { get { return Server + "|" + Where + "|" + Name; } }
+
+        /// <summary>
+        /// An estimate of what is still only on disk: the model file less what is in video and system memory. Zero when
+        /// either is unknown, and for a server that keeps more than one copy of the weights in memory.
+        /// </summary>
+        public long OnDisk { get { return FileSize > 0 && Vram + Ram > 0 ? Math.Max(0, FileSize - Vram - Ram) : 0; } }
     }
 
     internal sealed class Snapshot
@@ -264,11 +289,11 @@ namespace AIMeter
                 }
                 if (p.Catalogue != null) foreach (var m in p.Catalogue.Models) sb.Append(m.Id).Append(m.Expires);
                 foreach (var s in p.Sessions) sb.Append(s.Kind).Append(s.Title).Append(s.Status).Append(s.Model).Append(s.Note);
-                if (p.Models != null) sb.Append(p.GpuUsed >> 28).Append(p.RamUsed >> 28).Append(p.WslUsed >> 28).Append(p.WslHeld >> 28);
+                if (p.Models != null) sb.Append(p.GpuUsed >> 28).Append(p.RamUsed >> 28).Append(p.WslUsed >> 28).Append(p.WslHeld >> 28).Append(p.WslSwapUsed >> 28);
                 if (p.Models != null)
                     foreach (var m in p.Models)
                     {
-                        sb.Append(m.Key).Append(m.Vram >> 26).Append(m.Ram >> 26).Append(m.Context).Append(m.ContextUsed >> 10).Append(m.Busy);
+                        sb.Append(m.Key).Append(m.Vram >> 26).Append(m.Ram >> 26).Append(m.Swapped >> 26).Append(m.FileSize >> 26).Append(m.Context).Append(m.ContextUsed >> 10).Append(m.Busy);
                         foreach (var s in m.Sessions) sb.Append(s.Title).Append(s.Status);
                     }
             }

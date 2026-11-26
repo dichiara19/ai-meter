@@ -36,24 +36,67 @@ namespace AIMeter
             return true;
         }
 
-        /// <summary>
-        /// Memory of the WSL virtual machine as Linux sees it: its total, and what is not available to a new program.
-        /// False when /proc/meminfo cannot be read.
-        /// </summary>
-        public static bool Wsl(string root, out long used, out long total)
+        /// <summary>Memory of the WSL virtual machine as Linux sees it.</summary>
+        internal sealed class WslMemory
+        {
+            public long Total;       // The machine's ceiling.
+            public long Used;        // What is not available to a new program.
+            public long Touched;     // What Linux has asked Windows for: the total less what it never used or gave back.
+            public long SwapUsed, SwapTotal;
+        }
+
+        /// <summary>The memory of the WSL virtual machine, or null when /proc/meminfo cannot be read.</summary>
+        public static WslMemory Wsl(string root)
         {
             string text = ReadText(root + @"\proc\meminfo");
-            total = Field(text, "MemTotal");
-            long available = Field(text, "MemAvailable");
-            used = total > 0 && available >= 0 ? Math.Max(0, total - available) : 0;
-            if (total <= 0 || available < 0) { total = 0; return false; }
-            return true;
+            long total = Field(text, "MemTotal"), available = Field(text, "MemAvailable"), free = Field(text, "MemFree");
+            if (total <= 0 || available < 0) return null;
+            long swapTotal = Math.Max(0, Field(text, "SwapTotal")), swapFree = Math.Max(0, Field(text, "SwapFree"));
+            return new WslMemory
+            {
+                Total = total, Used = Math.Max(0, total - available), Touched = free < 0 ? 0 : Math.Max(0, total - free),
+                SwapTotal = swapTotal, SwapUsed = Math.Max(0, swapTotal - swapFree),
+            };
+        }
+
+        /// <summary>Memory of a process in WSL: what is resident, the part of it mapped from files, and what was swapped out.</summary>
+        internal sealed class ProcessMemory { public long Resident, Mapped, Swapped; }
+
+        /// <summary>The memory of a process in WSL; all zero when it is gone or is a kernel thread.</summary>
+        public static ProcessMemory Process(string root, uint pid)
+        {
+            string text = ReadText(ProcessFile(root, pid, "status"));
+            return new ProcessMemory
+            {
+                Resident = Math.Max(0, Field(text, "VmRSS")), Mapped = Math.Max(0, Field(text, "RssFile")), Swapped = Math.Max(0, Field(text, "VmSwap")),
+            };
         }
 
         /// <summary>Resident memory (VmRSS) of a process in WSL, or zero when it is gone or is a kernel thread.</summary>
         public static long Resident(string root, uint pid)
         {
-            return Math.Max(0, Field(ReadText(ProcessFile(root, pid, "status")), "VmRSS"));
+            return Process(root, pid).Resident;
+        }
+
+        /// <summary>
+        /// The size of a model file, named as its server names it: a Windows path, or an absolute Linux path under
+        /// the given WSL root. Zero when the path is not absolute, climbs out of its root or cannot be read.
+        /// </summary>
+        public static long FileSize(string path, string wslRoot)
+        {
+            if (string.IsNullOrEmpty(path)) return 0;
+            bool linux = wslRoot != null;
+            if (linux ? !path.StartsWith("/", StringComparison.Ordinal) : !Path.IsPathRooted(path)) return 0;
+            if (path.Split('/', '\\').Contains("..")) return 0;
+            try
+            {
+                var file = new FileInfo(linux ? wslRoot + path.Replace('/', '\\') : path);
+                return file.Exists ? file.Length : 0;
+            }
+            catch (IOException) { return 0; }
+            catch (UnauthorizedAccessException) { return 0; }
+            catch (ArgumentException) { return 0; }
+            catch (NotSupportedException) { return 0; }
         }
 
         /// <summary>The arguments of a process in WSL; empty when it is gone or is a kernel thread.</summary>

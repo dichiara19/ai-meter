@@ -98,7 +98,46 @@ namespace AIMeter
                 yield return row;
             }
             if (p.WslTotal > 0)
-                yield return MemoryRow(WslLogo(13), L.T("Inside WSL"), p.WslUsed, p.WslTotal, WslMemoryParts(p), 4, WslMemoryLines(p), 18);
+            {
+                var row = MemoryRow(WslLogo(13), L.T("Inside WSL"), p.WslUsed, p.WslTotal, WslMemoryParts(p), 4, WslMemoryLines(p), 18);
+                // Under memory pressure part of what WSL uses is no longer in RAM: said only then.
+                var notes = WslOutsideNotes(p);
+                if (notes.Count > 0)
+                {
+                    var note = Text(string.Join(" · ", notes), 11, "Text3");
+                    note.Margin = new Thickness(0, 3, 0, 0);
+                    note.TextWrapping = TextWrapping.Wrap;
+                    row.Children.Add(note);
+                }
+                yield return row;
+            }
+        }
+
+        /// <summary>Where a model is, in the order of its facts: video memory, system memory, then what is not in memory.</summary>
+        internal static List<MemoryPart> PlacementParts(LocalModel m)
+        {
+            long outside = (m.OnDisk >= WorthStating ? m.OnDisk : 0) + (m.Swapped >= WorthStating ? m.Swapped : 0);
+            var facts = MemoryFacts(m);
+            int inMemory = (m.Vram > 0 ? 1 : 0) + (m.Ram > 0 ? 1 : 0);
+            return new List<MemoryPart>
+            {
+                new MemoryPart { Name = m.Vram > 0 ? facts[0] : null, Bytes = m.Vram, Brush = ModelsBrush },
+                new MemoryPart { Name = m.Ram > 0 ? facts[inMemory - 1] : null, Bytes = m.Ram, Brush = ModelsBrush, Opacity = WslOpacity },
+                new MemoryPart { Name = outside > 0 ? string.Join(" · ", facts.Skip(inMemory)) : null, Bytes = outside, Brush = OtherBrush, Room = true },
+            };
+        }
+
+        /// <summary>
+        /// A model's own bar with its legend, when it is in more than one place; null for a model wholly in one memory.
+        /// </summary>
+        private static FrameworkElement PlacementBar(LocalModel m)
+        {
+            var parts = PlacementParts(m);
+            if (parts.Count(x => x.Bytes > 0) < 2) return null;
+            var placement = new StackPanel { Margin = new Thickness(18, 4, 0, 1) };
+            placement.Children.Add(SegmentedBar(parts, parts.Sum(x => x.Bytes), 4));
+            placement.Children.Add(Legend(parts));
+            return placement;
         }
 
         /// <summary>A memory as a limit reads (free or in use out of the total), over the bar of what holds it.</summary>
@@ -149,7 +188,7 @@ namespace AIMeter
                 Grid.SetColumn(segment, segments.ColumnDefinitions.Count - 1);
                 segments.Children.Add(segment);
             }
-            segments.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(free, 1), GridUnitType.Star) });
+            if (free > 0) segments.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(free, GridUnitType.Star) });
             bar.Children.Add(segments);
             return bar;
         }
@@ -163,7 +202,8 @@ namespace AIMeter
             {
                 var entry = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, part == named[named.Count - 1] ? 0 : 9, 0) };
                 var swatch = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(2), Opacity = part.Opacity, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 4, 0) };
-                swatch.SetResourceReference(Border.BackgroundProperty, part.Brush);
+                if (part.Room) swatch.BorderThickness = new Thickness(1);
+                swatch.SetResourceReference(part.Room ? Border.BorderBrushProperty : Border.BackgroundProperty, part.Brush);
                 entry.Children.Add(swatch);
                 var logo = part.Wsl ? WslLogo(12) : null;
                 if (logo != null)

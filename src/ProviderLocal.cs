@@ -29,6 +29,7 @@ namespace AIMeter
         private readonly HashSet<int> swapPorts = new HashSet<int>();   // Ports of the llama-server instances started by llama-swap.
         private readonly Dictionary<int, uint> wslServers = new Dictionary<int, uint>();        // Port to the process serving it in WSL.
         private readonly Dictionary<int, DateTime> wslMisses = new Dictionary<int, DateTime>();   // Ports whose process was not found, and when.
+        private readonly Dictionary<string, long> fileSizes = new Dictionary<string, long>();    // Model file to its size, while its model is loaded.
 
         /// <summary>Programs that host a model server, and the default ports of the most common servers.</summary>
         private static readonly string[] KnownProcesses = { "ollama", "llama-server", "llama-swap", "lm studio", "llmster", "koboldcpp", "local-ai", "localai", "vllm" };
@@ -84,6 +85,7 @@ namespace AIMeter
             }
             AttachWslMemory(p, models);
             ShareWslMemory(p, models);
+            AttachFileSizes(p, models);
 
             var st = new ProviderState { Id = "local", Name = L.T("Local models"), Models = models, Running = running };
             // GPU counters are read here, on the collection thread, and only when a server is active.
@@ -94,7 +96,12 @@ namespace AIMeter
                 HostMemory.Windows(out st.RamUsed, out st.RamTotal);
                 // What the WSL virtual machine holds is part of the PC's memory in use, whether or not a server runs in it.
                 st.WslHeld = WorkingSet(p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem").Select(kv => kv.Key));
-                if (p.WslUp) HostMemory.Wsl(p.WslRoot, out st.WslUsed, out st.WslTotal);
+                var wsl = p.WslUp ? HostMemory.Wsl(p.WslRoot) : null;
+                if (wsl != null)
+                {
+                    st.WslUsed = wsl.Used; st.WslTotal = wsl.Total; st.WslTouched = wsl.Touched;
+                    st.WslSwapUsed = wsl.SwapUsed; st.WslSwapTotal = wsl.SwapTotal;
+                }
             }
             if (S.LocalAgents)
             {
@@ -306,6 +313,8 @@ namespace AIMeter
                     Name = JPath.Str(JPath.Get(x, "name")) ?? JPath.Str(JPath.Get(x, "model")),
                     Detail = Join(JPath.Str(JPath.Get(x, "details.parameter_size")), JPath.Str(JPath.Get(x, "details.quantization_level"))),
                     Vram = vram, Ram = Math.Max(0, size - vram),
+                    VramOrigin = vram > 0 ? MemoryOrigin.Reported : MemoryOrigin.Unknown,
+                    RamOrigin = size > vram ? MemoryOrigin.Reported : MemoryOrigin.Unknown,
                     Context = (int)(JPath.Num(JPath.Get(x, "context_length")) ?? 0),
                 });
             }
@@ -489,13 +498,19 @@ namespace AIMeter
         {
             var list = JPath.Get(Get(port, "/system"), "loaded_models") as IList;
             if (list == null) return null;
-            return list.Cast<object>().Select(x => new LocalModel
+            var result = list.Cast<object>().Select(x => new LocalModel
             {
                 Name = JPath.Str(JPath.Get(x, "id")),
                 Detail = JPath.Str(JPath.Get(x, "backend")),
                 Vram = (long)(JPath.Num(JPath.Get(x, "size_vram")) ?? 0),
                 Ram = (long)(JPath.Num(JPath.Get(x, "process.rss_bytes")) ?? 0),
             }).ToList();
+            foreach (var m in result)
+            {
+                if (m.Vram > 0) m.VramOrigin = MemoryOrigin.Reported;
+                if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Reported;
+            }
+            return result;
         }
 
         private static List<LocalModel> TextGen(int port)
@@ -534,6 +549,7 @@ namespace AIMeter
         {
             if (s.Where != "Windows") return;
             var gpu = GpuMemory.ByProcess;
+            var shared = GpuMemory.SharedByProcess;
             foreach (var m in AloneOnPort(models))
             {
                 if (m.Vram > 0 || m.Ram > 0) continue;   // The server's own figures stand.
@@ -552,7 +568,44 @@ namespace AIMeter
                 foreach (var pid in pids) if (gpu.TryGetValue(pid, out v)) vram += v;
                 m.Vram = vram;
                 if (s.Kind != "lmstudio") m.Ram = WorkingSet(pids);   // The Electron app's RAM does not belong to the model.
+                if (m.Vram > 0) m.VramOrigin = MemoryOrigin.Measured;
+                if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Measured;
+                m.GpuShared = SharedWithCard(shared, pids, m.Ram);
             }
+        }
+
+        /// <summary>
+        /// System memory the processes share with the graphics card. It is part of their own memory, so a figure larger
+        /// than that is a driver's nonsense and counts as unknown.
+        /// </summary>
+        private static long SharedWithCard(Dictionary<uint, long> shared, IEnumerable<uint> pids, long limit)
+        {
+            long total = 0, v;
+            foreach (var pid in pids) if (shared.TryGetValue(pid, out v)) total += v;
+            return total > 0 && total <= limit ? total : 0;
+        }
+
+        /// <summary>
+        /// The size of each model's file, read once and kept while the model is loaded. With it, what is neither in
+        /// video nor in system memory is known to be still on disk.
+        /// </summary>
+        private void AttachFileSizes(Probe p, List<LocalModel> models)
+        {
+            var seen = new HashSet<string>();
+            foreach (var m in models.Where(x => !string.IsNullOrEmpty(x.File)))
+            {
+                string key = m.Where + "|" + m.File;
+                seen.Add(key);
+                long size;
+                if (!fileSizes.TryGetValue(key, out size))
+                {
+                    if (m.Where == "WSL" && !p.WslUp) continue;
+                    size = HostMemory.FileSize(m.File, m.Where == "WSL" ? p.WslRoot : null);
+                    fileSizes[key] = size;
+                }
+                m.FileSize = size;
+            }
+            foreach (var key in fileSizes.Keys.Where(k => !seen.Contains(k)).ToList()) fileSizes.Remove(key);
         }
 
         /// <summary>The models that are the only one on their port: the memory of that port's process is theirs.</summary>
@@ -598,7 +651,11 @@ namespace AIMeter
                     wslMisses.Remove(m.Port);
                     wslServers[m.Port] = pid;
                 }
-                m.Ram = HostMemory.Resident(p.WslRoot, pid);
+                var memory = HostMemory.Process(p.WslRoot, pid);
+                m.Ram = memory.Resident;
+                m.RamMapped = memory.Mapped;
+                m.Swapped = memory.Swapped;
+                if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Measured;
             }
         }
 
@@ -612,10 +669,11 @@ namespace AIMeter
             if (unknown.Count != 1 || models.Any(m => m.Where == "WSL" && m.Vram > 0)) return;
             long v, total = 0;
             var gpu = GpuMemory.ByProcess;
-            foreach (var kv in p.Procs)
-                if (kv.Value == "vmmemwsl" || kv.Value == "vmmem" || kv.Value == "vmwp.exe")
-                    if (gpu.TryGetValue(kv.Key, out v)) total += v;
+            var machine = p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem" || kv.Value == "vmwp.exe").Select(kv => kv.Key).ToList();
+            foreach (var pid in machine) if (gpu.TryGetValue(pid, out v)) total += v;
             unknown[0].Vram = total;
+            if (total > 0) unknown[0].VramOrigin = MemoryOrigin.Measured;
+            unknown[0].GpuShared = SharedWithCard(GpuMemory.SharedByProcess, machine, unknown[0].Ram);
         }
 
         // ================================================================ local HTTP

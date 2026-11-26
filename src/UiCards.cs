@@ -529,7 +529,11 @@ namespace AIMeter
             top.Children.Add(title);
             block.Children.Add(top);
 
-            var facts = LocalFacts(m).Where(f => !f.Contains("VRAM") || m.Ram > 0).ToList();
+            var placement = PlacementBar(m);
+            if (placement != null) block.Children.Add(placement);
+
+            // The bar's legend already states the memory; a model wholly in video memory has it on the right.
+            var facts = (placement != null ? LocalFacts(m, false) : LocalFacts(m).Where(f => !f.Contains("VRAM") || m.Ram > 0)).ToList();
             if (m.Detail != null) facts.Insert(1, m.Detail);
             var meta = Text(string.Join(" · ", facts), 11.5, "Text3");
             meta.Margin = new Thickness(18, 1, 0, 0);
@@ -545,7 +549,8 @@ namespace AIMeter
                 bar.ToolTip = L.F("Context in use: {0} of {1} tokens", Tokens(m.ContextUsed), Tokens(m.Context));
                 block.Children.Add(bar);
             }
-            block.ToolTip = m.Name + "\n" + string.Join(" · ", LocalFacts(m)) + (m.Slots > 0 ? "\n" + L.F("Requests in progress: {0} of {1}", m.Busy, m.Slots) : "");
+            block.ToolTip = m.Name + "\n" + string.Join(" · ", LocalFacts(m)) + string.Concat(LocalPlacement(m).Select(line => "\n" + line))
+                + (m.Slots > 0 ? "\n" + L.F("Requests in progress: {0} of {1}", m.Busy, m.Slots) : "");
             foreach (var s in m.Sessions.Take(4))
             {
                 var sr = SessionRow(s, "Info");
