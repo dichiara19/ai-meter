@@ -47,6 +47,11 @@ What engines say about their own memory differs widely. Ollama reports the size 
    - An engine with its own interface gets its own kind, read from its own endpoints, even when it also imitates llama-server.
    - A segment AI Meter cannot back with a source is absent, not zero.
 8. **The same data through MCP.** `list_local_models` gains these fields. Nothing existing changes meaning.
+9. **Models that are not text are local models too.**
+   - A server that generates images, audio or video holds the same memories and is shown in the same card, with the memory of its process, for the same reason: it is what fills the graphics card.
+   - It is recognised as a text server is: by an interface of its own, read with requests that start no work, or because a model manager lists it among what it runs (llama-swap names any service it started).
+   - What it makes is stated when the server says so or its kind is known, and left out otherwise. A context window, slots and tokens per second are shown only where they exist.
+   - Whether it is working is read where the server reports it, such as a queue. It is never deduced from how busy the graphics card is, which any other program can cause.
 
 What each source gives, as known today:
 
@@ -72,7 +77,7 @@ What each source gives, as known today:
 
 1. System memory per model on Windows and in WSL, and the WSL totals (decisions 1, 2 in part, 4, 5).
 2. Where the model is: file size, the part on disk, swap, shared GPU memory, reported splits, origins (decisions 2, 3).
-3. Segments and the unknown engine: own kinds, key-value cache, experts, tokens per second (decisions 6, 7).
+3. Segments and the unknown engine: own kinds, key-value cache, experts, tokens per second, servers of images and audio (decisions 6, 7, 9).
 4. MCP fields and warnings on memory pressure (decision 8).
 
 ## Open questions
@@ -81,6 +86,7 @@ What each source gives, as known today:
 - The "Shared Usage" counter of "GPU Process Memory" is expected to show the spill into system memory; it has not been read yet.
 - The cost of listing `/proc` through the WSL share on a busy distribution has not been measured.
 - Reading another process's command line on Windows, and whether the Store build may do it.
+- Which servers of images and audio to recognise by their own interface first, beyond those a model manager lists.
 
 ## Alternatives considered
 
