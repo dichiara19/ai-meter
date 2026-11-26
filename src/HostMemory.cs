@@ -79,18 +79,29 @@ namespace AIMeter
         }
 
         /// <summary>
+        /// Where a file a server names is, as Windows opens it: the path itself, or for an absolute Linux path the same
+        /// under the given WSL root. Null when the path is not absolute or climbs out of its root.
+        /// </summary>
+        public static string ResolveFile(string path, string wslRoot)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            bool linux = wslRoot != null;
+            if (linux ? !path.StartsWith("/", StringComparison.Ordinal) : !Path.IsPathRooted(path)) return null;
+            if (path.Split(new[] { '/', '\\' }).Contains("..")) return null;
+            return linux ? wslRoot + path.Replace('/', '\\') : path;
+        }
+
+        /// <summary>
         /// The size of a model file, named as its server names it: a Windows path, or an absolute Linux path under
         /// the given WSL root. Zero when the path is not absolute, climbs out of its root or cannot be read.
         /// </summary>
         public static long FileSize(string path, string wslRoot)
         {
-            if (string.IsNullOrEmpty(path)) return 0;
-            bool linux = wslRoot != null;
-            if (linux ? !path.StartsWith("/", StringComparison.Ordinal) : !Path.IsPathRooted(path)) return 0;
-            if (path.Split(new[] { '/', '\\' }).Contains("..")) return 0;
+            string resolved = ResolveFile(path, wslRoot);
+            if (resolved == null) return 0;
             try
             {
-                var file = new FileInfo(linux ? wslRoot + path.Replace('/', '\\') : path);
+                var file = new FileInfo(resolved);
                 return file.Exists ? file.Length : 0;
             }
             catch (IOException) { return 0; }

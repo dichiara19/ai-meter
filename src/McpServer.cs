@@ -1127,8 +1127,11 @@ namespace AIMeter
             var cache = new Dictionary<string, object>();
             if (s.KvCapacity > 0) cache["capacity_tokens"] = s.KvCapacity;
             if (!string.IsNullOrEmpty(s.KvType)) cache["type"] = s.KvType;
+            if (s.KvBytes > 0) cache["bytes_estimate"] = s.KvBytes;
             if (cache.Count > 0) d["kv_cache"] = cache;
             var experts = new Dictionary<string, object>();
+            if (s.Experts > 0) experts["count"] = s.Experts;
+            if (s.ExpertsUsed > 0) experts["used_per_token"] = s.ExpertsUsed;
             if (s.ExpertsIn != null) experts["residency"] = s.ExpertsIn;
             if (s.ExpertSlots > 0) experts["device_slots"] = s.ExpertSlots;
             if (s.ExpertHitRatio >= 0) experts["device_hit_ratio"] = Math.Round(s.ExpertHitRatio, 3);

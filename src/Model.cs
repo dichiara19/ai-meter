@@ -241,6 +241,8 @@ namespace AIMeter
         public string Engine;                // The engine's name when it is not the server the model was found on; else null.
         public double TokensPerSecond;       // Average generation speed since the server started; zero means unknown.
         public int KvCapacity;               // Tokens the key-value cache can hold; zero means unknown.
+        public long KvBytes;                 // An estimate of the cache's size from the model file's header; zero means unknown.
+        public int Experts, ExpertsUsed;     // Experts of a mixture of experts and how many each token uses, from the file's header; zero means unknown.
         public string KvType;                // How the cache stores them, as the engine names it; null means unknown.
         public string ExpertsIn;             // "device", "host" or "disk"; null when unknown or not a mixture of experts.
         public int ExpertSlots;              // Experts kept in video memory; zero means none or unknown.
@@ -250,7 +252,7 @@ namespace AIMeter
         /// <summary>Changes when what the card shows of these figures changes.</summary>
         public string Signature
         {
-            get { return Engine + "|" + Math.Round(TokensPerSecond) + "|" + KvCapacity + KvType + ExpertsIn + ExpertSlots + "|" + Math.Round(ExpertHitRatio * 100) + "|" + (ExpertBytesPerSecond >> 24); }
+            get { return Engine + "|" + Math.Round(TokensPerSecond) + "|" + KvCapacity + KvType + ExpertsIn + ExpertSlots + "|" + (KvBytes >> 24) + "|" + Experts + "|" + Math.Round(ExpertHitRatio * 100) + "|" + (ExpertBytesPerSecond >> 24); }
         }
     }
 

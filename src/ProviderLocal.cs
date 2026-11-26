@@ -34,6 +34,7 @@ namespace AIMeter
         private readonly Dictionary<int, NInferEngine.Sample> engineSamples = new Dictionary<int, NInferEngine.Sample>();                    // Port to its engine's last reading.
         private readonly Dictionary<int, Dictionary<string, string>> engineOptions = new Dictionary<int, Dictionary<string, string>>();   // Port to its engine's options.
         private readonly HashSet<int> withoutMetrics = new HashSet<int>();   // Ports of llama-server instances started without --metrics.
+        private readonly Dictionary<string, GgufHeader> headers = new Dictionary<string, GgufHeader>();   // Model file to its header (null when it has none), while its model is loaded.
 
         /// <summary>Programs that host a model server, and the default ports of the most common servers.</summary>
         private static readonly string[] KnownProcesses = { "ollama", "llama-server", "llama-swap", "lm studio", "llmster", "koboldcpp", "local-ai", "localai", "vllm" };
@@ -93,6 +94,7 @@ namespace AIMeter
             ShareWslMemory(p, models);
             AttachFileSizes(p, models);
             AttachSegments(models);
+            AttachHeaders(p, models);
 
             var st = new ProviderState { Id = "local", Name = L.T("Local models"), Models = models, Running = running };
             // GPU counters are read here, on the collection thread, and only when a server is active.
@@ -552,6 +554,44 @@ namespace AIMeter
                     else if (speed > 0) m.Segments = new ModelSegments { TokensPerSecond = speed.Value };
                 }
             }
+        }
+
+        /// <summary>
+        /// What the header of a GGUF model file adds, whatever engine loaded it: whether the model is a mixture of
+        /// experts, and an estimate of the key-value cache's size for the context it was loaded with. The header is
+        /// read once and kept while the model is loaded.
+        /// </summary>
+        private void AttachHeaders(Probe p, List<LocalModel> models)
+        {
+            var seen = new HashSet<string>();
+            foreach (var m in models.Where(x => x.File != null && x.File.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)))
+            {
+                string key = m.Where + "|" + m.File;
+                seen.Add(key);
+                GgufHeader header;
+                if (!headers.TryGetValue(key, out header))
+                {
+                    if (m.Where == "WSL" && !p.WslUp) continue;
+                    string file = HostMemory.ResolveFile(m.File, m.Where == "WSL" ? p.WslRoot : null);
+                    headers[key] = header = file == null ? null : GgufHeader.Read(file);
+                }
+                if (header != null) Describe(m, header);
+            }
+            foreach (var key in headers.Keys.Where(k => !seen.Contains(k)).ToList()) headers.Remove(key);
+        }
+
+        /// <summary>Adds to a model what its file's header says, leaving alone what its engine already reported.</summary>
+        internal static void Describe(LocalModel m, GgufHeader header)
+        {
+            // llama-server gives each slot its share of the context: the cache holds them all.
+            long tokens = (long)m.Context * Math.Max(1, m.Slots);
+            long cache = header.KvBytes(tokens);
+            if (header.Experts <= 0 && cache <= 0) return;
+            var s = m.Segments ?? (m.Segments = new ModelSegments());
+            s.Experts = header.Experts;
+            s.ExpertsUsed = header.ExpertsUsed;
+            s.KvBytes = cache;
+            if (s.KvCapacity == 0 && cache > 0 && tokens <= int.MaxValue) s.KvCapacity = (int)tokens;
         }
 
         private ModelSegments NInferSegments(int port)

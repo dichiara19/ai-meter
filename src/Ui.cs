@@ -329,12 +329,14 @@ namespace AIMeter
             var s = m.Segments;
             if (s == null) return lines;
             var experts = new List<string>();
+            if (s.Experts > 0) experts.Add(s.ExpertsUsed > 0 ? L.F("{0} experts, {1} per token", s.Experts, s.ExpertsUsed) : L.F("{0} experts", s.Experts));
             if (s.ExpertsIn != null) experts.Add(L.T(s.ExpertsIn == "host" ? "in system memory" : s.ExpertsIn == "disk" ? "on disk" : "in video memory"));
             if (s.ExpertSlots > 0) experts.Add(L.F("{0} kept on the card", s.ExpertSlots));
             if (s.ExpertHitRatio >= 0) experts.Add(L.F("{0}% found there", Math.Round(s.ExpertHitRatio * 100)));
             if (s.ExpertBytesPerSecond >= (1L << 20)) experts.Add(L.F("{0}/s to the card", GpuMemory.Format(s.ExpertBytesPerSecond)));
             if (experts.Count > 0) lines.Add(L.F("MoE experts: {0}", string.Join(" · ", experts)));
             var cache = new List<string>();
+            if (s.KvBytes >= WorthStating) cache.Add("~" + GpuMemory.Format(s.KvBytes));
             if (s.KvCapacity > 0) cache.Add(L.F("up to {0} tokens", Tokens(s.KvCapacity)));
             if (!string.IsNullOrEmpty(s.KvType)) cache.Add(s.KvType);
             if (cache.Count > 0) lines.Add(L.F("KV cache: {0}", string.Join(" · ", cache)));
