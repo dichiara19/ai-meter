@@ -318,6 +318,29 @@ namespace AIMeter
             return lines;
         }
 
+        /// <summary>
+        /// The inside of a model as its engine reports it, one line per segment: the experts of a mixture of experts
+        /// (where they are, how many the card keeps, how often a routed one is found there, what is being moved to
+        /// the card) and the key-value cache. Empty for an engine that reports none of it.
+        /// </summary>
+        public static List<string> SegmentLines(LocalModel m)
+        {
+            var lines = new List<string>();
+            var s = m.Segments;
+            if (s == null) return lines;
+            var experts = new List<string>();
+            if (s.ExpertsIn != null) experts.Add(L.T(s.ExpertsIn == "host" ? "in system memory" : s.ExpertsIn == "disk" ? "on disk" : "in video memory"));
+            if (s.ExpertSlots > 0) experts.Add(L.F("{0} kept on the card", s.ExpertSlots));
+            if (s.ExpertHitRatio >= 0) experts.Add(L.F("{0}% found there", Math.Round(s.ExpertHitRatio * 100)));
+            if (s.ExpertBytesPerSecond >= (1L << 20)) experts.Add(L.F("{0}/s to the card", GpuMemory.Format(s.ExpertBytesPerSecond)));
+            if (experts.Count > 0) lines.Add(L.F("MoE experts: {0}", string.Join(" · ", experts)));
+            var cache = new List<string>();
+            if (s.KvCapacity > 0) cache.Add(L.F("up to {0} tokens", Tokens(s.KvCapacity)));
+            if (!string.IsNullOrEmpty(s.KvType)) cache.Add(s.KvType);
+            if (cache.Count > 0) lines.Add(L.F("KV cache: {0}", string.Join(" · ", cache)));
+            return lines;
+        }
+
         /// <summary>Where a model is, in short: video memory, system memory, then what is on disk or in swap, when worth stating.</summary>
         public static List<string> MemoryFacts(LocalModel m)
         {
@@ -343,8 +366,10 @@ namespace AIMeter
         public static List<string> LocalFacts(LocalModel m, bool memory = true)
         {
             var f = new List<string> { m.Where == "WSL" ? m.Server + " (WSL)" : m.Server };
+            if (m.Segments != null && m.Segments.Engine != null) f.Add(m.Segments.Engine);
             if (memory) f.AddRange(MemoryFacts(m));
             if (m.Context > 0) f.Add(L.F("{0} context", Tokens(m.Context)));
+            if (m.Segments != null && m.Segments.TokensPerSecond >= 0.05) f.Add(L.F("{0} tok/s", m.Segments.TokensPerSecond.ToString("0.#", L.Culture)));
             if (m.Busy > 0) f.Add(L.T("working"));
             return f;
         }

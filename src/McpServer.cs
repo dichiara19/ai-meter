@@ -1119,6 +1119,23 @@ namespace AIMeter
             return origin == MemoryOrigin.Reported ? "reported" : origin == MemoryOrigin.Measured ? "measured" : origin == MemoryOrigin.Estimated ? "estimated" : "unknown";
         }
 
+        /// <summary>What the engine reports of a model's inside; a figure it does not report is left out, never zero.</summary>
+        private static void Segments(Dictionary<string, object> d, ModelSegments s)
+        {
+            if (s.Engine != null) d["engine"] = s.Engine;
+            if (s.TokensPerSecond > 0) d["tokens_per_second"] = Math.Round(s.TokensPerSecond, 1);
+            var cache = new Dictionary<string, object>();
+            if (s.KvCapacity > 0) cache["capacity_tokens"] = s.KvCapacity;
+            if (!string.IsNullOrEmpty(s.KvType)) cache["type"] = s.KvType;
+            if (cache.Count > 0) d["kv_cache"] = cache;
+            var experts = new Dictionary<string, object>();
+            if (s.ExpertsIn != null) experts["residency"] = s.ExpertsIn;
+            if (s.ExpertSlots > 0) experts["device_slots"] = s.ExpertSlots;
+            if (s.ExpertHitRatio >= 0) experts["device_hit_ratio"] = Math.Round(s.ExpertHitRatio, 3);
+            if (s.ExpertBytesPerSecond > 0) experts["to_device_bytes_per_second"] = s.ExpertBytesPerSecond;
+            if (experts.Count > 0) d["experts"] = experts;
+        }
+
         private static List<object> LocalModels(IEnumerable<ProviderState> providers)
         {
             var list = new List<object>();
@@ -1134,6 +1151,7 @@ namespace AIMeter
                     if (m.Swapped > 0) d["swapped_bytes"] = m.Swapped;
                     if (m.FileSize > 0) d["file_bytes"] = m.FileSize;
                     if (m.FileSize > 0 && m.Vram + m.Ram > 0) d["on_disk_bytes_estimate"] = m.OnDisk;
+                    if (m.Segments != null) Segments(d, m.Segments);
                     if (m.Context > 0) d["context_tokens"] = m.Context;
                     if (m.Slots > 0) { d["busy_requests"] = m.Busy; d["slots"] = m.Slots; }
                     list.Add(d);

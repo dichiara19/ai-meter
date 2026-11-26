@@ -539,6 +539,13 @@ namespace AIMeter
             meta.Margin = new Thickness(18, 1, 0, 0);
             meta.TextTrimming = TextTrimming.CharacterEllipsis;
             block.Children.Add(meta);
+            foreach (var line in SegmentLines(m))
+            {
+                var segment = Text(line, 11.5, "Text3");
+                segment.Margin = new Thickness(18, 1, 0, 0);
+                segment.TextWrapping = TextWrapping.Wrap;
+                block.Children.Add(segment);
+            }
 
             // Show context usage for the active request when the server reports it.
             if (m.Context > 0 && m.ContextUsed > 0)
@@ -549,7 +556,7 @@ namespace AIMeter
                 bar.ToolTip = L.F("Context in use: {0} of {1} tokens", Tokens(m.ContextUsed), Tokens(m.Context));
                 block.Children.Add(bar);
             }
-            block.ToolTip = m.Name + "\n" + string.Join(" · ", LocalFacts(m)) + string.Concat(LocalPlacement(m).Select(line => "\n" + line))
+            block.ToolTip = m.Name + "\n" + string.Join(" · ", LocalFacts(m)) + string.Concat(LocalPlacement(m).Concat(SegmentLines(m)).Select(line => "\n" + line))
                 + (m.Slots > 0 ? "\n" + L.F("Requests in progress: {0} of {1}", m.Busy, m.Slots) : "");
             foreach (var s in m.Sessions.Take(4))
             {

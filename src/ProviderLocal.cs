@@ -31,6 +31,9 @@ namespace AIMeter
         private readonly Dictionary<int, DateTime> wslMisses = new Dictionary<int, DateTime>();   // Ports whose process was not found, and when.
         private readonly Dictionary<string, long> fileSizes = new Dictionary<string, long>();    // Model file to its size, while its model is loaded.
         private long physicalMemory;   // This PC's memory, read once: the bound of what a process can share with the card.
+        private readonly Dictionary<int, NInferEngine.Sample> engineSamples = new Dictionary<int, NInferEngine.Sample>();                    // Port to its engine's last reading.
+        private readonly Dictionary<int, Dictionary<string, string>> engineOptions = new Dictionary<int, Dictionary<string, string>>();   // Port to its engine's options.
+        private readonly HashSet<int> withoutMetrics = new HashSet<int>();   // Ports of llama-server instances started without --metrics.
 
         /// <summary>Programs that host a model server, and the default ports of the most common servers.</summary>
         private static readonly string[] KnownProcesses = { "ollama", "llama-server", "llama-swap", "lm studio", "llmster", "koboldcpp", "local-ai", "localai", "vllm" };
@@ -89,6 +92,7 @@ namespace AIMeter
             AttachWslMemory(p, models);
             ShareWslMemory(p, models);
             AttachFileSizes(p, models);
+            AttachSegments(models);
 
             var st = new ProviderState { Id = "local", Name = L.T("Local models"), Models = models, Running = running };
             // GPU counters are read here, on the collection thread, and only when a server is active.
@@ -399,6 +403,8 @@ namespace AIMeter
                 Slots = (int)(JPath.Num(JPath.Get(props, "total_slots")) ?? 0),
                 Port = port,
                 File = JPath.Str(JPath.Get(props, "model_path")),
+                // A sleeping model is left alone: only /props and /slots are known not to wake it.
+                Build = JPath.Truthy(JPath.Get(props, "is_sleeping")) ? null : JPath.Str(JPath.Get(props, "build_info")),
             };
             if (JPath.Get(props, "endpoint_slots") is bool && !(bool)JPath.Get(props, "endpoint_slots")) return m;
             var slots = Get(port, slotsPath) as IList;
@@ -524,7 +530,47 @@ namespace AIMeter
             return new List<LocalModel> { new LocalModel { Name = name, Detail = JPath.Str(JPath.Get(Get(port, "/v1/internal/model/info"), "loader")) } };
         }
 
-        private static double? Metric(string text, string name)
+        /// <summary>
+        /// What the engine says of each model's inside: NInfer's own figures, and for any llama-server interface the
+        /// generation speed of /metrics. Only for a model alone on its port, whose server's figures are its own.
+        /// </summary>
+        private void AttachSegments(List<LocalModel> models)
+        {
+            var alone = AloneOnPort(models).Where(m => m.Build != null).ToList();
+            var ports = new HashSet<int>(alone.Select(m => m.Port));
+            foreach (var port in engineSamples.Keys.Where(k => !ports.Contains(k)).ToList()) engineSamples.Remove(port);
+            foreach (var port in engineOptions.Keys.Where(k => !ports.Contains(k)).ToList()) engineOptions.Remove(port);
+            withoutMetrics.RemoveWhere(port => !ports.Contains(port));
+            foreach (var m in alone)
+            {
+                if (NInferEngine.Is(m.Build)) m.Segments = NInferSegments(m.Port);
+                else if (!withoutMetrics.Contains(m.Port))
+                {
+                    // llama-server answers /metrics only when started with --metrics: one without is asked once.
+                    double? speed = Metric(GetText(m.Port, "/metrics"), "llamacpp:predicted_tokens_seconds");
+                    if (speed == null) withoutMetrics.Add(m.Port);
+                    else if (speed > 0) m.Segments = new ModelSegments { TokensPerSecond = speed.Value };
+                }
+            }
+        }
+
+        private ModelSegments NInferSegments(int port)
+        {
+            NInferEngine.Sample previous, sample;
+            engineSamples.TryGetValue(port, out previous);
+            var stats = Get(port, "/stats");
+            double uptime = JPath.Num(JPath.Get(stats, "uptime_seconds")) ?? 0;
+            Dictionary<string, string> options;
+            // The options belong to one run of the server: they are read again when it has restarted.
+            if (!engineOptions.TryGetValue(port, out options) || previous == null || uptime < previous.Uptime)
+                engineOptions[port] = options = NInferEngine.Options(Get(port, "/v1/models"));
+            var segments = NInferEngine.Read(stats, options, GetText(port, "/metrics"), previous, DateTime.Now, out sample);
+            if (sample == null) engineSamples.Remove(port);
+            else engineSamples[port] = sample;
+            return segments;
+        }
+
+        internal static double? Metric(string text, string name)
         {
             if (text == null) return null;
             double sum = 0;
