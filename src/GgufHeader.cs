@@ -77,15 +77,8 @@ namespace AIMeter
             // The model's own keys carry its architecture as a prefix: "llama.block_count", "qwen3moe.expert_count".
             int dot = key.IndexOf('.');
             string name = dot < 0 ? "" : key.Substring(dot + 1);
-            long? number = null;
-            switch (name)
-            {
-                case "block_count": case "embedding_length": case "attention.head_count": case "attention.head_count_kv":
-                case "attention.key_length": case "attention.value_length": case "expert_count": case "expert_used_count":
-                    number = Number(reader, type);
-                    break;
-            }
             // Head counts given per layer (an array) are left unread: without one figure there is no estimate.
+            long? number = Array.IndexOf(SizeNames, name) < 0 ? null : Number(reader, type);
             if (number == null) return false;
             int value = number.Value < 0 || number.Value > int.MaxValue ? 0 : (int)number.Value;
             switch (name)
@@ -97,10 +90,18 @@ namespace AIMeter
                 case "attention.key_length": KeyLength = value; break;
                 case "attention.value_length": ValueLength = value; break;
                 case "expert_count": Experts = value; break;
-                default: ExpertsUsed = value; break;
+                case "expert_used_count": ExpertsUsed = value; break;
+                default: throw new InvalidOperationException("A name among those read has no field: " + name);
             }
             return true;
         }
+
+        /// <summary>The names, after the architecture's prefix, of the whole numbers that are read.</summary>
+        private static readonly string[] SizeNames =
+        {
+            "block_count", "embedding_length", "attention.head_count", "attention.head_count_kv",
+            "attention.key_length", "attention.value_length", "expert_count", "expert_used_count",
+        };
 
         /// <summary>A whole number of any width, or null when the value is of another type (nothing is read then).</summary>
         private static long? Number(Source reader, uint type)
