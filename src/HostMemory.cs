@@ -87,7 +87,7 @@ namespace AIMeter
             if (string.IsNullOrEmpty(path)) return 0;
             bool linux = wslRoot != null;
             if (linux ? !path.StartsWith("/", StringComparison.Ordinal) : !Path.IsPathRooted(path)) return 0;
-            if (path.Split('/', '\\').Contains("..")) return 0;
+            if (path.Split(new[] { '/', '\\' }).Contains("..")) return 0;
             try
             {
                 var file = new FileInfo(linux ? wslRoot + path.Replace('/', '\\') : path);
