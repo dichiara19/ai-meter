@@ -180,12 +180,18 @@ namespace AIMeter
             Assert(Ui.PlacementParts(m).Select(x => x.Name).SequenceEqual(new[] { "8.0 GB VRAM", "6.0 GB RAM", "~6.0 GB on disk · 1.0 GB in swap" }), "The bar's legend does not state each place.");
             Assert(Ui.LocalFacts(m, false).SequenceEqual(new[] { "llama.cpp (WSL)" }), "The facts repeat the memory the bar's legend states.");
             // In system memory and on disk only: the legend still names each part by its own figure.
-            var onHost = new LocalModel { Name = "c", Server = "x", Where = "Windows", Ram = 4 * gb, FileSize = 9 * gb };
+            var onHost = new LocalModel { Name = "c", Server = "x", Where = "Windows", Ram = 4 * gb, FileSize = 9 * gb, VramOrigin = MemoryOrigin.Measured };
             Assert(Ui.PlacementParts(onHost).Select(x => x.Name).SequenceEqual(new[] { null, "4.0 GB RAM", "~5.0 GB on disk" }), "A model without video memory names its parts wrongly.");
 
             // More in memory than the file holds (a second copy of the weights): nothing is on disk, never a negative figure.
             m.Ram = 14 * gb;
             Assert(m.OnDisk == 0 && !Ui.LocalFacts(m).Any(f => f.Contains("on disk")), "A model larger in memory than its file is stated as on disk.");
+            // Video memory that could not be read (one of several models in WSL): the file less system memory alone would
+            // call "on disk" what is on the card. A 16 GB file with 13 GB in system memory was stated as 2.9 GB on disk.
+            var unread = new LocalModel { Name = "d", Server = "x", Where = "WSL", Ram = 13 * gb, FileSize = 16 * gb, RamOrigin = MemoryOrigin.Measured };
+            Assert(!unread.PlacementKnown && unread.OnDisk == 0 && !Ui.LocalFacts(unread).Any(f => f.Contains("on disk")), "An estimate was made without the video memory.");
+            unread.VramOrigin = MemoryOrigin.Measured;
+            Assert(unread.PlacementKnown && unread.OnDisk == 3 * gb, "Video memory read as none did not allow the estimate.");
             // Unknown memory, or an unknown file: no estimate at all.
             Assert(new LocalModel { FileSize = 20 * gb }.OnDisk == 0 && new LocalModel { Vram = 8 * gb }.OnDisk == 0, "An estimate was made from an unknown figure.");
             // A few megabytes are noise, not a place.
