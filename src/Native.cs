@@ -315,6 +315,36 @@ namespace AIMeter
             return true;
         }
 
+        private const uint GW_OWNER = 4;
+
+        /// <summary>
+        /// The top-level window that holds the desktop icons: Progman, or the WorkerW that Windows moves them into
+        /// (with a slideshow wallpaper, for one). "Show desktop" (Win + D) raises this window above every other, so
+        /// what belongs to the desktop stays just above it rather than at the bottom of the z-order. Falls back to
+        /// Progman without its icons; zero when File Explorer is not running.
+        /// </summary>
+        public static IntPtr FindDesktopIconsHost()
+        {
+            IntPtr shell = GetShellWindow();
+            if (shell != IntPtr.Zero && FindWindowExW(shell, IntPtr.Zero, "SHELLDLL_DefView", null) != IntPtr.Zero) return shell;
+            for (IntPtr w = FindWindowExW(IntPtr.Zero, IntPtr.Zero, "WorkerW", null); w != IntPtr.Zero; w = FindWindowExW(IntPtr.Zero, w, "WorkerW", null))
+                if (FindWindowExW(w, IntPtr.Zero, "SHELLDLL_DefView", null) != IntPtr.Zero) return w;
+            return shell;
+        }
+
+        /// <summary>
+        /// Where a window goes in the z-order to sit just above another, wherever that one is now: gives the window to
+        /// insert it after (zero, the top, when nothing is above the other) and returns true, or returns false when
+        /// it is already there. The window's own owner, which Windows keeps beneath it, may stand between the two.
+        /// </summary>
+        internal static bool SlotJustAbove(IntPtr window, IntPtr other, out IntPtr insertAfter)
+        {
+            insertAfter = GetWindow(other, GW_HWNDPREV);
+            IntPtr nearest = insertAfter;
+            if (nearest != IntPtr.Zero && nearest == GetWindow(window, GW_OWNER)) nearest = GetWindow(nearest, GW_HWNDPREV);
+            return nearest != window;
+        }
+
         // Application desktop toolbars ("appbars"): a registered window is told when a full-screen app opens or closes.
         public const int ABN_FULLSCREENAPP = 2;
 

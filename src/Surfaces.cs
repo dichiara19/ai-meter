@@ -12,12 +12,21 @@ using System.Windows.Threading;
 
 namespace AIMeter
 {
-    /// <summary>Desktop widget: always stays below other windows, as part of the wallpaper.</summary>
+    /// <summary>
+    /// Desktop widget: always stays below other windows, as part of the wallpaper. It keeps itself just above the
+    /// window that holds the desktop icons, not at the bottom of the z-order: "Show desktop" (Win + D) raises that
+    /// window above every other and sends nothing to the windows it covers, so a widget at the bottom would vanish
+    /// with them. Every change of its own position goes to that place (StayOnDesktop), and FollowDesktop moves it
+    /// when the desktop itself is raised or lowered: at once on a change of foreground window, and on a timer for
+    /// the changes that come without one, such as Win + D pressed with the desktop already in the foreground.
+    /// </summary>
     internal sealed class DesktopWidget : Window
     {
         private readonly Controller C;
         private readonly StackPanel body = new StackPanel();
         private readonly TextBlock status;
+        private readonly DispatcherTimer followDesktop = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
+        private IntPtr handle;
 
         public DesktopWidget(Controller c)
         {
@@ -54,20 +63,47 @@ namespace AIMeter
             Content = root;
             Ui.ToolTipsOnHold(this);
 
-            SourceInitialized += (o, e) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle).AddHook(StayAtBottom);
+            SourceInitialized += (o, e) =>
+            {
+                handle = new WindowInteropHelper(this).Handle;
+                HwndSource.FromHwnd(handle).AddHook(StayOnDesktop);
+            };
             Loaded += (o, e) => Place();
+            followDesktop.Tick += (o, e) => FollowDesktop();
+            IsVisibleChanged += (o, e) => followDesktop.IsEnabled = IsVisible;
+            Closed += (o, e) => followDesktop.Stop();
         }
 
-        private IntPtr StayAtBottom(IntPtr hwnd, int msg, IntPtr w, IntPtr l, ref bool handled)
+        private IntPtr StayOnDesktop(IntPtr hwnd, int msg, IntPtr w, IntPtr l, ref bool handled)
         {
             if (msg == Native.WM_WINDOWPOSCHANGING)
             {
                 var pos = (Native.WINDOWPOS)Marshal.PtrToStructure(l, typeof(Native.WINDOWPOS));
-                pos.hwndInsertAfter = Native.HWND_BOTTOM;
-                pos.flags &= ~Native.SWP_NOZORDER;
+                KeepOnDesktop(hwnd, Native.FindDesktopIconsHost(), ref pos);
                 Marshal.StructureToPtr(pos, l, false);
             }
             return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// Rewrites a change of the widget's position so that it lands just above the window holding the desktop
+        /// icons, whatever was asked (a click would bring it to the top), or stays where it is when already there.
+        /// Without that window (File Explorer is not running) the bottom of the z-order is the nearest thing.
+        /// </summary>
+        internal static void KeepOnDesktop(IntPtr widget, IntPtr iconsHost, ref Native.WINDOWPOS pos)
+        {
+            IntPtr insertAfter = Native.HWND_BOTTOM;
+            if (iconsHost != IntPtr.Zero && !Native.SlotJustAbove(widget, iconsHost, out insertAfter)) { pos.flags |= Native.SWP_NOZORDER; return; }
+            pos.hwndInsertAfter = insertAfter;
+            pos.flags &= ~Native.SWP_NOZORDER;
+        }
+
+        /// <summary>Puts the widget back just above the desktop when the desktop was raised over it, or lowered away from it.</summary>
+        public void FollowDesktop()
+        {
+            IntPtr iconsHost = Native.FindDesktopIconsHost(), insertAfter;
+            if (handle == IntPtr.Zero || iconsHost == IntPtr.Zero || !Native.SlotJustAbove(handle, iconsHost, out insertAfter)) return;
+            Native.SetWindowPos(handle, insertAfter, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         }
 
         public void Place()
