@@ -1,0 +1,80 @@
+{
+  "id": "xai",
+  "name": "xAI (Grok API)",
+  "monogram": "xA",
+  "description": "Prepaid credit balance of your xAI API team.",
+  "color": { "light": "#1A1A1A", "dark": "#5F6672" },
+  "detect": { "env": ["XAI_MANAGEMENT_API_KEY"] },
+  "auth": {
+    "type": "key",
+    "ids": ["xai-management"],
+    "env": ["XAI_MANAGEMENT_API_KEY"],
+    "page": "https://console.x.ai",
+    "notice": "Add an xAI Management API key (xAI console → Settings → Management Keys). Regular API keys are not accepted."
+  },
+  "keys": {
+    "team": {
+      "label": "Team ID",
+      "description": "The team ID shown in the xAI console (part of the console address).",
+      "secret": false,
+      "pattern": "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+      "page": "https://console.x.ai",
+      "pageLabel": "Open the xAI console"
+    }
+  },
+  "request": {
+    "url": "https://management-api.x.ai/v1/billing/teams/{key:team|urlencode}/prepaid/balance",
+    "headers": { "Authorization": "Bearer {token}" },
+    "interval": 15
+  },
+  "spend": {
+    "balance": "total.val",
+    "scale": -0.01,
+    "currency": "USD"
+  },
+  "limits": [
+    { "label": "Prepaid credits", "short": "$", "balance": "total.val", "scale": -0.01, "currency": "USD" }
+  ],
+  "i18n": {
+    "it": {
+      "Prepaid credit balance of your xAI API team.": "Saldo del credito prepagato del tuo team API xAI.",
+      "Prepaid credits": "Credito prepagato",
+      "Team ID": "ID del team",
+      "The team ID shown in the xAI console (part of the console address).": "L'ID del team mostrato nella console xAI (parte dell'indirizzo della console).",
+      "Open the xAI console": "Apri la console xAI",
+      "Add an xAI Management API key (xAI console → Settings → Management Keys). Regular API keys are not accepted.": "Aggiungi una chiave Management API di xAI (console xAI → Settings → Management Keys). Le normali chiavi API non sono accettate."
+    },
+    "es": {
+      "Prepaid credit balance of your xAI API team.": "Saldo de crédito prepago de tu equipo de la API de xAI.",
+      "Prepaid credits": "Crédito prepago",
+      "Team ID": "ID del equipo",
+      "The team ID shown in the xAI console (part of the console address).": "El ID del equipo que aparece en la consola de xAI (parte de la dirección de la consola).",
+      "Open the xAI console": "Abrir la consola de xAI",
+      "Add an xAI Management API key (xAI console → Settings → Management Keys). Regular API keys are not accepted.": "Añade una clave de Management API de xAI (consola de xAI → Settings → Management Keys). Las claves de API normales no se aceptan."
+    },
+    "fr": {
+      "Prepaid credit balance of your xAI API team.": "Solde de crédit prépayé de votre équipe API xAI.",
+      "Prepaid credits": "Crédit prépayé",
+      "Team ID": "ID de l'équipe",
+      "The team ID shown in the xAI console (part of the console address).": "L'ID de l'équipe affiché dans la console xAI (partie de l'adresse de la console).",
+      "Open the xAI console": "Ouvrir la console xAI",
+      "Add an xAI Management API key (xAI console → Settings → Management Keys). Regular API keys are not accepted.": "Ajoutez une clé Management API xAI (console xAI → Settings → Management Keys). Les clés API ordinaires ne sont pas acceptées."
+    },
+    "de": {
+      "Prepaid credit balance of your xAI API team.": "Prepaid-Guthaben deines xAI-API-Teams.",
+      "Prepaid credits": "Prepaid-Guthaben",
+      "Team ID": "Team-ID",
+      "The team ID shown in the xAI console (part of the console address).": "Die Team-ID aus der xAI-Konsole (Teil der Adresse der Konsole).",
+      "Open the xAI console": "xAI-Konsole öffnen",
+      "Add an xAI Management API key (xAI console → Settings → Management Keys). Regular API keys are not accepted.": "Füge einen xAI-Management-API-Schlüssel hinzu (xAI-Konsole → Settings → Management Keys). Normale API-Schlüssel werden nicht akzeptiert."
+    },
+    "pt": {
+      "Prepaid credit balance of your xAI API team.": "Saldo de crédito pré-pago da tua equipa da API xAI.",
+      "Prepaid credits": "Crédito pré-pago",
+      "Team ID": "ID da equipa",
+      "The team ID shown in the xAI console (part of the console address).": "O ID da equipa apresentado na consola xAI (parte do endereço da consola).",
+      "Open the xAI console": "Abrir a consola xAI",
+      "Add an xAI Management API key (xAI console → Settings → Management Keys). Regular API keys are not accepted.": "Adiciona uma chave de Management API da xAI (consola xAI → Settings → Management Keys). As chaves de API normais não são aceites."
+    }
+  }
+}

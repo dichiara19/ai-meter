@@ -35,7 +35,7 @@ Claude, ChatGPT/Codex and GitHub Copilot need custom sign-in flows and stay in c
 |---|---|
 | `id` | Lowercase letters, digits and `-`. `claude`, `openai`, `copilot`, `antigravity`, `grok` and `local` are reserved. |
 | `name`, `description` | Shown in Settings and in the panel. Write them in English and translate them in `i18n`. |
-| `monogram` | Letter shown when there is no logo (default: first letter of `name`). |
+| `monogram` | Letter or two shown when there is no logo (default: first letter of `name`). Pick one no other service uses: `X` is Grok's. |
 | `color` | Brand color for light and dark theme, `#RRGGBB`. |
 | `detect` | When the service counts as installed, which turns it on at first run: `paths` (files or folders), `env` (environment variables), `commands` (programs on the `PATH`). |
 | `logo` | `file` (PNG) or `exe` (its icon) of the installed app, first one found wins; paths accept `%VARIABLES%` and `~`. Without an installed app, `image` (and `imageDark` for the dark theme) is a PNG next to the definition file, for example the service's official logo. |
@@ -89,7 +89,7 @@ A path picks a value from the JSON answer: `data.usage`, `items[0].name`, `items
 | `percent` | Path of the used percentage; `percentScale: 100` if the API returns a fraction. |
 | `used`, `limit`, `remaining` | Paths of amounts, or numbers written in the file for a documented limit (`"limit": 10000`): the percentage is computed from two of them. |
 | `emptyIsZero` | Path of the list that holds `used`, for services that answer with no rows when nothing was used: only a list that is present and empty counts as zero. Otherwise a missing value is unknown, never zero. |
-| `currency`, `currencyPath`, `scale` | With a currency the row shows money left (`scale: 0.01` for cents). |
+| `currency`, `currencyPath`, `scale` | With a currency the row shows money left (`scale: 0.01` for cents). A negative `scale` also flips the sign: xAI reports its prepaid balance in `total.val` as a string of cents that is negative while the account is in credit, so its definition uses `"scale": -0.01`. |
 | `balance` | Path of a balance with no limit: only the amount is shown, without a bar. |
 | `unlimited` | Path that, when true, shows *unlimited*. |
 | `starts`, `resets` | Paths of the start and reset time: ISO text, Unix seconds or milliseconds. With both, AI Meter knows the length of the window: it uses it for the forecast, the reset notification and the tip before a reset (`short` values `5h`, `7d`, `month` and `1d` also tell it the length). |
