@@ -42,12 +42,12 @@ namespace AIMeter
             var settings = Settings.Current;
 
             // No choice made, or no dictionary at all in an older settings object: every service is shown.
-            Assert(Texts(Ui.PillRow(snapshot, "5h", true)).SequenceEqual(new[] { "18%", "60%", "90%" }), "The pill does not show every service by default.");
+            Assert(Values(Ui.PillRow(snapshot, "5h", true)).SequenceEqual(new[] { "18%", "60%", "90%" }), "The pill does not show every service by default.");
             settings.PillHidden = null;
             Assert(Ui.PillServices(snapshot).Count() == 3, "A settings object without the choice hid a service.");
 
             settings.PillHidden = new Dictionary<string, bool> { { "openai", true }, { "copilot", false } };
-            Assert(Texts(Ui.PillRow(snapshot, "5h", true)).SequenceEqual(new[] { "18%", "90%" }), "A hidden service stayed in the pill, or a shown one left it.");
+            Assert(Values(Ui.PillRow(snapshot, "5h", true)).SequenceEqual(new[] { "18%", "90%" }), "A hidden service stayed in the pill, or a shown one left it.");
             Assert(Ui.PillServices(snapshot).Select(p => p.Id).SequenceEqual(new[] { "claude", "copilot" }), "The overlay icon does not follow the pill.");
             Assert(Ui.Summary(snapshot).Contains("ChatGPT: 60% left"), "A service hidden from the pill left the tooltip.");
             Assert(snapshot.Shown.Count == 3, "A service hidden from the pill left the panel and the widget.");
@@ -65,8 +65,11 @@ namespace AIMeter
             var local = new ProviderState { Id = "local", Name = "Local models", Running = true, Models = new List<LocalModel> { new LocalModel { Name = "qwen", Server = "Ollama" } } };
             var snapshot = Snapshot(Service("claude", "Claude", 82), local);
             Assert(Ui.PillRow(snapshot, "5h", true).Children.OfType<Border>().Any(b => b.Child != null), "Local models are not in the pill by default.");
+            int shown = Ui.PillRow(snapshot, "5h", true).Children.Count;
             Settings.Current.PillHidden["local"] = true;
-            Assert(Texts(Ui.PillRow(snapshot, "5h", true)).SequenceEqual(new[] { "18%" }), "Hidden local models stayed in the pill.");
+            var row = Ui.PillRow(snapshot, "5h", true);
+            // Their area shows a count, not a percentage: it is gone when the pill has one item fewer and the service is still there.
+            Assert(row.Children.Count == shown - 1 && Values(row).SequenceEqual(new[] { "18%" }), "Hidden local models stayed in the pill.");
         }
 
         private static void SavedChoice()
@@ -104,6 +107,15 @@ namespace AIMeter
         }
 
         /// <summary>The text of every TextBlock in a control tree.</summary>
+        /// <summary>
+        /// The limit values in the pill, in order. A service whose app is not installed gets its initials for a logo,
+        /// which are texts too: on a PC without Claude, ChatGPT or Copilot the pill holds "C", "G" and "GH" as well.
+        /// </summary>
+        private static List<string> Values(DependencyObject root)
+        {
+            return Texts(root).Where(text => text.EndsWith("%", StringComparison.Ordinal)).ToList();
+        }
+
         private static List<string> Texts(DependencyObject root)
         {
             var list = new List<string>();
