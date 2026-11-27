@@ -35,6 +35,7 @@ namespace AIMeter
             {
                 SetTheme(dark);
                 Save(PanelShot(snap, dark), IOPath.Combine(outDir, dark ? "panel-dark.png" : "panel-light.png"), 2);
+                Save(PanelShot(LocalOnly(snap), dark), IOPath.Combine(outDir, dark ? "local-models-dark.png" : "local-models-light.png"), 2);
             }
             SetTheme(true);
             Save(TaskbarShot(snap), IOPath.Combine(outDir, "taskbar.png"), 2);
@@ -345,6 +346,14 @@ namespace AIMeter
                 c.Children.Add(cur);
             }
             return c;
+        }
+
+        /// <summary>The same reading with the local models alone, for the image that shows their card in full.</summary>
+        private static Snapshot LocalOnly(Snapshot s)
+        {
+            var only = new Snapshot { Taken = s.Taken };
+            only.Providers.AddRange(s.Providers.Where(p => p.Models != null));
+            return only;
         }
 
         private static FrameworkElement PanelShot(Snapshot s, bool dark)

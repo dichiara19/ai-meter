@@ -249,7 +249,13 @@ namespace AIMeter
         {
             if (p.Models == null || p.Models.Count == 0) return L.T("Local models: none loaded");
             var lines = new List<string> { L.N(p.Models.Count, "{0} local model loaded", "{0} local models loaded") };
-            foreach (var m in p.Models) lines.Add("• " + m.Name + " · " + string.Join(" · ", LocalFacts(m)));
+            foreach (var m in p.Models)
+            {
+                // A server shown under its own name (ComfyUI) is not named twice.
+                var facts = LocalFacts(m);
+                if (facts.Count > 0 && facts[0] == m.Name) facts.RemoveAt(0);
+                lines.Add("• " + string.Join(" · ", new[] { m.Name }.Concat(facts)));
+            }
             lines.AddRange(LocalMemoryLines(p));
             return string.Join("\n", lines);
         }

@@ -1,3 +1,28 @@
+## What changed in 0.13.0
+
+Local models are shown where they really are: in video memory, in system memory, in swap or still on disk, on Windows and inside WSL, for any engine.
+
+![The local models card: bars for video memory, system memory split into Windows, the models and WSL, and memory inside WSL; a mixture-of-experts model with its own bar, its experts, key-value cache and speed; ComfyUI with the memory it holds](https://raw.githubusercontent.com/dichiara19/ai-meter/v0.13.0/docs/media/local-models-dark.png)
+
+### Local models
+- **System memory, not only video memory.** Until now a model in WSL showed its video memory alone, and one on Windows showed system memory only when its video memory was unknown: a model kept mostly in system memory looked far smaller than it is. Each model now shows what its process holds, on Windows and inside WSL, without starting anything in WSL.
+- **A map of each memory.** Video memory, system memory and, with WSL, the memory inside its virtual machine are bars split into what holds them: the models, other programs and WSL, with an outline of how much more WSL may take before its own ceiling. A memory that is running out is told by the colour of its value.
+- **Where each model is.** A model in more than one place has a bar of its own: video memory, system memory, then what is in swap or still on disk. What is on disk is an estimate (the model file's size less what is in memory), marked with `~`. The tooltip says how each figure is known: reported by the server or measured from the process.
+- **Under memory pressure** the card says how much of what WSL uses Windows has compressed or paged out.
+- **What the engine says of the model's inside**: the experts of a mixture-of-experts model (where they are, how many the card keeps, how often a routed one is found there, how much is being moved to the card), the capacity and format of the key-value cache, and the generation speed. Read from [NInfer](https://github.com/iamwavecut/ninfer-all), now recognised behind its llama-server interface, and, for the speed, from a `llama-server` started with `--metrics`.
+- **GGUF model files.** For a model `llama-server` loaded, the file's header says whether it is a mixture of experts and gives the sizes from which the key-value cache's weight is estimated.
+- **Not only text.** ComfyUI is recognised, with its version, the video memory it holds and its queue. Any server that answers the OpenAI-compatible `/v1/models` is shown as one entry while its process holds at least a gigabyte, so that a proxy to a cloud service is not taken for a local model. Whatever llama-swap started is recognised by its own interface.
+- **MCP.** `list_local_models` returns the same figures: where each model's memory is and how it is known, its engine, speed, key-value cache and experts.
+- LocalAI, text-generation-webui and ComfyUI were not always found: a refused request kept its connection, and later requests to the same server timed out. Fixed.
+
+### New services
+- **Z.ai Coding Plan**: the 5-hour, weekly and MCP quotas of a GLM Coding Plan, with their reset times.
+- **xAI**: the prepaid credit balance of an xAI API team, with a Management API key and the team ID.
+- Both by [@Murzinio](https://github.com/Murzinio), checked against real accounts.
+
+### Lighter
+- **A refresh costs less than in 0.12.0.** The processes of the PC, their parents and the memory they hold now come from one system query: on a PC with 618 processes a refresh without network requests went from about 39 ms to about 28 ms. Memory inside WSL is read at most every 30 seconds, 60 on battery.
+
 ## What changed in 0.12.0
 
 Delegation no longer needs a coding agent of your own: AI Meter can set one up for you, and Settings guide you through it.
