@@ -24,7 +24,11 @@ namespace AIMeter
         private DateTime winScanAt = DateTime.MinValue, wslScanAt = DateTime.MinValue;
         private List<Tuple<int, string>> wslPorts = new List<Tuple<int, string>>();
         private Dictionary<int, uint> winPorts = new Dictionary<int, uint>();
-        private Dictionary<uint, uint> parents = new Dictionary<uint, uint>();
+        private Dictionary<uint, uint> parents = new Dictionary<uint, uint>();   // Process to its parent, from this collection's listing.
+        private DateTime wslReadAt = DateTime.MinValue;   // When the memory figures inside WSL were last read.
+        private bool wslDue;                              // Whether this collection reads them again.
+        private HostMemory.WslMemory wslTotals;
+        private readonly Dictionary<int, HostMemory.ProcessMemory> wslProcesses = new Dictionary<int, HostMemory.ProcessMemory>();   // Port to its process's memory, as last read.
         private readonly CodingAgents agents;
         private readonly HashSet<int> swapPorts = new HashSet<int>();   // Ports of the servers started by llama-swap.
         private readonly Dictionary<int, string> swapKinds = new Dictionary<int, string>();   // Port of a server llama-swap started to its kind; null when it is none AI Meter reads.
@@ -60,6 +64,10 @@ namespace AIMeter
 
         public override ProviderState Collect(Probe p)
         {
+            parents = p.Table.ToDictionary(entry => entry.Key, entry => entry.Value.Parent);
+            // Every read inside WSL goes through its share and wakes the virtual machine: memory there is read at most
+            // every 30 seconds (60 on battery), however often the panel asks, and kept in between.
+            wslDue = (DateTime.Now - wslReadAt).TotalSeconds >= (p.SavingPower ? 60 : 30);
             Discover(p);
             long inUse;
             if (physicalMemory == 0) HostMemory.Windows(out inUse, out physicalMemory);
@@ -110,8 +118,10 @@ namespace AIMeter
                 st.GpuUsed = st.GpuTotal > 0 ? GpuMemory.Used : 0;
                 HostMemory.Windows(out st.RamUsed, out st.RamTotal);
                 // What the WSL virtual machine holds is part of the PC's memory in use, whether or not a server runs in it.
-                st.WslHeld = WorkingSet(p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem").Select(kv => kv.Key));
-                var wsl = p.WslUp ? HostMemory.Wsl(p.WslRoot) : null;
+                st.WslHeld = p.WorkingSet(p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem").Select(kv => kv.Key));
+                if (!p.WslUp) wslTotals = null;
+                else if (wslDue || wslTotals == null) wslTotals = HostMemory.Wsl(p.WslRoot);
+                var wsl = wslTotals;
                 if (wsl != null)
                 {
                     st.WslUsed = wsl.Used; st.WslTotal = wsl.Total; st.WslTouched = wsl.Touched;
@@ -175,7 +185,6 @@ namespace AIMeter
             {
                 winScanAt = DateTime.Now;
                 winPorts = Native.ListeningPorts();
-                parents = Native.ProcessParents();
                 foreach (var kv in winPorts)
                 {
                     string name;
@@ -748,7 +757,7 @@ namespace AIMeter
                 long vram = 0, v;
                 foreach (var pid in pids) if (gpu.TryGetValue(pid, out v)) vram += v;
                 m.Vram = vram;
-                if (s.Kind != "lmstudio") m.Ram = WorkingSet(pids);   // The Electron app's RAM does not belong to the model.
+                if (s.Kind != "lmstudio") m.Ram = p.WorkingSet(pids);   // The Electron app's RAM does not belong to the model.
                 // The counters were read: a process absent from them holds no video memory, which is not the same as unknown.
                 if (m.Vram > 0 || gpu.Count > 0) m.VramOrigin = MemoryOrigin.Measured;
                 if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Measured;
@@ -797,19 +806,6 @@ namespace AIMeter
             return models.Where(m => m.Port > 0).GroupBy(m => m.Port).Where(g => g.Count() == 1).Select(g => g.First()).ToList();
         }
 
-        /// <summary>Memory the processes hold in RAM (working set); those that have ended count nothing.</summary>
-        private static long WorkingSet(IEnumerable<uint> pids)
-        {
-            long total = 0;
-            foreach (var pid in pids)
-            {
-                try { using (var process = Process.GetProcessById((int)pid)) total += process.WorkingSet64; }
-                catch (ArgumentException) { }
-                catch (InvalidOperationException) { }
-            }
-            return total;
-        }
-
         /// <summary>
         /// System memory of the models in WSL whose server reports none: the resident memory of the process serving
         /// each one, read from /proc as a file. /proc is listed only to find a process, and not again for a port that
@@ -820,9 +816,12 @@ namespace AIMeter
             var unknown = AloneOnPort(models.Where(m => m.Where == "WSL")).Where(m => m.Vram == 0 && m.Ram == 0).ToList();
             foreach (var port in wslServers.Keys.Where(k => unknown.All(m => m.Port != k)).ToList()) wslServers.Remove(port);
             foreach (var port in wslMisses.Keys.Where(k => unknown.All(m => m.Port != k)).ToList()) wslMisses.Remove(port);
+            foreach (var port in wslProcesses.Keys.Where(k => unknown.All(m => m.Port != k)).ToList()) wslProcesses.Remove(port);
             if (!p.WslUp) return;
             foreach (var m in unknown)
             {
+                HostMemory.ProcessMemory kept;
+                if (!wslDue && wslProcesses.TryGetValue(m.Port, out kept)) { Apply(m, kept); continue; }
                 uint pid;
                 if (wslServers.TryGetValue(m.Port, out pid) && !HostMemory.Serves(HostMemory.CommandLine(p.WslRoot, pid), m.Port, m.File)) wslServers.Remove(m.Port);
                 if (!wslServers.TryGetValue(m.Port, out pid))
@@ -835,11 +834,18 @@ namespace AIMeter
                     wslServers[m.Port] = pid;
                 }
                 var memory = HostMemory.Process(p.WslRoot, pid);
-                m.Ram = memory.Resident;
-                m.RamMapped = memory.Mapped;
-                m.Swapped = memory.Swapped;
-                if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Measured;
+                wslProcesses[m.Port] = memory;
+                Apply(m, memory);
             }
+            if (wslDue) wslReadAt = DateTime.Now;
+        }
+
+        private static void Apply(LocalModel m, HostMemory.ProcessMemory memory)
+        {
+            m.Ram = memory.Resident;
+            m.RamMapped = memory.Mapped;
+            m.Swapped = memory.Swapped;
+            if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Measured;
         }
 
         /// <summary>

@@ -152,7 +152,7 @@ How:
 - The taskbar pill checks every 2 s, with two window-position reads, whether the taskbar moved; it repositions itself only when something changed.
 - Files are read only when they change, large logs only from their tail, and only the needed fields are cached.
 - **WSL is never started**: it is read only if its VM is already running, and listening ports are read from the kernel's TCP table as a file. The only process launched inside it is the CLI of Claude Code or Antigravity, to renew its own expired sign-in (`claude auth status`, `agy models`), so that AI Meter never handles refresh tokens. AI Meter asks Windows which distributions are running at most once a minute.
-- Local model servers are contacted only on `127.0.0.1`; a port that does not answer HTTP is dropped after one short request. GPU memory is read with PDH only while a local server runs.
+- Local model servers are contacted only on `127.0.0.1`; a port that does not answer HTTP is dropped after one short request. GPU memory is read with PDH only while a local server runs. The processes of the PC, with their parents and the memory they hold, come from one system query per refresh. Memory inside WSL is read at most every 30 s (60 on battery), however often the panel refreshes.
 - The Claude limit is fetched over the network every 5 minutes (15 on battery), only while something is visible.
 - Full-screen detection is event-driven, not polled.
 

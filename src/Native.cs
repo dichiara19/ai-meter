@@ -26,10 +26,78 @@ namespace AIMeter
         [DllImport("kernel32.dll")] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageNameW(IntPtr h, uint flags, StringBuilder buf, ref uint size);
 
-        /// <summary>PID → lower-case executable name. A single Toolhelp snapshot: ~1 ms, no WMI.</summary>
-        public static Dictionary<uint, string> Processes()
+        /// <summary>One process as Windows lists it. The working set is -1 when the listing did not carry it.</summary>
+        internal struct ProcessEntry
         {
-            var map = new Dictionary<uint, string>();
+            public string Name;       // Executable name, lower-case.
+            public uint Parent;
+            public long WorkingSet;   // Bytes held in RAM.
+        }
+
+        [DllImport("ntdll.dll")] private static extern int NtQuerySystemInformation(int informationClass, IntPtr buffer, int length, out int needed);
+        private const int SystemProcessInformation = 5;
+        private static readonly object ProcessTableLock = new object();
+        private static IntPtr processBuffer = IntPtr.Zero;
+        private static int processBufferSize = 1 << 20;
+
+        /// <summary>
+        /// Every process with its name, parent and working set, from one system query. It is what every collection
+        /// starts with, so its cost is the app's floor: on a PC with 618 processes it took 5.8 ms against 11.5 ms for
+        /// a Toolhelp snapshot, which gives neither the working sets (10 ms more for each process asked through the
+        /// Process class) nor, for protected processes such as the WSL virtual machine, a handle to ask them.
+        /// The layout read is the documented one of 64-bit Windows; anywhere else, or if the query fails, the
+        /// Toolhelp snapshot stands in, without working sets.
+        /// </summary>
+        public static Dictionary<uint, ProcessEntry> ProcessTable()
+        {
+            return (IntPtr.Size == 8 ? QueryProcessTable() : null) ?? ToolhelpProcessTable();
+        }
+
+        /// <summary>SYSTEM_PROCESS_INFORMATION entries, each followed by its threads and chained by NextEntryOffset.</summary>
+        internal static Dictionary<uint, ProcessEntry> QueryProcessTable()
+        {
+            const int NextEntry = 0x00, NameLength = 0x38, NameBuffer = 0x40, ProcessId = 0x50, ParentId = 0x58, WorkingSetSize = 0x90, EntrySize = 0x100;
+            lock (ProcessTableLock)
+            {
+                int length = 0;
+                for (int attempt = 0; ; attempt++)
+                {
+                    if (processBuffer == IntPtr.Zero) processBuffer = Marshal.AllocHGlobal(processBufferSize);
+                    int needed;
+                    if (NtQuerySystemInformation(SystemProcessInformation, processBuffer, processBufferSize, out needed) == 0) { length = needed > 0 ? Math.Min(needed, processBufferSize) : processBufferSize; break; }
+                    // Too small (processes start between two calls): grow past what was asked for, a few times at most.
+                    Marshal.FreeHGlobal(processBuffer);
+                    processBuffer = IntPtr.Zero;
+                    if (attempt == 3 || needed <= 0 || needed > (256 << 20)) return null;
+                    processBufferSize = needed + (256 << 10);
+                }
+                var map = new Dictionary<uint, ProcessEntry>();
+                long start = processBuffer.ToInt64(), offset = 0;
+                while (offset + EntrySize <= length)
+                {
+                    IntPtr entry = new IntPtr(start + offset);
+                    int next = Marshal.ReadInt32(entry, NextEntry);
+                    int nameBytes = (ushort)Marshal.ReadInt16(entry, NameLength);
+                    long name = Marshal.ReadIntPtr(entry, NameBuffer).ToInt64();
+                    // The name lies inside the same buffer; one that does not is not read.
+                    bool inside = name >= start && name + nameBytes <= start + length;
+                    map[(uint)Marshal.ReadIntPtr(entry, ProcessId).ToInt64()] = new ProcessEntry
+                    {
+                        Name = inside ? Marshal.PtrToStringUni(new IntPtr(name), nameBytes / 2).ToLowerInvariant() : "",
+                        Parent = (uint)Marshal.ReadIntPtr(entry, ParentId).ToInt64(),
+                        WorkingSet = Marshal.ReadIntPtr(entry, WorkingSetSize).ToInt64(),
+                    };
+                    if (next <= 0) break;
+                    offset += next;
+                }
+                return map.Count == 0 ? null : map;
+            }
+        }
+
+        /// <summary>The same table from a Toolhelp snapshot, which carries no working sets.</summary>
+        internal static Dictionary<uint, ProcessEntry> ToolhelpProcessTable()
+        {
+            var map = new Dictionary<uint, ProcessEntry>();
             IntPtr snap = CreateToolhelp32Snapshot(0x2, 0);
             if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return map;
             try
@@ -39,12 +107,37 @@ namespace AIMeter
                 bool ok = Process32FirstW(snap, ref e);
                 while (ok)
                 {
-                    map[e.th32ProcessID] = (e.szExeFile ?? "").ToLowerInvariant();
+                    map[e.th32ProcessID] = new ProcessEntry { Name = (e.szExeFile ?? "").ToLowerInvariant(), Parent = e.th32ParentProcessID, WorkingSet = -1 };
                     ok = Process32NextW(snap, ref e);
                 }
             }
             finally { CloseHandle(snap); }
             return map;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProcessMemoryCounters
+        {
+            public uint Size, PageFaultCount;
+            public UIntPtr PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage, QuotaPeakNonPagedPoolUsage, QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage;
+        }
+
+        [DllImport("psapi.dll")] private static extern bool GetProcessMemoryInfo(IntPtr process, out ProcessMemoryCounters counters, uint size);
+
+        /// <summary>
+        /// The working set of one process, asked of the process itself: for a listing that carried none. Zero for a
+        /// process that has ended or that gives no handle (a protected one).
+        /// </summary>
+        public static long WorkingSet(uint pid)
+        {
+            IntPtr handle = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
+            if (handle == IntPtr.Zero) return 0;
+            try
+            {
+                ProcessMemoryCounters counters;
+                return GetProcessMemoryInfo(handle, out counters, (uint)Marshal.SizeOf(typeof(ProcessMemoryCounters))) ? (long)counters.WorkingSetSize.ToUInt64() : 0;
+            }
+            finally { CloseHandle(handle); }
         }
 
         // --- listening TCP ports with their owning process (IPv4 and IPv6) -------------------
@@ -75,23 +168,6 @@ namespace AIMeter
                 }
                 finally { Marshal.FreeHGlobal(buf); }
             }
-            return map;
-        }
-
-        /// <summary>Parent of every process: PID → parent PID.</summary>
-        public static Dictionary<uint, uint> ProcessParents()
-        {
-            var map = new Dictionary<uint, uint>();
-            IntPtr snap = CreateToolhelp32Snapshot(0x2, 0);
-            if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return map;
-            try
-            {
-                var e = new PROCESSENTRY32();
-                e.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
-                bool ok = Process32FirstW(snap, ref e);
-                while (ok) { map[e.th32ProcessID] = e.th32ParentProcessID; ok = Process32NextW(snap, ref e); }
-            }
-            finally { CloseHandle(snap); }
             return map;
         }
 
