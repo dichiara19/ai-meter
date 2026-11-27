@@ -43,12 +43,33 @@ namespace AIMeter
         {
             AllowNetwork = allowNetwork;
             SavingPower = savingPower;
-            Procs = Native.Processes();
+            Table = Native.ProcessTable();
+            Procs = new Dictionary<uint, string>(Table.Count);
+            foreach (var entry in Table) Procs[entry.Key] = entry.Value.Name;
             foreach (var pid in pathByPid.Keys.ToList()) if (!Procs.ContainsKey(pid)) pathByPid.Remove(pid);
             RefreshWslState();
         }
 
         public bool IsRunning(string exe) { return Procs.ContainsValue(exe); }
+
+        /// <summary>The processes of this collection with their parents and working sets (Procs holds their names).</summary>
+        public Dictionary<uint, Native.ProcessEntry> Table = new Dictionary<uint, Native.ProcessEntry>();
+
+        /// <summary>
+        /// Memory the processes hold in RAM, from this collection's listing; a process that has ended counts nothing.
+        /// When the listing carries no working sets each process is asked, which a protected one refuses.
+        /// </summary>
+        public long WorkingSet(IEnumerable<uint> pids)
+        {
+            long total = 0;
+            foreach (var pid in pids)
+            {
+                Native.ProcessEntry entry;
+                if (!Table.TryGetValue(pid, out entry)) continue;
+                total += entry.WorkingSet >= 0 ? entry.WorkingSet : Native.WorkingSet(pid);
+            }
+            return total;
+        }
 
         public string PathOf(uint pid)
         {

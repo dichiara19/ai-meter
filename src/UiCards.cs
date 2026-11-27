@@ -468,14 +468,8 @@ namespace AIMeter
             stack.Children.Add(head);
 
             // GPU memory is the capacity constraint for local models.
-            if (p.Running && p.GpuTotal > 0)
-            {
-                double free = 100 - Math.Min(100, p.GpuUsed * 100.0 / p.GpuTotal);
-                var w = new UsageWindow { Label = "Video memory", Used = 100 - free, RightText = GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long) };
-                var row = UsageRow(w, null, "Info");
-                row.ToolTip = L.F("Video memory: {0}", GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long));
-                stack.Children.Add(row);
-            }
+            // System memory holds what does not fit there; a model in WSL is bounded by the virtual machine's own.
+            if (p.Running) foreach (var row in MemoryMap(p)) stack.Children.Add(row);
 
             foreach (var m in p.Models) stack.Children.Add(LocalModelBlock(m));
 
@@ -517,7 +511,8 @@ namespace AIMeter
         {
             var block = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
             var top = new DockPanel();
-            string mem = m.Vram > 0 ? GpuMemory.Format(m.Vram) : m.Ram > 0 ? GpuMemory.Format(m.Ram) : null;
+            // Everything the model holds, in video and system memory; the facts below say how much is where.
+            string mem = m.Vram + m.Ram > 0 ? GpuMemory.Format(m.Vram + m.Ram) : null;
             if (mem != null)
             {
                 var r = Text(mem, 13, "Text", FontWeights.SemiBold);
@@ -534,12 +529,23 @@ namespace AIMeter
             top.Children.Add(title);
             block.Children.Add(top);
 
-            var facts = LocalFacts(m).Where(f => !f.Contains("VRAM") || mem == null).ToList();
+            var placement = PlacementBar(m);
+            if (placement != null) block.Children.Add(placement);
+
+            // The bar's legend already states the memory; a model wholly in video memory has it on the right.
+            var facts = (placement != null ? LocalFacts(m, false) : LocalFacts(m).Where(f => !f.Contains("VRAM") || m.Ram > 0)).ToList();
             if (m.Detail != null) facts.Insert(1, m.Detail);
             var meta = Text(string.Join(" · ", facts), 11.5, "Text3");
             meta.Margin = new Thickness(18, 1, 0, 0);
             meta.TextTrimming = TextTrimming.CharacterEllipsis;
             block.Children.Add(meta);
+            foreach (var line in SegmentLines(m))
+            {
+                var segment = Text(line, 11.5, "Text3");
+                segment.Margin = new Thickness(18, 1, 0, 0);
+                segment.TextWrapping = TextWrapping.Wrap;
+                block.Children.Add(segment);
+            }
 
             // Show context usage for the active request when the server reports it.
             if (m.Context > 0 && m.ContextUsed > 0)
@@ -550,7 +556,8 @@ namespace AIMeter
                 bar.ToolTip = L.F("Context in use: {0} of {1} tokens", Tokens(m.ContextUsed), Tokens(m.Context));
                 block.Children.Add(bar);
             }
-            block.ToolTip = m.Name + "\n" + string.Join(" · ", LocalFacts(m)) + (m.Slots > 0 ? "\n" + L.F("Requests in progress: {0} of {1}", m.Busy, m.Slots) : "");
+            block.ToolTip = m.Name + "\n" + string.Join(" · ", LocalFacts(m)) + string.Concat(LocalPlacement(m).Concat(SegmentLines(m)).Select(line => "\n" + line))
+                + (m.Slots > 0 ? "\n" + L.F("Requests in progress: {0} of {1}", m.Busy, m.Slots) : "");
             foreach (var s in m.Sessions.Take(4))
             {
                 var sr = SessionRow(s, "Info");
