@@ -366,7 +366,7 @@ namespace AIMeter
                     }
                     catch (SocketException) { }
                     catch (IOException) { }
-                    catch (ObjectDisposedException) { }
+                    catch (InvalidOperationException) { }   // Stopped between two requests ("not listening"), or disposed.
                 });
                 thread.IsBackground = true;
                 thread.Start();
