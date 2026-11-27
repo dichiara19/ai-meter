@@ -1,0 +1,88 @@
+{
+  "id": "zai",
+  "name": "Z.ai Coding Plan",
+  "monogram": "Z",
+  "description": "5-hour, weekly and MCP quotas of your Z.ai GLM Coding Plan.",
+  "color": { "light": "#18191A", "dark": "#3B6AE0" },
+  "detect": { "env": ["ZAI_API_KEY", "Z_AI_API_KEY"] },
+  "auth": {
+    "type": "key",
+    "ids": ["zai", "zai-coding-plan"],
+    "env": ["ZAI_API_KEY", "Z_AI_API_KEY"],
+    "page": "https://z.ai/manage-apikey/apikey-list",
+    "notice": "Add the API key of your GLM Coding Plan (Z.ai console \u2192 API Keys)."
+  },
+  "plan": "data.level",
+  "request": {
+    "url": "https://api.z.ai/api/monitor/usage/quota/limit",
+    "headers": { "Authorization": "Bearer {token}" },
+    "interval": 5
+  },
+  "limits": [
+    {
+      "label": "5-hour quota",
+      "short": "5h",
+      "when": "data.limits[unit=3]",
+      "percent": "data.limits[unit=3].percentage",
+      "used": "data.limits[unit=3].currentValue",
+      "limit": "data.limits[unit=3].usage",
+      "remaining": "data.limits[unit=3].remaining",
+      "resets": "data.limits[unit=3].nextResetTime"
+    },
+    {
+      "label": "Weekly quota",
+      "short": "7d",
+      "when": "data.limits[unit=6]",
+      "percent": "data.limits[unit=6].percentage",
+      "used": "data.limits[unit=6].currentValue",
+      "limit": "data.limits[unit=6].usage",
+      "remaining": "data.limits[unit=6].remaining",
+      "resets": "data.limits[unit=6].nextResetTime"
+    },
+    {
+      "label": "MCP monthly usage",
+      "short": "m",
+      "when": "data.limits[type=TIME_LIMIT]",
+      "percent": "data.limits[type=TIME_LIMIT].percentage",
+      "used": "data.limits[type=TIME_LIMIT].currentValue",
+      "limit": "data.limits[type=TIME_LIMIT].usage"
+    }
+  ],
+  "i18n": {
+    "it": {
+      "5-hour, weekly and MCP quotas of your Z.ai GLM Coding Plan.": "Quote di 5 ore, settimanale e MCP del tuo Z.ai GLM Coding Plan.",
+      "5-hour quota": "Quota di 5 ore",
+      "Weekly quota": "Quota settimanale",
+      "MCP monthly usage": "Utilizzo MCP mensile",
+      "Add the API key of your GLM Coding Plan (Z.ai console \u2192 API Keys).": "Aggiungi la chiave API del tuo GLM Coding Plan (console Z.ai \u2192 API Keys)."
+    },
+    "es": {
+      "5-hour, weekly and MCP quotas of your Z.ai GLM Coding Plan.": "Cuotas de 5 horas, semanales y de MCP de tu Z.ai GLM Coding Plan.",
+      "5-hour quota": "Cuota de 5 horas",
+      "Weekly quota": "Cuota semanal",
+      "MCP monthly usage": "Uso mensual de MCP",
+      "Add the API key of your GLM Coding Plan (Z.ai console \u2192 API Keys).": "A\u00f1ade la clave API de tu GLM Coding Plan (consola de Z.ai \u2192 API Keys)."
+    },
+    "fr": {
+      "5-hour, weekly and MCP quotas of your Z.ai GLM Coding Plan.": "Quotas de 5 heures, hebdomadaires et MCP de votre Z.ai GLM Coding Plan.",
+      "5-hour quota": "Quota de 5 heures",
+      "Weekly quota": "Quota hebdomadaire",
+      "MCP monthly usage": "Utilisation MCP mensuelle",
+      "Add the API key of your GLM Coding Plan (Z.ai console \u2192 API Keys).": "Ajoutez la cl\u00e9 API de votre GLM Coding Plan (console Z.ai \u2192 API Keys)."
+    },
+    "de": {
+      "5-hour, weekly and MCP quotas of your Z.ai GLM Coding Plan.": "5-Stunden-, Wochen- und MCP-Kontingente deines Z.ai-GLM-Coding-Plans.",
+      "5-hour quota": "5-Stunden-Kontingent",
+      "Weekly quota": "Wochenkontingent",
+      "MCP monthly usage": "Monatliche MCP-Nutzung",
+      "Add the API key of your GLM Coding Plan (Z.ai console \u2192 API Keys).": "F\u00fcge den API-Schl\u00fcssel deines GLM Coding Plans hinzu (Z.ai-Konsole \u2192 API Keys)."
+    },
+    "pt": {
+      "5-hour, weekly and MCP quotas of your Z.ai GLM Coding Plan.": "Quotas de 5 horas, semanais e MCP do teu Z.ai GLM Coding Plan.",
+      "5-hour quota": "Quota de 5 horas",
+      "Weekly quota": "Quota semanal",
+      "MCP monthly usage": "Uso mensal de MCP",
+      "Add the API key of your GLM Coding Plan (Z.ai console \u2192 API Keys).": "Adiciona a chave de API do teu GLM Coding Plan (consola Z.ai \u2192 API Keys)."
+    }
+  }
+}

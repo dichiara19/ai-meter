@@ -24,13 +24,26 @@ namespace AIMeter
         private DateTime winScanAt = DateTime.MinValue, wslScanAt = DateTime.MinValue;
         private List<Tuple<int, string>> wslPorts = new List<Tuple<int, string>>();
         private Dictionary<int, uint> winPorts = new Dictionary<int, uint>();
-        private Dictionary<uint, uint> parents = new Dictionary<uint, uint>();
+        private Dictionary<uint, uint> parents = new Dictionary<uint, uint>();   // Process to its parent, from this collection's listing.
+        private DateTime wslReadAt = DateTime.MinValue;   // When the memory figures inside WSL were last read.
+        private bool wslDue;                              // Whether this collection reads them again.
+        private HostMemory.WslMemory wslTotals;
+        private readonly Dictionary<int, HostMemory.ProcessMemory> wslProcesses = new Dictionary<int, HostMemory.ProcessMemory>();   // Port to its process's memory, as last read.
         private readonly CodingAgents agents;
-        private readonly HashSet<int> swapPorts = new HashSet<int>();   // Ports of the llama-server instances started by llama-swap.
+        private readonly HashSet<int> swapPorts = new HashSet<int>();   // Ports of the servers started by llama-swap.
+        private readonly Dictionary<int, string> swapKinds = new Dictionary<int, string>();   // Port of a server llama-swap started to its kind; null when it is none AI Meter reads.
+        private readonly Dictionary<int, uint> wslServers = new Dictionary<int, uint>();        // Port to the process serving it in WSL.
+        private readonly Dictionary<int, DateTime> wslMisses = new Dictionary<int, DateTime>();   // Ports whose process was not found, and when.
+        private readonly Dictionary<string, long> fileSizes = new Dictionary<string, long>();    // Model file to its size, while its model is loaded.
+        private long physicalMemory;   // This PC's memory, read once: the bound of what a process can share with the card.
+        private readonly Dictionary<int, NInferEngine.Sample> engineSamples = new Dictionary<int, NInferEngine.Sample>();                    // Port to its engine's last reading.
+        private readonly Dictionary<int, Dictionary<string, string>> engineOptions = new Dictionary<int, Dictionary<string, string>>();   // Port to its engine's options.
+        private readonly HashSet<int> withoutMetrics = new HashSet<int>();   // Ports of llama-server instances started without --metrics.
+        private readonly Dictionary<string, GgufHeader> headers = new Dictionary<string, GgufHeader>();   // Model file to its header (null when it has none), while its model is loaded.
 
         /// <summary>Programs that host a model server, and the default ports of the most common servers.</summary>
         private static readonly string[] KnownProcesses = { "ollama", "llama-server", "llama-swap", "lm studio", "llmster", "koboldcpp", "local-ai", "localai", "vllm" };
-        private static readonly int[] KnownPorts = { 11434, 1234, 9931, 8080, 8000, 5001, 5000 };
+        private static readonly int[] KnownPorts = { 11434, 1234, 9931, 8080, 8000, 5001, 5000, 8188 };
         /// <summary>Processes that run llama-server as their engine: their children are not separate servers.</summary>
         private static readonly string[] Hosts = { "ollama.exe", "llama-swap.exe", "jan-llama-worker.exe", "jan.exe", "lm studio.exe" };
 
@@ -51,14 +64,20 @@ namespace AIMeter
 
         public override ProviderState Collect(Probe p)
         {
+            parents = p.Table.ToDictionary(entry => entry.Key, entry => entry.Value.Parent);
+            // Every read inside WSL goes through its share and wakes the virtual machine: memory there is read at most
+            // every 30 seconds (60 on battery), however often the panel asks, and kept in between.
+            wslDue = (DateTime.Now - wslReadAt).TotalSeconds >= (p.SavingPower ? 60 : 30);
             Discover(p);
+            long inUse;
+            if (physicalMemory == 0) HostMemory.Windows(out inUse, out physicalMemory);
             var models = new List<LocalModel>();
             bool running = false;
             swapPorts.Clear();
-            // llama-swap first: the llama-server instances it starts must not be counted a second time.
+            // llama-swap first: the servers it starts must not be counted a second time.
             foreach (var srv in servers.Values.OrderBy(x => x.Kind == "llamaswap" ? 0 : 1).ToList())
             {
-                if (srv.Kind == "llamacpp" && swapPorts.Contains(srv.Port)) continue;
+                if (srv.Kind != "llamaswap" && swapPorts.Contains(srv.Port)) continue;
                 List<LocalModel> found = null;
                 try { found = Query(srv); }
                 catch (Exception ex) { Trace.WriteLine("local " + srv.Kind + ": " + ex.Message); }
@@ -68,17 +87,47 @@ namespace AIMeter
                     continue;
                 }
                 srv.Failures = 0;
-                running = true;
-                foreach (var m in found) { m.Where = srv.Where; if (m.Server == null) m.Server = ServerName(srv.Kind); }
+                // A server found only by the common interface counts as running once it is shown, below.
+                if (srv.Kind != "openai") running = true;
+                foreach (var m in found)
+                {
+                    m.Where = srv.Where;
+                    if (m.Server == null) m.Server = ServerName(srv.Kind);
+                    if (m.Name == null) m.Name = string.IsNullOrEmpty(srv.Proc) ? m.Server : srv.Proc;
+                    // A llama-swap model is held by its own server; while that one's port is unknown, so is its process.
+                    if (m.Port == 0 && srv.Kind != "llamaswap") m.Port = srv.Port;
+                }
                 if (srv.Kind == "ollama" && srv.Where == "Windows") OllamaActivity(p, found);
                 AttachMemory(p, srv, found);
                 models.AddRange(found);
             }
+            AttachWslMemory(p, models);
+            // Before the video memory of the WSL machine is handed to a model alone there: it is not a proxy's.
+            models.RemoveAll(m => !WorthShowing(m));
+            if (models.Any(m => m.Generic)) running = true;
             ShareWslMemory(p, models);
+            AttachFileSizes(p, models);
+            AttachSegments(models);
+            AttachHeaders(p, models);
 
             var st = new ProviderState { Id = "local", Name = L.T("Local models"), Models = models, Running = running };
             // GPU counters are read here, on the collection thread, and only when a server is active.
-            if (running) { st.GpuTotal = GpuMemory.Total; st.GpuUsed = st.GpuTotal > 0 ? GpuMemory.Used : 0; }
+            if (running)
+            {
+                st.GpuTotal = GpuMemory.Total;
+                st.GpuUsed = st.GpuTotal > 0 ? GpuMemory.Used : 0;
+                HostMemory.Windows(out st.RamUsed, out st.RamTotal);
+                // What the WSL virtual machine holds is part of the PC's memory in use, whether or not a server runs in it.
+                st.WslHeld = p.WorkingSet(p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem").Select(kv => kv.Key));
+                if (!p.WslUp) wslTotals = null;
+                else if (wslDue || wslTotals == null) wslTotals = HostMemory.Wsl(p.WslRoot);
+                var wsl = wslTotals;
+                if (wsl != null)
+                {
+                    st.WslUsed = wsl.Used; st.WslTotal = wsl.Total; st.WslTouched = wsl.Touched;
+                    st.WslSwapUsed = wsl.SwapUsed; st.WslSwapTotal = wsl.SwapTotal;
+                }
+            }
             if (S.LocalAgents)
             {
                 // CLI sessions belong under the model they use, if it is loaded here.
@@ -105,6 +154,8 @@ namespace AIMeter
                 case "kobold": return "KoboldCpp";
                 case "localai": return "LocalAI";
                 case "textgen": return "text-generation-webui";
+                case "comfyui": return "ComfyUI";
+                case "openai": return L.T("OpenAI-compatible");
                 default: return "llama.cpp";
             }
         }
@@ -134,7 +185,6 @@ namespace AIMeter
             {
                 winScanAt = DateTime.Now;
                 winPorts = Native.ListeningPorts();
-                parents = Native.ProcessParents();
                 foreach (var kv in winPorts)
                 {
                     string name;
@@ -232,11 +282,25 @@ namespace AIMeter
             }
             return list;
         }
+        /// <summary>Memory below which a process cannot be holding a model: an idle Python server, a proxy, a gateway.</summary>
+        internal const long WorthAModel = 1L << 30;
+
+        /// <summary>
+        /// A server known by its own interface is always shown. One found only by the common interface is shown while
+        /// its process holds memory worth a model: in WSL its system memory alone, since video memory there cannot be
+        /// told apart by process.
+        /// </summary>
+        internal static bool WorthShowing(LocalModel m)
+        {
+            return !m.Generic || (m.Where == "WSL" ? m.Ram : m.Vram + m.Ram) >= WorthAModel;
+        }
+
         /// <summary>
         /// Which server is listening on the port, from a request only that server can answer. The order matters:
-        /// KoboldCpp imitates llama-server and Ollama, and llama-swap has an /api/version like Ollama.
+        /// KoboldCpp imitates llama-server and Ollama, and llama-swap has an /api/version like Ollama. Last comes
+        /// the interface every OpenAI-compatible server answers: what no earlier request recognised.
         /// </summary>
-        private static string Identify(int port)
+        internal static string Identify(int port)
         {
             // One short request first: if the port does not speak HTTP (adb, databases…) stop immediately.
             if (!SpeaksHttp(port)) return null;
@@ -253,7 +317,8 @@ namespace AIMeter
             if (v1 != null && v1.Cast<object>().Any(x => JPath.Str(JPath.Get(x, "owned_by")) == "vllm")) return "vllm";
             if (JPath.Get(Get(port, "/system"), "loaded_models") is IList) return "localai";
             if (JPath.Get(Get(port, "/v1/internal/model/info"), "model_name") != null) return "textgen";
-            return null;
+            if (JPath.Str(JPath.Get(Get(port, "/system_stats"), "system.comfyui_version")) != null) return "comfyui";
+            return v1 != null ? "openai" : null;
         }
 
         // ================================================================ loaded models
@@ -269,6 +334,8 @@ namespace AIMeter
                 case "kobold": return Kobold(s.Port);
                 case "localai": return LocalAi(s.Port);
                 case "textgen": return TextGen(s.Port);
+                case "comfyui": return ComfyUi(s.Port);
+                case "openai": return OpenAiCompatible(s.Port);
                 default:
                     var m = LlamaCpp(s.Port, "/props", "/slots");
                     return m == null ? null : new List<LocalModel> { m };
@@ -289,6 +356,8 @@ namespace AIMeter
                     Name = JPath.Str(JPath.Get(x, "name")) ?? JPath.Str(JPath.Get(x, "model")),
                     Detail = Join(JPath.Str(JPath.Get(x, "details.parameter_size")), JPath.Str(JPath.Get(x, "details.quantization_level"))),
                     Vram = vram, Ram = Math.Max(0, size - vram),
+                    VramOrigin = vram > 0 ? MemoryOrigin.Reported : MemoryOrigin.Unknown,
+                    RamOrigin = size > vram ? MemoryOrigin.Reported : MemoryOrigin.Unknown,
                     Context = (int)(JPath.Num(JPath.Get(x, "context_length")) ?? 0),
                 });
             }
@@ -368,6 +437,10 @@ namespace AIMeter
                 Detail = JPath.Truthy(JPath.Get(props, "is_sleeping")) ? L.T("sleeping") : JPath.Str(JPath.Get(props, "model_ftype")),
                 Context = (int)(JPath.Num(JPath.Get(props, "default_generation_settings.n_ctx")) ?? 0),
                 Slots = (int)(JPath.Num(JPath.Get(props, "total_slots")) ?? 0),
+                Port = port,
+                File = JPath.Str(JPath.Get(props, "model_path")),
+                // A sleeping model is left alone: only /props and /slots are known not to wake it.
+                Build = JPath.Truthy(JPath.Get(props, "is_sleeping")) ? null : JPath.Str(JPath.Get(props, "build_info")),
             };
             if (JPath.Get(props, "endpoint_slots") is bool && !(bool)JPath.Get(props, "endpoint_slots")) return m;
             var slots = Get(port, slotsPath) as IList;
@@ -427,15 +500,82 @@ namespace AIMeter
                 var proxy = Regex.Match(JPath.Str(JPath.Get(x, "proxy")) ?? "", @"^https?://(localhost|127\.0\.0\.1|\[::1\]):(\d+)/?$");
                 int target = proxy.Success ? int.Parse(proxy.Groups[2].Value, CultureInfo.InvariantCulture) : 0;
                 if (target > 0) swapPorts.Add(target);
-                if (state == "ready" && target > 0) m = LlamaCpp(target, "/props", "/slots");
-                if (m == null) m = new LocalModel();
+                if (state == "ready" && target > 0) m = Upstream(target);
+                if (m == null) m = new LocalModel { Port = target };
+                m.Generic = false;   // llama-swap started it: it is a service of this PC, not a proxy.
                 m.Name = JPath.Str(JPath.Get(x, "name")) ?? id;
                 m.Server = "llama-swap";
                 if (state == "starting") m.Detail = L.T("loading");
                 else if (state == "stopping") m.Detail = L.T("unloading");
                 result.Add(m);
             }
+            foreach (var gone in swapKinds.Keys.Where(k => !swapPorts.Contains(k)).ToList()) swapKinds.Remove(gone);
             return result;
+        }
+
+        /// <summary>
+        /// A server llama-swap started, asked directly as going through llama-swap would load it. llama-swap starts
+        /// any program: what it is, is recognised once like any other server, and read if it is a kind with one
+        /// model. Null for the others, which keep the name llama-swap gives them and the memory of their process.
+        /// </summary>
+        private LocalModel Upstream(int port)
+        {
+            string kind;
+            if (!swapKinds.TryGetValue(port, out kind)) swapKinds[port] = kind = Identify(port);
+            if (kind == "llamacpp") return LlamaCpp(port, "/props", "/slots");
+            var one = kind == "comfyui" ? ComfyUi(port) : kind == "openai" ? OpenAiCompatible(port) : null;
+            if (one == null || one.Count != 1) return null;
+            // Under the name llama-swap gives it, a server with a name of its own keeps that as its engine.
+            if (kind != "openai") one[0].Segments = new ModelSegments { Engine = ServerName(kind) };
+            return one[0];
+        }
+
+        /// <summary>
+        /// ComfyUI: /system_stats gives its version and, for each device, the video memory PyTorch holds in this
+        /// process; /prompt, how many jobs are queued or running. It loads and frees models as its workflows need,
+        /// and names none, so the entry is the server itself. Neither request starts work.
+        /// </summary>
+        internal static List<LocalModel> ComfyUi(int port)
+        {
+            var stats = Get(port, "/system_stats");
+            string version = JPath.Str(JPath.Get(stats, "system.comfyui_version"));
+            if (version == null) return null;
+            long held = 0;
+            var devices = JPath.Get(stats, "devices") as IList;
+            if (devices != null) foreach (var device in devices) held += (long)Math.Max(0, JPath.Num(JPath.Get(device, "torch_vram_total")) ?? 0);
+            return new List<LocalModel> { new LocalModel
+            {
+                Name = "ComfyUI", Detail = version, Port = port,
+                Vram = held, VramOrigin = held > 0 ? MemoryOrigin.Reported : MemoryOrigin.Unknown,
+                Busy = (int)Math.Max(0, JPath.Num(JPath.Get(Get(port, "/prompt"), "exec_info.queue_remaining")) ?? 0),
+            } };
+        }
+
+        /// <summary>
+        /// A server known only by /v1/models, which lists what it can serve, not what is loaded: one entry for the
+        /// server, named after its model when it has one alone, otherwise after its program.
+        /// </summary>
+        internal static List<LocalModel> OpenAiCompatible(int port)
+        {
+            var list = JPath.Get(Get(port, "/v1/models"), "data") as IList;
+            if (list == null) return null;
+            var only = list.Count == 1 ? list[0] : null;
+            return new List<LocalModel> { new LocalModel
+            {
+                Name = JPath.Str(JPath.Get(only, "id")), Port = port, Generic = true, Makes = Output(only),
+                Context = (int)(JPath.Num(JPath.Get(only, "context_length")) ?? JPath.Num(JPath.Get(only, "max_model_len")) ?? 0),
+            } };
+        }
+
+        /// <summary>
+        /// What a model gives when it is not text, from the "architecture.output_modalities" its server lists for it
+        /// (the form OpenRouter set and local servers took up). Null for text and for a server that does not say.
+        /// </summary>
+        internal static string Output(object model)
+        {
+            var outputs = JPath.Get(model, "architecture.output_modalities") as IList;
+            if (outputs == null) return null;
+            return new[] { "image", "audio", "video" }.FirstOrDefault(kind => outputs.Contains(kind));
         }
 
         /// <summary>vLLM: one model per process; /metrics for the requests in progress.</summary>
@@ -470,13 +610,19 @@ namespace AIMeter
         {
             var list = JPath.Get(Get(port, "/system"), "loaded_models") as IList;
             if (list == null) return null;
-            return list.Cast<object>().Select(x => new LocalModel
+            var result = list.Cast<object>().Select(x => new LocalModel
             {
                 Name = JPath.Str(JPath.Get(x, "id")),
                 Detail = JPath.Str(JPath.Get(x, "backend")),
                 Vram = (long)(JPath.Num(JPath.Get(x, "size_vram")) ?? 0),
                 Ram = (long)(JPath.Num(JPath.Get(x, "process.rss_bytes")) ?? 0),
             }).ToList();
+            foreach (var m in result)
+            {
+                if (m.Vram > 0) m.VramOrigin = MemoryOrigin.Reported;
+                if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Reported;
+            }
+            return result;
         }
 
         private static List<LocalModel> TextGen(int port)
@@ -487,7 +633,85 @@ namespace AIMeter
             return new List<LocalModel> { new LocalModel { Name = name, Detail = JPath.Str(JPath.Get(Get(port, "/v1/internal/model/info"), "loader")) } };
         }
 
-        private static double? Metric(string text, string name)
+        /// <summary>
+        /// What the engine says of each model's inside: NInfer's own figures, and for any llama-server interface the
+        /// generation speed of /metrics. Only for a model alone on its port, whose server's figures are its own.
+        /// </summary>
+        private void AttachSegments(List<LocalModel> models)
+        {
+            var alone = AloneOnPort(models).Where(m => m.Build != null).ToList();
+            var ports = new HashSet<int>(alone.Select(m => m.Port));
+            foreach (var port in engineSamples.Keys.Where(k => !ports.Contains(k)).ToList()) engineSamples.Remove(port);
+            foreach (var port in engineOptions.Keys.Where(k => !ports.Contains(k)).ToList()) engineOptions.Remove(port);
+            withoutMetrics.RemoveWhere(port => !ports.Contains(port));
+            foreach (var m in alone)
+            {
+                if (NInferEngine.Is(m.Build)) m.Segments = NInferSegments(m.Port);
+                else if (!withoutMetrics.Contains(m.Port))
+                {
+                    // llama-server answers /metrics only when started with --metrics: one without is asked once.
+                    double? speed = Metric(GetText(m.Port, "/metrics"), "llamacpp:predicted_tokens_seconds");
+                    if (speed == null) withoutMetrics.Add(m.Port);
+                    else if (speed > 0) m.Segments = new ModelSegments { TokensPerSecond = speed.Value };
+                }
+            }
+        }
+
+        /// <summary>
+        /// What the header of a GGUF model file adds, whatever engine loaded it: whether the model is a mixture of
+        /// experts, and an estimate of the key-value cache's size for the context it was loaded with. The header is
+        /// read once and kept while the model is loaded.
+        /// </summary>
+        private void AttachHeaders(Probe p, List<LocalModel> models)
+        {
+            var seen = new HashSet<string>();
+            foreach (var m in models.Where(x => x.File != null && x.File.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)))
+            {
+                string key = m.Where + "|" + m.File;
+                seen.Add(key);
+                GgufHeader header;
+                if (!headers.TryGetValue(key, out header))
+                {
+                    if (m.Where == "WSL" && !p.WslUp) continue;
+                    string file = HostMemory.ResolveFile(m.File, m.Where == "WSL" ? p.WslRoot : null);
+                    headers[key] = header = file == null ? null : GgufHeader.Read(file);
+                }
+                if (header != null) Describe(m, header);
+            }
+            foreach (var key in headers.Keys.Where(k => !seen.Contains(k)).ToList()) headers.Remove(key);
+        }
+
+        /// <summary>Adds to a model what its file's header says, leaving alone what its engine already reported.</summary>
+        internal static void Describe(LocalModel m, GgufHeader header)
+        {
+            // llama-server gives each slot its share of the context: the cache holds them all.
+            long tokens = (long)m.Context * Math.Max(1, m.Slots);
+            long cache = header.KvBytes(tokens);
+            if (header.Experts <= 0 && cache <= 0) return;
+            var s = m.Segments ?? (m.Segments = new ModelSegments());
+            s.Experts = header.Experts;
+            s.ExpertsUsed = header.ExpertsUsed;
+            s.KvBytes = cache;
+            if (s.KvCapacity == 0 && cache > 0 && tokens <= int.MaxValue) s.KvCapacity = (int)tokens;
+        }
+
+        private ModelSegments NInferSegments(int port)
+        {
+            NInferEngine.Sample previous, sample;
+            engineSamples.TryGetValue(port, out previous);
+            var stats = Get(port, "/stats");
+            double uptime = JPath.Num(JPath.Get(stats, "uptime_seconds")) ?? 0;
+            Dictionary<string, string> options;
+            // The options belong to one run of the server: they are read again when it has restarted.
+            if (!engineOptions.TryGetValue(port, out options) || previous == null || uptime < previous.Uptime)
+                engineOptions[port] = options = NInferEngine.Options(Get(port, "/v1/models"));
+            var segments = NInferEngine.Read(stats, options, GetText(port, "/metrics"), previous, DateTime.Now, out sample);
+            if (sample == null) engineSamples.Remove(port);
+            else engineSamples[port] = sample;
+            return segments;
+        }
+
+        internal static double? Metric(string text, string name)
         {
             if (text == null) return null;
             double sum = 0;
@@ -507,47 +731,138 @@ namespace AIMeter
         }
 
         // ================================================================ memory
-        /// <summary>Video and system memory of servers on Windows, from process counters (when the server does not report it).</summary>
+        /// <summary>
+        /// Video and system memory of the models of a server on Windows, from the counters of the process that holds
+        /// each one, when the server reports neither. A process holding several models cannot be split between them.
+        /// </summary>
         private void AttachMemory(Probe p, Server s, List<LocalModel> models)
         {
-            if (s.Where != "Windows" || models.Count == 0 || models.Any(m => m.Vram > 0)) return;
-            // The server and the processes it started (llama-swap's llama-server, LM Studio engines).
-            var pids = new HashSet<uint> { s.Pid };
-            bool grew = true;
-            while (grew)
-            {
-                grew = false;
-                foreach (var kv in parents) if (pids.Contains(kv.Value) && pids.Add(kv.Key)) grew = true;
-            }
-            if (s.Kind == "lmstudio") foreach (var kv in p.Procs) if (kv.Value == "lm studio.exe") pids.Add(kv.Key);
-            long vram = 0, ram = 0;
+            if (s.Where != "Windows") return;
             var gpu = GpuMemory.ByProcess;
-            foreach (var pid in pids)
+            var shared = GpuMemory.SharedByProcess;
+            foreach (var m in AloneOnPort(models))
             {
-                long v;
-                if (gpu.TryGetValue(pid, out v)) vram += v;
-                if (s.Kind == "lmstudio") continue;   // The Electron app's RAM does not belong to the model.
-                try { using (var proc = Process.GetProcessById((int)pid)) ram += proc.WorkingSet64; }
-                catch (ArgumentException) { }
-                catch (InvalidOperationException) { }
+                if (m.Vram > 0 || m.Ram > 0) continue;   // The server's own figures stand.
+                uint holder = s.Pid;
+                if (m.Port != s.Port && !winPorts.TryGetValue(m.Port, out holder)) continue;
+                // The process and those it started (llama-swap's llama-server, LM Studio engines).
+                var pids = new HashSet<uint> { holder };
+                bool grew = true;
+                while (grew)
+                {
+                    grew = false;
+                    foreach (var kv in parents) if (pids.Contains(kv.Value) && pids.Add(kv.Key)) grew = true;
+                }
+                if (s.Kind == "lmstudio") foreach (var kv in p.Procs) if (kv.Value == "lm studio.exe") pids.Add(kv.Key);
+                long vram = 0, v;
+                foreach (var pid in pids) if (gpu.TryGetValue(pid, out v)) vram += v;
+                m.Vram = vram;
+                if (s.Kind != "lmstudio") m.Ram = p.WorkingSet(pids);   // The Electron app's RAM does not belong to the model.
+                // The counters were read: a process absent from them holds no video memory, which is not the same as unknown.
+                if (m.Vram > 0 || gpu.Count > 0) m.VramOrigin = MemoryOrigin.Measured;
+                if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Measured;
+                m.GpuShared = SharedWithCard(shared, pids, physicalMemory);
             }
-            if (models.Count == 1) { models[0].Vram = vram; if (models[0].Ram == 0 && vram == 0) models[0].Ram = ram; }
+        }
+
+        /// <summary>
+        /// System memory the processes share with the graphics card. A driver can report nonsense for a process (159 GB
+        /// seen on a 32 GB PC): a figure larger than the PC's memory counts as unknown. The process's own resident
+        /// memory is no bound: pinned memory it has partly swapped out is still shared.
+        /// </summary>
+        internal static long SharedWithCard(Dictionary<uint, long> shared, IEnumerable<uint> pids, long physicalMemory)
+        {
+            long total = 0, v;
+            foreach (var pid in pids) if (shared.TryGetValue(pid, out v)) total += v;
+            return total > 0 && total <= physicalMemory ? total : 0;
+        }
+
+        /// <summary>
+        /// The size of each model's file, read once and kept while the model is loaded. With it, what is neither in
+        /// video nor in system memory is known to be still on disk.
+        /// </summary>
+        private void AttachFileSizes(Probe p, List<LocalModel> models)
+        {
+            var seen = new HashSet<string>();
+            foreach (var m in models.Where(x => !string.IsNullOrEmpty(x.File)))
+            {
+                string key = m.Where + "|" + m.File;
+                seen.Add(key);
+                long size;
+                if (!fileSizes.TryGetValue(key, out size))
+                {
+                    if (m.Where == "WSL" && !p.WslUp) continue;
+                    size = HostMemory.FileSize(m.File, m.Where == "WSL" ? p.WslRoot : null);
+                    fileSizes[key] = size;
+                }
+                m.FileSize = size;
+            }
+            foreach (var key in fileSizes.Keys.Where(k => !seen.Contains(k)).ToList()) fileSizes.Remove(key);
+        }
+
+        /// <summary>The models that are the only one on their port: the memory of that port's process is theirs.</summary>
+        private static List<LocalModel> AloneOnPort(IEnumerable<LocalModel> models)
+        {
+            return models.Where(m => m.Port > 0).GroupBy(m => m.Port).Where(g => g.Count() == 1).Select(g => g.First()).ToList();
+        }
+
+        /// <summary>
+        /// System memory of the models in WSL whose server reports none: the resident memory of the process serving
+        /// each one, read from /proc as a file. /proc is listed only to find a process, and not again for a port that
+        /// had none until a minute has passed (five on battery).
+        /// </summary>
+        private void AttachWslMemory(Probe p, List<LocalModel> models)
+        {
+            var unknown = AloneOnPort(models.Where(m => m.Where == "WSL")).Where(m => m.Vram == 0 && m.Ram == 0).ToList();
+            foreach (var port in wslServers.Keys.Where(k => unknown.All(m => m.Port != k)).ToList()) wslServers.Remove(port);
+            foreach (var port in wslMisses.Keys.Where(k => unknown.All(m => m.Port != k)).ToList()) wslMisses.Remove(port);
+            foreach (var port in wslProcesses.Keys.Where(k => unknown.All(m => m.Port != k)).ToList()) wslProcesses.Remove(port);
+            if (!p.WslUp) return;
+            foreach (var m in unknown)
+            {
+                HostMemory.ProcessMemory kept;
+                if (!wslDue && wslProcesses.TryGetValue(m.Port, out kept)) { Apply(m, kept); continue; }
+                uint pid;
+                if (wslServers.TryGetValue(m.Port, out pid) && !HostMemory.Serves(HostMemory.CommandLine(p.WslRoot, pid), m.Port, m.File)) wslServers.Remove(m.Port);
+                if (!wslServers.TryGetValue(m.Port, out pid))
+                {
+                    DateTime missedAt;
+                    if (wslMisses.TryGetValue(m.Port, out missedAt) && (DateTime.Now - missedAt).TotalSeconds < (p.SavingPower ? 300 : 60)) continue;
+                    pid = HostMemory.FindServer(p.WslRoot, m.Port, m.File);
+                    if (pid == 0) { wslMisses[m.Port] = DateTime.Now; continue; }
+                    wslMisses.Remove(m.Port);
+                    wslServers[m.Port] = pid;
+                }
+                var memory = HostMemory.Process(p.WslRoot, pid);
+                wslProcesses[m.Port] = memory;
+                Apply(m, memory);
+            }
+            if (wslDue) wslReadAt = DateTime.Now;
+        }
+
+        private static void Apply(LocalModel m, HostMemory.ProcessMemory memory)
+        {
+            m.Ram = memory.Resident;
+            m.RamMapped = memory.Mapped;
+            m.Swapped = memory.Swapped;
+            if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Measured;
         }
 
         /// <summary>
         /// Video memory used in WSL is all charged to vmmemWSL (and vmwp): it cannot be split between Linux processes.
         /// It is assigned to the model if that is the only one in WSL without its own figure.
         /// </summary>
-        private static void ShareWslMemory(Probe p, List<LocalModel> models)
+        private void ShareWslMemory(Probe p, List<LocalModel> models)
         {
             var unknown = models.Where(m => m.Where == "WSL" && m.Vram == 0).ToList();
             if (unknown.Count != 1 || models.Any(m => m.Where == "WSL" && m.Vram > 0)) return;
             long v, total = 0;
             var gpu = GpuMemory.ByProcess;
-            foreach (var kv in p.Procs)
-                if (kv.Value == "vmmemwsl" || kv.Value == "vmmem" || kv.Value == "vmwp.exe")
-                    if (gpu.TryGetValue(kv.Key, out v)) total += v;
+            var machine = p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem" || kv.Value == "vmwp.exe").Select(kv => kv.Key).ToList();
+            foreach (var pid in machine) if (gpu.TryGetValue(pid, out v)) total += v;
             unknown[0].Vram = total;
+            if (total > 0 || gpu.Count > 0) unknown[0].VramOrigin = MemoryOrigin.Measured;
+            unknown[0].GpuShared = SharedWithCard(GpuMemory.SharedByProcess, machine, physicalMemory);
         }
 
         // ================================================================ local HTTP
@@ -569,8 +884,20 @@ namespace AIMeter
                 r.Method = "GET";
                 using (r.GetResponse()) return true;
             }
-            catch (WebException e) { return e.Response != null; }
+            catch (WebException e) { return Release(e); }
             catch (IOException) { return false; }
+        }
+
+        /// <summary>
+        /// Closes the answer a refused request carries (a 404, say), and says whether there was one. Left open it keeps
+        /// its connection, of which a host gets two: after two paths a server does not have, every later request to
+        /// it waited for a connection until it timed out, and a server recognised late in the order was never found.
+        /// </summary>
+        private static bool Release(WebException e)
+        {
+            if (e.Response == null) return false;
+            e.Response.Close();
+            return true;
         }
 
         private static string GetText(int port, string path)
@@ -591,7 +918,7 @@ namespace AIMeter
                     return new string(buf, 0, n);
                 }
             }
-            catch (WebException) { return null; }
+            catch (WebException e) { Release(e); return null; }
             catch (IOException) { return null; }
         }
     }

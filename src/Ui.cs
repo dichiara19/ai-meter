@@ -250,17 +250,129 @@ namespace AIMeter
             if (p.Models == null || p.Models.Count == 0) return L.T("Local models: none loaded");
             var lines = new List<string> { L.N(p.Models.Count, "{0} local model loaded", "{0} local models loaded") };
             foreach (var m in p.Models) lines.Add("• " + m.Name + " · " + string.Join(" · ", LocalFacts(m)));
-            if (p.GpuTotal > 0) lines.Add(L.F("Video memory: {0}", GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long)));
+            lines.AddRange(LocalMemoryLines(p));
             return string.Join("\n", lines);
         }
 
-        /// <summary>Format a local model's server, location, memory and context for compact card text.</summary>
-        public static List<string> LocalFacts(LocalModel m)
+        /// <summary>The memories local models live in, one line each: the card, this PC and the WSL virtual machine.</summary>
+        public static List<string> LocalMemoryLines(ProviderState p)
         {
-            var f = new List<string> { m.Where == "WSL" ? m.Server + " (WSL)" : m.Server };
+            var lines = new List<string>();
+            if (p.GpuTotal > 0) lines.Add(L.F("Video memory: {0}", GpuMemory.Value(p.GpuUsed, p.GpuTotal, ValueStyle.Long)));
+            if (p.RamTotal > 0) lines.Add(SystemMemoryLines(p)[0]);
+            if (p.WslTotal > 0) lines.Add(WslMemoryLines(p)[0]);
+            return lines;
+        }
+
+        /// <summary>System memory of this PC, then how much of it the local models hold, wherever they run.</summary>
+        public static List<string> SystemMemoryLines(ProviderState p)
+        {
+            var lines = new List<string> { L.F("System memory: {0}", GpuMemory.Value(p.RamUsed, p.RamTotal, ValueStyle.Long)) };
+            long models = p.Models.Sum(m => m.Ram);
+            if (models > 0) lines.Add(L.F("Local models: {0}", GpuMemory.Format(models)));
+            return lines;
+        }
+
+        /// <summary>
+        /// What WSL uses that is not in RAM: the part Windows compressed or paged out (an estimate) and the swap used
+        /// inside WSL. Empty when neither is worth stating, which is the usual case.
+        /// </summary>
+        public static List<string> WslOutsideNotes(ProviderState p)
+        {
+            var notes = new List<string>();
+            // The estimate is the difference of two readings taken apart, and the two disagree by some hundreds of megabytes
+            // with nothing paged out (476 MB seen on an idle machine): below a gigabyte it says nothing.
+            if (p.WslOutside >= 4 * WorthStating) notes.Add(L.F("~{0} compressed or paged out by Windows", GpuMemory.Format(p.WslOutside)));
+            if (p.WslSwapUsed >= WorthStating) notes.Add(L.F("{0} in swap", GpuMemory.Format(p.WslSwapUsed)));
+            return notes;
+        }
+
+        /// <summary>Memory inside WSL, then what its models hold and what the virtual machine holds on Windows.</summary>
+        public static List<string> WslMemoryLines(ProviderState p)
+        {
+            var lines = new List<string> { L.F("WSL memory: {0}", GpuMemory.Value(p.WslUsed, p.WslTotal, ValueStyle.Long)) };
+            long models = p.Models.Where(m => m.Where == "WSL").Sum(m => m.Ram);
+            if (models > 0) lines.Add(L.F("Local models: {0}", GpuMemory.Format(models)));
+            if (p.WslHeld > 0) lines.Add(L.F("Held on Windows: {0}", GpuMemory.Format(p.WslHeld)));
+            lines.AddRange(WslOutsideNotes(p));
+            return lines;
+        }
+
+        /// <summary>Below this a part of a model's memory is noise (a rounding of the estimate, a few pages swapped) and is not stated.</summary>
+        internal const long WorthStating = 256L << 20;
+
+        /// <summary>
+        /// Where a model is, one line per figure with how it is known (ADR 0006): reported by its server, measured
+        /// from its process or estimated. For the tooltip, where there is room to say it.
+        /// </summary>
+        public static List<string> LocalPlacement(LocalModel m)
+        {
+            var lines = new List<string>();
+            if (m.Vram > 0) lines.Add(L.F("Video memory: {0}", Sourced(m.Vram, m.VramOrigin)));
+            if (m.Ram > 0) lines.Add(L.F("System memory: {0}", Sourced(m.Ram, m.RamOrigin)));
+            if (m.RamMapped >= WorthStating) lines.Add(L.F("Mapped from files: {0}", GpuMemory.Format(m.RamMapped)));
+            if (m.GpuShared >= WorthStating) lines.Add(L.F("Shared with the graphics card: {0}", GpuMemory.Format(m.GpuShared)));
+            if (m.Swapped >= WorthStating) lines.Add(L.F("In swap: {0}", GpuMemory.Format(m.Swapped)));
+            if (m.FileSize > 0) lines.Add(L.F("Model file: {0}", GpuMemory.Format(m.FileSize)));
+            if (m.OnDisk >= WorthStating) lines.Add(L.F("Still on disk: about {0} (estimate)", GpuMemory.Format(m.OnDisk)));
+            return lines;
+        }
+
+        /// <summary>
+        /// The inside of a model as its engine reports it, one line per segment: the experts of a mixture of experts
+        /// (where they are, how many the card keeps, how often a routed one is found there, what is being moved to
+        /// the card) and the key-value cache. Empty for an engine that reports none of it.
+        /// </summary>
+        public static List<string> SegmentLines(LocalModel m)
+        {
+            var lines = new List<string>();
+            var s = m.Segments;
+            if (s == null) return lines;
+            var experts = new List<string>();
+            if (s.Experts > 0) experts.Add(s.ExpertsUsed > 0 ? L.F("{0} experts, {1} per token", s.Experts, s.ExpertsUsed) : L.F("{0} experts", s.Experts));
+            if (s.ExpertsIn != null) experts.Add(L.T(s.ExpertsIn == "host" ? "in system memory" : s.ExpertsIn == "disk" ? "on disk" : "in video memory"));
+            if (s.ExpertSlots > 0) experts.Add(L.F("{0} kept on the card", s.ExpertSlots));
+            if (s.ExpertHitRatio >= 0) experts.Add(L.F("{0}% found there", Math.Round(s.ExpertHitRatio * 100)));
+            if (s.ExpertBytesPerSecond >= (1L << 20)) experts.Add(L.F("{0}/s to the card", GpuMemory.Format(s.ExpertBytesPerSecond)));
+            if (experts.Count > 0) lines.Add(L.F("MoE experts: {0}", string.Join(" · ", experts)));
+            var cache = new List<string>();
+            if (s.KvBytes >= WorthStating) cache.Add("~" + GpuMemory.Format(s.KvBytes));
+            if (s.KvCapacity > 0) cache.Add(L.F("up to {0} tokens", Tokens(s.KvCapacity)));
+            if (!string.IsNullOrEmpty(s.KvType)) cache.Add(s.KvType);
+            if (cache.Count > 0) lines.Add(L.F("KV cache: {0}", string.Join(" · ", cache)));
+            return lines;
+        }
+
+        /// <summary>Where a model is, in short: video memory, system memory, then what is on disk or in swap, when worth stating.</summary>
+        public static List<string> MemoryFacts(LocalModel m)
+        {
+            var f = new List<string>();
             if (m.Vram > 0) f.Add(L.F("{0} VRAM", GpuMemory.Format(m.Vram)));
             if (m.Ram > 0) f.Add(L.F("{0} RAM", GpuMemory.Format(m.Ram)));
+            if (m.OnDisk >= WorthStating) f.Add(L.F("~{0} on disk", GpuMemory.Format(m.OnDisk)));
+            if (m.Swapped >= WorthStating) f.Add(L.F("{0} in swap", GpuMemory.Format(m.Swapped)));
+            return f;
+        }
+
+        private static string Sourced(long bytes, MemoryOrigin origin)
+        {
+            string size = GpuMemory.Format(bytes);
+            return origin == MemoryOrigin.Reported ? L.F("{0}, reported by the server", size)
+                 : origin == MemoryOrigin.Measured ? L.F("{0}, measured from the process", size) : size;
+        }
+
+        /// <summary>
+        /// Format a local model's server, location, memory and context for compact card text. Without the memory where
+        /// the card draws it as the model's own bar, with these figures as its legend.
+        /// </summary>
+        public static List<string> LocalFacts(LocalModel m, bool memory = true)
+        {
+            var f = new List<string> { m.Where == "WSL" ? m.Server + " (WSL)" : m.Server };
+            if (m.Segments != null && m.Segments.Engine != null) f.Add(m.Segments.Engine);
+            if (m.Makes != null) f.Add(L.T(m.Makes == "image" ? "images" : m.Makes == "audio" ? "audio" : "video"));
+            if (memory) f.AddRange(MemoryFacts(m));
             if (m.Context > 0) f.Add(L.F("{0} context", Tokens(m.Context)));
+            if (m.Segments != null && m.Segments.TokensPerSecond >= 0.05) f.Add(L.F("{0} tok/s", m.Segments.TokensPerSecond.ToString("0.#", L.Culture)));
             if (m.Busy > 0) f.Add(L.T("working"));
             return f;
         }
