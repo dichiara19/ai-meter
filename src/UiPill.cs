@@ -99,14 +99,27 @@ namespace AIMeter
             return row;
         }
 
+        /// <summary>Whether the user took this service out of the taskbar pill and the overlay (Settings.PillHidden).</summary>
+        private static bool HiddenFromPill(ProviderState p) { return Settings.Current != null && Settings.Current.HiddenFromPill(p.Id); }
+
+        /// <summary>
+        /// The cloud services the taskbar pill and the overlay show, in order: those on every surface, without the
+        /// ones the user keeps only in the panel, the desktop widget and tooltips.
+        /// </summary>
+        internal static IEnumerable<ProviderState> PillServices(Snapshot s)
+        {
+            return s.Shown.Where(p => p.Models == null && !HiddenFromPill(p));
+        }
+
         /// <summary>
         /// Build compact logo, value and bar rows for the overlay and taskbar pill.
         /// The optional dark flag controls logo variants; null follows the app theme.
+        /// With every service taken out of the pill, the app's name keeps it visible and clickable.
         /// </summary>
         public static StackPanel PillRow(Snapshot s, string metric, bool? dark)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            foreach (var p in s.Shown.Where(x => x.Models == null))
+            foreach (var p in PillServices(s))
             {
                 if (row.Children.Count > 0)
                 {
@@ -160,7 +173,7 @@ namespace AIMeter
                 row.Children.Add(item);
             }
             var local = s.Providers.FirstOrDefault(x => x.Models != null);
-            if (local != null && local.Running) row.Children.Add(LocalPill(local, row.Children.Count > 0));
+            if (local != null && local.Running && !HiddenFromPill(local)) row.Children.Add(LocalPill(local, row.Children.Count > 0));
             if (row.Children.Count == 0) row.Children.Add(Text("AI Meter", 12, "Text2"));
             return row;
         }

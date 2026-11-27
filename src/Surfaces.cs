@@ -155,7 +155,7 @@ namespace AIMeter
 
         private FrameworkElement Collapsed(Snapshot s)
         {
-            var five = s.Shown.Where(p => p.Models == null).Select(p => Tuple.Create(p, Ui.Primary(p))).ToList();
+            var five = Ui.PillServices(s).Select(p => Tuple.Create(p, Ui.Primary(p))).ToList();
             var icon = Ui.RingIcon(five, 24);
             // A real button: click, keyboard and accessibility tools all expand it again in the same way.
             var b = new Button { Content = icon, Padding = new Thickness(6), Cursor = Cursors.Hand };

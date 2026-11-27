@@ -229,6 +229,11 @@ namespace AIMeter
             }
             var def2 = Definitions.Get(id);
             if (def2 != null && Json.Obj(def2.Raw, "spend") != null) rows.Add(BudgetRow(def2));
+            // A catalogue-only service never reaches the pill, so it has nothing to choose here.
+            if (def2 == null || !def2.CatalogueOnly)
+                rows.Add(Row(null, L.T("Show in the taskbar"),
+                    L.T("Turn it off to keep this service out of the pill and the overlay. It stays in the panel, the desktop widget and the pill's tooltip."),
+                    Toggle(!S.HiddenFromPill(id), v => { if (v) S.PillHidden.Remove(id); else S.PillHidden[id] = true; Changed(); })));
             if (id != "local") AddLimitRow(rows, id);
             return rows;
         }
