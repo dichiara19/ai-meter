@@ -571,7 +571,8 @@ namespace AIMeter
                 foreach (var pid in pids) if (gpu.TryGetValue(pid, out v)) vram += v;
                 m.Vram = vram;
                 if (s.Kind != "lmstudio") m.Ram = WorkingSet(pids);   // The Electron app's RAM does not belong to the model.
-                if (m.Vram > 0) m.VramOrigin = MemoryOrigin.Measured;
+                // The counters were read: a process absent from them holds no video memory, which is not the same as unknown.
+                if (m.Vram > 0 || gpu.Count > 0) m.VramOrigin = MemoryOrigin.Measured;
                 if (m.Ram > 0) m.RamOrigin = MemoryOrigin.Measured;
                 m.GpuShared = SharedWithCard(shared, pids, physicalMemory);
             }
@@ -676,7 +677,7 @@ namespace AIMeter
             var machine = p.Procs.Where(kv => kv.Value == "vmmemwsl" || kv.Value == "vmmem" || kv.Value == "vmwp.exe").Select(kv => kv.Key).ToList();
             foreach (var pid in machine) if (gpu.TryGetValue(pid, out v)) total += v;
             unknown[0].Vram = total;
-            if (total > 0) unknown[0].VramOrigin = MemoryOrigin.Measured;
+            if (total > 0 || gpu.Count > 0) unknown[0].VramOrigin = MemoryOrigin.Measured;
             unknown[0].GpuShared = SharedWithCard(GpuMemory.SharedByProcess, machine, physicalMemory);
         }
 
