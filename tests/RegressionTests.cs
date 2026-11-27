@@ -72,6 +72,7 @@ namespace AIMeter
             LocalMemoryTests.Register(Test);
             LocalEngineTests.Register(Test);
             GgufHeaderTests.Register(Test);
+            LocalServerTests.Register(Test);
             LogoTests.Register(Test);
             TouchTests.Register(Test);
             FullScreenTests.Register(Test);

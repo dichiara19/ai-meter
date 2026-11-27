@@ -369,6 +369,7 @@ namespace AIMeter
         {
             var f = new List<string> { m.Where == "WSL" ? m.Server + " (WSL)" : m.Server };
             if (m.Segments != null && m.Segments.Engine != null) f.Add(m.Segments.Engine);
+            if (m.Makes != null) f.Add(L.T(m.Makes == "image" ? "images" : m.Makes == "audio" ? "audio" : "video"));
             if (memory) f.AddRange(MemoryFacts(m));
             if (m.Context > 0) f.Add(L.F("{0} context", Tokens(m.Context)));
             if (m.Segments != null && m.Segments.TokensPerSecond >= 0.05) f.Add(L.F("{0} tok/s", m.Segments.TokensPerSecond.ToString("0.#", L.Culture)));

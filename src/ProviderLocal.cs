@@ -26,7 +26,8 @@ namespace AIMeter
         private Dictionary<int, uint> winPorts = new Dictionary<int, uint>();
         private Dictionary<uint, uint> parents = new Dictionary<uint, uint>();
         private readonly CodingAgents agents;
-        private readonly HashSet<int> swapPorts = new HashSet<int>();   // Ports of the llama-server instances started by llama-swap.
+        private readonly HashSet<int> swapPorts = new HashSet<int>();   // Ports of the servers started by llama-swap.
+        private readonly Dictionary<int, string> swapKinds = new Dictionary<int, string>();   // Port of a server llama-swap started to its kind; null when it is none AI Meter reads.
         private readonly Dictionary<int, uint> wslServers = new Dictionary<int, uint>();        // Port to the process serving it in WSL.
         private readonly Dictionary<int, DateTime> wslMisses = new Dictionary<int, DateTime>();   // Ports whose process was not found, and when.
         private readonly Dictionary<string, long> fileSizes = new Dictionary<string, long>();    // Model file to its size, while its model is loaded.
@@ -38,7 +39,7 @@ namespace AIMeter
 
         /// <summary>Programs that host a model server, and the default ports of the most common servers.</summary>
         private static readonly string[] KnownProcesses = { "ollama", "llama-server", "llama-swap", "lm studio", "llmster", "koboldcpp", "local-ai", "localai", "vllm" };
-        private static readonly int[] KnownPorts = { 11434, 1234, 9931, 8080, 8000, 5001, 5000 };
+        private static readonly int[] KnownPorts = { 11434, 1234, 9931, 8080, 8000, 5001, 5000, 8188 };
         /// <summary>Processes that run llama-server as their engine: their children are not separate servers.</summary>
         private static readonly string[] Hosts = { "ollama.exe", "llama-swap.exe", "jan-llama-worker.exe", "jan.exe", "lm studio.exe" };
 
@@ -65,10 +66,10 @@ namespace AIMeter
             var models = new List<LocalModel>();
             bool running = false;
             swapPorts.Clear();
-            // llama-swap first: the llama-server instances it starts must not be counted a second time.
+            // llama-swap first: the servers it starts must not be counted a second time.
             foreach (var srv in servers.Values.OrderBy(x => x.Kind == "llamaswap" ? 0 : 1).ToList())
             {
-                if (srv.Kind == "llamacpp" && swapPorts.Contains(srv.Port)) continue;
+                if (srv.Kind != "llamaswap" && swapPorts.Contains(srv.Port)) continue;
                 List<LocalModel> found = null;
                 try { found = Query(srv); }
                 catch (Exception ex) { Trace.WriteLine("local " + srv.Kind + ": " + ex.Message); }
@@ -78,11 +79,13 @@ namespace AIMeter
                     continue;
                 }
                 srv.Failures = 0;
-                running = true;
+                // A server found only by the common interface counts as running once it is shown, below.
+                if (srv.Kind != "openai") running = true;
                 foreach (var m in found)
                 {
                     m.Where = srv.Where;
                     if (m.Server == null) m.Server = ServerName(srv.Kind);
+                    if (m.Name == null) m.Name = string.IsNullOrEmpty(srv.Proc) ? m.Server : srv.Proc;
                     // A llama-swap model is held by its own server; while that one's port is unknown, so is its process.
                     if (m.Port == 0 && srv.Kind != "llamaswap") m.Port = srv.Port;
                 }
@@ -91,6 +94,9 @@ namespace AIMeter
                 models.AddRange(found);
             }
             AttachWslMemory(p, models);
+            // Before the video memory of the WSL machine is handed to a model alone there: it is not a proxy's.
+            models.RemoveAll(m => !WorthShowing(m));
+            if (models.Any(m => m.Generic)) running = true;
             ShareWslMemory(p, models);
             AttachFileSizes(p, models);
             AttachSegments(models);
@@ -138,6 +144,8 @@ namespace AIMeter
                 case "kobold": return "KoboldCpp";
                 case "localai": return "LocalAI";
                 case "textgen": return "text-generation-webui";
+                case "comfyui": return "ComfyUI";
+                case "openai": return L.T("OpenAI-compatible");
                 default: return "llama.cpp";
             }
         }
@@ -265,11 +273,25 @@ namespace AIMeter
             }
             return list;
         }
+        /// <summary>Memory below which a process cannot be holding a model: an idle Python server, a proxy, a gateway.</summary>
+        internal const long WorthAModel = 1L << 30;
+
+        /// <summary>
+        /// A server known by its own interface is always shown. One found only by the common interface is shown while
+        /// its process holds memory worth a model: in WSL its system memory alone, since video memory there cannot be
+        /// told apart by process.
+        /// </summary>
+        internal static bool WorthShowing(LocalModel m)
+        {
+            return !m.Generic || (m.Where == "WSL" ? m.Ram : m.Vram + m.Ram) >= WorthAModel;
+        }
+
         /// <summary>
         /// Which server is listening on the port, from a request only that server can answer. The order matters:
-        /// KoboldCpp imitates llama-server and Ollama, and llama-swap has an /api/version like Ollama.
+        /// KoboldCpp imitates llama-server and Ollama, and llama-swap has an /api/version like Ollama. Last comes
+        /// the interface every OpenAI-compatible server answers: what no earlier request recognised.
         /// </summary>
-        private static string Identify(int port)
+        internal static string Identify(int port)
         {
             // One short request first: if the port does not speak HTTP (adb, databases…) stop immediately.
             if (!SpeaksHttp(port)) return null;
@@ -286,7 +308,8 @@ namespace AIMeter
             if (v1 != null && v1.Cast<object>().Any(x => JPath.Str(JPath.Get(x, "owned_by")) == "vllm")) return "vllm";
             if (JPath.Get(Get(port, "/system"), "loaded_models") is IList) return "localai";
             if (JPath.Get(Get(port, "/v1/internal/model/info"), "model_name") != null) return "textgen";
-            return null;
+            if (JPath.Str(JPath.Get(Get(port, "/system_stats"), "system.comfyui_version")) != null) return "comfyui";
+            return v1 != null ? "openai" : null;
         }
 
         // ================================================================ loaded models
@@ -302,6 +325,8 @@ namespace AIMeter
                 case "kobold": return Kobold(s.Port);
                 case "localai": return LocalAi(s.Port);
                 case "textgen": return TextGen(s.Port);
+                case "comfyui": return ComfyUi(s.Port);
+                case "openai": return OpenAiCompatible(s.Port);
                 default:
                     var m = LlamaCpp(s.Port, "/props", "/slots");
                     return m == null ? null : new List<LocalModel> { m };
@@ -466,15 +491,82 @@ namespace AIMeter
                 var proxy = Regex.Match(JPath.Str(JPath.Get(x, "proxy")) ?? "", @"^https?://(localhost|127\.0\.0\.1|\[::1\]):(\d+)/?$");
                 int target = proxy.Success ? int.Parse(proxy.Groups[2].Value, CultureInfo.InvariantCulture) : 0;
                 if (target > 0) swapPorts.Add(target);
-                if (state == "ready" && target > 0) m = LlamaCpp(target, "/props", "/slots");
+                if (state == "ready" && target > 0) m = Upstream(target);
                 if (m == null) m = new LocalModel { Port = target };
+                m.Generic = false;   // llama-swap started it: it is a service of this PC, not a proxy.
                 m.Name = JPath.Str(JPath.Get(x, "name")) ?? id;
                 m.Server = "llama-swap";
                 if (state == "starting") m.Detail = L.T("loading");
                 else if (state == "stopping") m.Detail = L.T("unloading");
                 result.Add(m);
             }
+            foreach (var gone in swapKinds.Keys.Where(k => !swapPorts.Contains(k)).ToList()) swapKinds.Remove(gone);
             return result;
+        }
+
+        /// <summary>
+        /// A server llama-swap started, asked directly as going through llama-swap would load it. llama-swap starts
+        /// any program: what it is, is recognised once like any other server, and read if it is a kind with one
+        /// model. Null for the others, which keep the name llama-swap gives them and the memory of their process.
+        /// </summary>
+        private LocalModel Upstream(int port)
+        {
+            string kind;
+            if (!swapKinds.TryGetValue(port, out kind)) swapKinds[port] = kind = Identify(port);
+            if (kind == "llamacpp") return LlamaCpp(port, "/props", "/slots");
+            var one = kind == "comfyui" ? ComfyUi(port) : kind == "openai" ? OpenAiCompatible(port) : null;
+            if (one == null || one.Count != 1) return null;
+            // Under the name llama-swap gives it, a server with a name of its own keeps that as its engine.
+            if (kind != "openai") one[0].Segments = new ModelSegments { Engine = ServerName(kind) };
+            return one[0];
+        }
+
+        /// <summary>
+        /// ComfyUI: /system_stats gives its version and, for each device, the video memory PyTorch holds in this
+        /// process; /prompt, how many jobs are queued or running. It loads and frees models as its workflows need,
+        /// and names none, so the entry is the server itself. Neither request starts work.
+        /// </summary>
+        internal static List<LocalModel> ComfyUi(int port)
+        {
+            var stats = Get(port, "/system_stats");
+            string version = JPath.Str(JPath.Get(stats, "system.comfyui_version"));
+            if (version == null) return null;
+            long held = 0;
+            var devices = JPath.Get(stats, "devices") as IList;
+            if (devices != null) foreach (var device in devices) held += (long)Math.Max(0, JPath.Num(JPath.Get(device, "torch_vram_total")) ?? 0);
+            return new List<LocalModel> { new LocalModel
+            {
+                Name = "ComfyUI", Detail = version, Port = port,
+                Vram = held, VramOrigin = held > 0 ? MemoryOrigin.Reported : MemoryOrigin.Unknown,
+                Busy = (int)Math.Max(0, JPath.Num(JPath.Get(Get(port, "/prompt"), "exec_info.queue_remaining")) ?? 0),
+            } };
+        }
+
+        /// <summary>
+        /// A server known only by /v1/models, which lists what it can serve, not what is loaded: one entry for the
+        /// server, named after its model when it has one alone, otherwise after its program.
+        /// </summary>
+        internal static List<LocalModel> OpenAiCompatible(int port)
+        {
+            var list = JPath.Get(Get(port, "/v1/models"), "data") as IList;
+            if (list == null) return null;
+            var only = list.Count == 1 ? list[0] : null;
+            return new List<LocalModel> { new LocalModel
+            {
+                Name = JPath.Str(JPath.Get(only, "id")), Port = port, Generic = true, Makes = Output(only),
+                Context = (int)(JPath.Num(JPath.Get(only, "context_length")) ?? JPath.Num(JPath.Get(only, "max_model_len")) ?? 0),
+            } };
+        }
+
+        /// <summary>
+        /// What a model gives when it is not text, from the "architecture.output_modalities" its server lists for it
+        /// (the form OpenRouter set and local servers took up). Null for text and for a server that does not say.
+        /// </summary>
+        internal static string Output(object model)
+        {
+            var outputs = JPath.Get(model, "architecture.output_modalities") as IList;
+            if (outputs == null) return null;
+            return new[] { "image", "audio", "video" }.FirstOrDefault(kind => outputs.Contains(kind));
         }
 
         /// <summary>vLLM: one model per process; /metrics for the requests in progress.</summary>
@@ -786,8 +878,20 @@ namespace AIMeter
                 r.Method = "GET";
                 using (r.GetResponse()) return true;
             }
-            catch (WebException e) { return e.Response != null; }
+            catch (WebException e) { return Release(e); }
             catch (IOException) { return false; }
+        }
+
+        /// <summary>
+        /// Closes the answer a refused request carries (a 404, say), and says whether there was one. Left open it keeps
+        /// its connection, of which a host gets two: after two paths a server does not have, every later request to
+        /// it waited for a connection until it timed out, and a server recognised late in the order was never found.
+        /// </summary>
+        private static bool Release(WebException e)
+        {
+            if (e.Response == null) return false;
+            e.Response.Close();
+            return true;
         }
 
         private static string GetText(int port, string path)
@@ -808,7 +912,7 @@ namespace AIMeter
                     return new string(buf, 0, n);
                 }
             }
-            catch (WebException) { return null; }
+            catch (WebException e) { Release(e); return null; }
             catch (IOException) { return null; }
         }
     }

@@ -274,6 +274,12 @@ namespace AIMeter
         public int Port;           // Port of the process that holds the model; zero means unknown.
         public string File;        // The model file as its server names it, when known.
         public string Build;       // The build string of a llama-server interface that is awake: it names the engine behind it.
+        public string Makes;       // "image", "audio" or "video" when the server states that is what the model gives; null for text or unknown.
+        /// <summary>
+        /// Found only by the interface every OpenAI-compatible server has, which a proxy to a cloud service has too:
+        /// it counts as a local model only while its process holds memory worth one (ADR 0006, decision 6).
+        /// </summary>
+        public bool Generic;
         public ModelSegments Segments;   // What the engine says of the model's inside; null when it says nothing.
         public List<Session> Sessions = new List<Session>();   // CLI sessions using this model.
 
@@ -327,7 +333,7 @@ namespace AIMeter
                 if (p.Models != null)
                     foreach (var m in p.Models)
                     {
-                        sb.Append(m.Key).Append(m.Vram >> 26).Append(m.Ram >> 26).Append(m.Swapped >> 26).Append(m.FileSize >> 26).Append(m.Segments == null ? "" : m.Segments.Signature).Append(m.Context).Append(m.ContextUsed >> 10).Append(m.Busy);
+                        sb.Append(m.Key).Append(m.Vram >> 26).Append(m.Ram >> 26).Append(m.Swapped >> 26).Append(m.FileSize >> 26).Append(m.Makes).Append(m.Segments == null ? "" : m.Segments.Signature).Append(m.Context).Append(m.ContextUsed >> 10).Append(m.Busy);
                         foreach (var s in m.Sessions) sb.Append(s.Title).Append(s.Status);
                     }
             }
