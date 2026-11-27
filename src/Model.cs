@@ -263,7 +263,7 @@ namespace AIMeter
         public string Where;       // "Windows" or "WSL".
         public string Detail;      // Parameter count and quantisation, when known.
         public long Vram, Ram;     // GPU and system memory in bytes; zero means unknown.
-        public MemoryOrigin VramOrigin, RamOrigin;
+        public MemoryOrigin VramOrigin, RamOrigin;   // For video memory, known with Vram at zero means none, not unknown.
         public long RamMapped;     // The part of Ram mapped from files, such as a model file its server maps; zero means none or unknown.
         public long Swapped;       // Memory of its process moved to swap; zero means none or unknown.
         public long GpuShared;     // System memory its process shares with the graphics card; zero means none or unknown.
@@ -280,10 +280,17 @@ namespace AIMeter
         public string Key { get { return Server + "|" + Where + "|" + Name; } }
 
         /// <summary>
-        /// An estimate of what is still only on disk: the model file less what is in video and system memory. Zero when
-        /// either is unknown, and for a server that keeps more than one copy of the weights in memory.
+        /// Whether what is on disk can be estimated: the file's size, some memory, and video memory that was read, be
+        /// it zero. Among several models in WSL the video memory of each is not known, and the whole file less the
+        /// system memory alone would call "on disk" what is on the card.
         /// </summary>
-        public long OnDisk { get { return FileSize > 0 && Vram + Ram > 0 ? Math.Max(0, FileSize - Vram - Ram) : 0; } }
+        public bool PlacementKnown { get { return FileSize > 0 && Vram + Ram > 0 && VramOrigin != MemoryOrigin.Unknown; } }
+
+        /// <summary>
+        /// An estimate of what is still only on disk: the model file less what is in video and system memory. Zero when
+        /// it cannot be estimated, and for a server that keeps more than one copy of the weights in memory.
+        /// </summary>
+        public long OnDisk { get { return PlacementKnown ? Math.Max(0, FileSize - Vram - Ram) : 0; } }
     }
 
     internal sealed class Snapshot

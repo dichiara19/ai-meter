@@ -1153,7 +1153,7 @@ namespace AIMeter
                     if (m.GpuShared > 0) d["gpu_shared_bytes"] = m.GpuShared;
                     if (m.Swapped > 0) d["swapped_bytes"] = m.Swapped;
                     if (m.FileSize > 0) d["file_bytes"] = m.FileSize;
-                    if (m.FileSize > 0 && m.Vram + m.Ram > 0) d["on_disk_bytes_estimate"] = m.OnDisk;
+                    if (m.PlacementKnown) d["on_disk_bytes_estimate"] = m.OnDisk;
                     if (m.Segments != null) Segments(d, m.Segments);
                     if (m.Context > 0) d["context_tokens"] = m.Context;
                     if (m.Slots > 0) { d["busy_requests"] = m.Busy; d["slots"] = m.Slots; }
