@@ -91,6 +91,8 @@ namespace AIMeter
             Func<string, Dictionary<string, object>> spec = pattern => new Dictionary<string, object> { { "pattern", pattern } };
             Assert(ServiceDefinition.SlotText(spec("[0-9a-f]{32}"), "https://dash.example.com/0123456789abcdef0123456789ABCDEF/home") == "0123456789abcdef0123456789ABCDEF",
                 "A valid pattern no longer picks its part out of a pasted address.");
+            Assert(ServiceDefinition.SlotText(spec("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"), "https://console.x.ai/team/0A1b2c3d-4e5f-6789-abcd-ef0123456789/billing") == "0A1b2c3d-4e5f-6789-abcd-ef0123456789",
+                "A UUID pattern picked something other than the team id out of a console address.");
             Assert(ServiceDefinition.SlotText(spec("([a-z"), "abc") == null, "An invalid pattern did not count as no match.");
             var watch = Stopwatch.StartNew();
             Assert(ServiceDefinition.SlotText(spec("^(a+)+$"), new string('a', 40) + "!") == null, "A pattern that backtracks without end matched.");
