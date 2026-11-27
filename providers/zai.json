@@ -2,6 +2,7 @@
   "id": "zai",
   "name": "Z.ai Coding Plan",
   "monogram": "Z",
+  "logo": { "image": "zai.png" },
   "description": "5-hour, weekly and MCP quotas of your Z.ai GLM Coding Plan.",
   "color": { "light": "#18191A", "dark": "#3B6AE0" },
   "detect": { "env": ["ZAI_API_KEY", "Z_AI_API_KEY"] },
