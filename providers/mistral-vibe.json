@@ -1,0 +1,83 @@
+{
+  "id": "mistral-vibe",
+  "name": "Mistral Vibe",
+  "monogram": "M",
+  "description": "Monthly Vibe Code usage of your Mistral account, as the Vibe CLI shows it.",
+  "color": { "light": "#FA500F", "dark": "#FF8205" },
+  "detect": { "commands": ["vibe"], "paths": ["~/.vibe"], "env": ["MISTRAL_API_KEY"] },
+  "auth": {
+    "type": "key",
+    "ids": ["mistral"],
+    "env": ["MISTRAL_API_KEY"],
+    "page": "https://console.mistral.ai/api-keys",
+    "notice": "Add the Mistral API key Vibe uses (Mistral console → API Keys)."
+  },
+  "request": {
+    "url": "https://api.mistral.ai/v1/billing/budget",
+    "headers": { "Authorization": "Bearer {token}" },
+    "interval": 10
+  },
+  "limits": [
+    {
+      "label": "Monthly Vibe Code usage",
+      "short": "month",
+      "when": "vibe_budget.initial_budget",
+      "percent": "vibe_budget.usage_percentage",
+      "resets": "vibe_budget.reset_at"
+    },
+    {
+      "label": "Monthly API budget",
+      "short": "m",
+      "when": "api_budget.initial_budget",
+      "percent": "api_budget.usage_percentage",
+      "resets": "api_budget.reset_at"
+    }
+  ],
+  "notes": [
+    { "when": "vibe_budget.initial_budget", "text": "Monthly Vibe allowance: {0}",
+      "values": [{ "path": "vibe_budget.initial_budget", "currencyPath": "vibe_budget.currency", "currency": "EUR" }] },
+    { "when": "vibe_budget.payg_enabled", "text": "Pay-as-you-go is on: usage past the allowance is billed" }
+  ],
+  "i18n": {
+    "it": {
+      "Monthly Vibe Code usage of your Mistral account, as the Vibe CLI shows it.": "Utilizzo mensile di Vibe Code del tuo account Mistral, come lo mostra la CLI Vibe.",
+      "Monthly Vibe Code usage": "Utilizzo mensile di Vibe Code",
+      "Monthly API budget": "Budget API mensile",
+      "Monthly Vibe allowance: {0}": "Quota mensile di Vibe: {0}",
+      "Pay-as-you-go is on: usage past the allowance is billed": "Pagamento a consumo attivo: l'utilizzo oltre la quota viene addebitato",
+      "Add the Mistral API key Vibe uses (Mistral console → API Keys).": "Aggiungi la chiave API Mistral usata da Vibe (console Mistral → API Keys)."
+    },
+    "es": {
+      "Monthly Vibe Code usage of your Mistral account, as the Vibe CLI shows it.": "Uso mensual de Vibe Code de tu cuenta de Mistral, como lo muestra la CLI de Vibe.",
+      "Monthly Vibe Code usage": "Uso mensual de Vibe Code",
+      "Monthly API budget": "Presupuesto mensual de API",
+      "Monthly Vibe allowance: {0}": "Asignación mensual de Vibe: {0}",
+      "Pay-as-you-go is on: usage past the allowance is billed": "Pago por uso activado: el uso por encima de la asignación se factura",
+      "Add the Mistral API key Vibe uses (Mistral console → API Keys).": "Añade la clave API de Mistral que usa Vibe (consola de Mistral → API Keys)."
+    },
+    "fr": {
+      "Monthly Vibe Code usage of your Mistral account, as the Vibe CLI shows it.": "Utilisation mensuelle de Vibe Code de votre compte Mistral, telle que l'affiche la CLI Vibe.",
+      "Monthly Vibe Code usage": "Utilisation mensuelle de Vibe Code",
+      "Monthly API budget": "Budget API mensuel",
+      "Monthly Vibe allowance: {0}": "Allocation mensuelle de Vibe : {0}",
+      "Pay-as-you-go is on: usage past the allowance is billed": "Paiement à l'usage activé : l'utilisation au-delà de l'allocation est facturée",
+      "Add the Mistral API key Vibe uses (Mistral console → API Keys).": "Ajoutez la clé API Mistral utilisée par Vibe (console Mistral → API Keys)."
+    },
+    "de": {
+      "Monthly Vibe Code usage of your Mistral account, as the Vibe CLI shows it.": "Monatliche Vibe-Code-Nutzung deines Mistral-Kontos, wie die Vibe-CLI sie anzeigt.",
+      "Monthly Vibe Code usage": "Monatliche Vibe-Code-Nutzung",
+      "Monthly API budget": "Monatliches API-Budget",
+      "Monthly Vibe allowance: {0}": "Monatliches Vibe-Kontingent: {0}",
+      "Pay-as-you-go is on: usage past the allowance is billed": "Pay-as-you-go ist aktiv: Nutzung über das Kontingent hinaus wird berechnet",
+      "Add the Mistral API key Vibe uses (Mistral console → API Keys).": "Füge den Mistral-API-Schlüssel hinzu, den Vibe verwendet (Mistral-Konsole → API Keys)."
+    },
+    "pt": {
+      "Monthly Vibe Code usage of your Mistral account, as the Vibe CLI shows it.": "Utilização mensal do Vibe Code da tua conta Mistral, tal como a CLI do Vibe a mostra.",
+      "Monthly Vibe Code usage": "Utilização mensal do Vibe Code",
+      "Monthly API budget": "Orçamento mensal da API",
+      "Monthly Vibe allowance: {0}": "Quota mensal do Vibe: {0}",
+      "Pay-as-you-go is on: usage past the allowance is billed": "Pagamento por utilização ativo: a utilização acima da quota é cobrada",
+      "Add the Mistral API key Vibe uses (Mistral console → API Keys).": "Adiciona a chave de API Mistral que o Vibe usa (consola Mistral → API Keys)."
+    }
+  }
+}
