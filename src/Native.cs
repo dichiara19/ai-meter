@@ -27,7 +27,7 @@ namespace AIMeter
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageNameW(IntPtr h, uint flags, StringBuilder buf, ref uint size);
 
         /// <summary>One process as Windows lists it. The working set is -1 when the listing did not carry it.</summary>
-        internal struct ProcessEntry
+        internal sealed class ProcessEntry
         {
             public string Name;       // Executable name, lower-case.
             public uint Parent;
@@ -115,14 +115,16 @@ namespace AIMeter
             return map;
         }
 
+        /// <summary>PROCESS_MEMORY_COUNTERS. A class, filled in place by Windows, so that it is never compared or copied by value.</summary>
         [StructLayout(LayoutKind.Sequential)]
-        private struct ProcessMemoryCounters
+        private sealed class ProcessMemoryCounters
         {
-            public uint Size, PageFaultCount;
+            public uint Size = (uint)Marshal.SizeOf(typeof(ProcessMemoryCounters));
+            public uint PageFaultCount;
             public UIntPtr PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage, QuotaPeakNonPagedPoolUsage, QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage;
         }
 
-        [DllImport("psapi.dll")] private static extern bool GetProcessMemoryInfo(IntPtr process, out ProcessMemoryCounters counters, uint size);
+        [DllImport("psapi.dll")] private static extern bool GetProcessMemoryInfo(IntPtr process, [In, Out] ProcessMemoryCounters counters, uint size);
 
         /// <summary>
         /// The working set of one process, asked of the process itself: for a listing that carried none. Zero for a
@@ -134,8 +136,8 @@ namespace AIMeter
             if (handle == IntPtr.Zero) return 0;
             try
             {
-                ProcessMemoryCounters counters;
-                return GetProcessMemoryInfo(handle, out counters, (uint)Marshal.SizeOf(typeof(ProcessMemoryCounters))) ? (long)counters.WorkingSetSize.ToUInt64() : 0;
+                var counters = new ProcessMemoryCounters();
+                return GetProcessMemoryInfo(handle, counters, counters.Size) ? (long)counters.WorkingSetSize.ToUInt64() : 0;
             }
             finally { CloseHandle(handle); }
         }
