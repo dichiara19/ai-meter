@@ -18,7 +18,8 @@ Local models are shown where they really are: in video memory, in system memory,
 ### New services
 - **Z.ai Coding Plan**: the 5-hour, weekly and MCP quotas of a GLM Coding Plan, with their reset times.
 - **xAI**: the prepaid credit balance of an xAI API team, with a Management API key and the team ID.
-- Both by [@Murzinio](https://github.com/Murzinio), checked against real accounts.
+- **Mistral Vibe**: the monthly Vibe Code allowance of a Mistral account, as the Vibe CLI shows it, with its reset date and, when one is set, the monthly API budget.
+- All three by [@Murzinio](https://github.com/Murzinio), checked against real accounts.
 
 ### Lighter
 - **A refresh costs less than in 0.12.0.** The processes of the PC, their parents and the memory they hold now come from one system query: on a PC with 618 processes a refresh without network requests went from about 39 ms to about 28 ms. Memory inside WSL is read at most every 30 seconds, 60 on battery.
