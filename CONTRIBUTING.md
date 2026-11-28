@@ -71,7 +71,7 @@ The roadmap and its status are in [docs/plans](docs/plans/agent-orchestration.md
 1. Fork the repository and create a branch from `main` (for example `fix/taskbar-dpi` or `feat/gemini-cli`).
 2. Keep one topic per pull request.
 3. Write commit messages in English with an imperative title: "Add Gemini CLI quota", "Fix pill position with a vertical taskbar".
-4. Open the pull request and fill in the template. The CI build must pass.
+4. Open the pull request and fill in the template. The CI build must pass. A pull request that changes only documentation (Markdown at the root or in `.github`, the issue templates, anything under `docs/`) skips the build, and its `build` check is reported as skipped.
 5. A maintainer reviews it. Pull requests are merged with **squash**, so the pull request title becomes the commit title.
 
 ## License
