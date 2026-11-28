@@ -316,6 +316,13 @@ With these off, and without pressing the Pi download button, AI Meter makes no n
 
 Bug reports, translations, new services and code are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Questions and ideas go to [Discussions](https://github.com/dichiara19/ai-meter/discussions), security issues to a [private report](SECURITY.md). Everyone is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
+## Contributors
+
+Thank you to everyone who has made AI Meter better.
+
+- [@Murzinio](https://github.com/Murzinio): the Z.ai Coding Plan, xAI, Mistral Vibe and Grok services, and the reports behind the Antigravity sign-in fix, the taskbar switch and the desktop widget fix.
+- [@Juris-S](https://github.com/Juris-S): the Gemini quotas for Antigravity.
+
 ## Support
 
 AI Meter is free and open source, and it stays that way. If it is useful to you and you would like to chip in, you can [buy me a coffee](https://buymeacoffee.com/giuseppedichiara); a star or a bug report helps just as much.
