@@ -40,7 +40,7 @@ namespace AIMeter
             var copy = ManagedPi.ReachableIn(where);
             if (copy == null)
             {
-                ManagedPiError = L.T("WSL is not running. Start it to install Pi there; AI Meter does not start it.");
+                ManagedPiError = L.T("WSL is not running. Start it to install Pi there.");
                 RefreshSettingsPage();
                 return;
             }
@@ -55,7 +55,7 @@ namespace AIMeter
                 Settings.ManagedPiServicesAwaitingKey = new List<string>();
                 if (!Settings.Save())
                 {
-                    ManagedPiError = L.T("This choice could not be saved, so it will not last past a restart. Check AI Meter's settings file, then change it again.");
+                    ManagedPiError = L.T("Couldn't save this choice. Check AI Meter's settings file, then change it again.");
                     RefreshSettingsPage();
                     return;
                 }
@@ -107,7 +107,7 @@ namespace AIMeter
             var copy = ManagedPi.ReachableIn(where);
             try
             {
-                if (copy == null) throw new ManagedPi.InstallException(L.T("WSL is not running. Start it to remove Pi from there; AI Meter does not start it."));
+                if (copy == null) throw new ManagedPi.InstallException(L.T("WSL is not running. Start it to remove Pi from there."));
                 copy.Remove(Settings);
             }
             catch (ManagedPi.InstallException ex) { ManagedPiError = ex.Message; }
@@ -129,7 +129,7 @@ namespace AIMeter
         {
             // A choice that is not on disk would come back at the next start: a withdrawn key would be copied again.
             if (!Settings.Save())
-                MessageBox.Show(L.T("This choice could not be saved, so it will not last past a restart. Check AI Meter's settings file, then change it again."), "AI Meter", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(L.T("Couldn't save this choice. Check AI Meter's settings file, then change it again."), "AI Meter", MessageBoxButton.OK, MessageBoxImage.Warning);
             if (!ManagedPi.Sync(Settings))
                 MessageBox.Show(L.T("Pi's key file could not be written. Check that no delegated task is running, then try again."), "AI Meter", MessageBoxButton.OK, MessageBoxImage.Warning);
             RefreshSettingsPage();

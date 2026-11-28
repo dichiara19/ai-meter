@@ -72,7 +72,7 @@ namespace AIMeter
             Settings.Save();
             balloonAction = () => OpenReleasePage(latest);
             tray.ShowBalloonTip(15000, L.F("AI Meter {0} is available", latest),
-                L.F("You are using {0}. Click to open the release page: nothing is downloaded automatically.", Version), Forms.ToolTipIcon.None);
+                L.F("Installed version: {0}", Version), Forms.ToolTipIcon.None);
         }
 
         internal static void OpenReleasePage(string version)

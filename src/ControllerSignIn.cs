@@ -109,7 +109,7 @@ namespace AIMeter
                     Process.Start(new ProcessStartInfo("wsl.exe", "-d " + Settings.WslDistro + " -- bash -lc \"~/.local/bin/agy\"") { UseShellExecute = true });
                 else
                 {
-                    MessageBox.Show(L.T("Antigravity CLI was not found on this PC."), "AI Meter");
+                    MessageBox.Show(L.T("Antigravity CLI was not found on this PC"), "AI Meter");
                     return;
                 }
             }

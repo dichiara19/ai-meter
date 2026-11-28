@@ -115,8 +115,8 @@ namespace AIMeter
             {
                 "{0}% left", "{0}% used", "{0} left", "{0} used", "{0} left of {1}", "{0} used of {1}", "{0} free of {1}", "{0} in use of {1}",
                 "{0} still has {1} left.", "Limits show", "In the taskbar, the panel, the widget and the overlay. Video memory follows the same choice.",
-                "What is left", "What is used", "Credit limits show", "For limits in money, such as credits, key limits and budgets.",
-                "The amount", "A percentage", "Video memory: {0}", "Notifications always say what is left, since they warn that a limit is running out.",
+                "What is left", "What is used", "Credit limits show", "For limits in money, such as credits, key limits and budgets",
+                "The amount", "A percentage", "Video memory: {0}", "Notifications always show what is left",
             };
             try
             {

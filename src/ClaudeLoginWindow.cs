@@ -114,12 +114,12 @@ namespace AIMeter
             if (psi == null)
             {
                 info.Text = L.T("AI Meter reads real-time limits through the Claude Code sign-in. If you use Claude Code only in the Claude app, open its Code tab once so that the app downloads it, or install Claude Code; then try again.");
-                status.Text = L.T("Claude Code was not found on this PC.");
+                status.Text = L.T("Claude Code was not found on this PC");
                 Primary(L.T("Try again"), Start);
                 return;
             }
 
-            info.Text = L.T("Sign in to your Claude account on the page that opens in the browser. AI Meter uses the Claude Code sign-in only to read your limits; it stays on this PC.");
+            info.Text = L.T("Sign in to your Claude account on the page that opens in the browser");
             status.Text = L.T("Opening the sign-in page…");
             Primary(L.T("Open the sign-in page"), OpenPage);
             primary.IsEnabled = false;

@@ -36,7 +36,7 @@ namespace AIMeter
         private void BuildDelegationAgent()
         {
             Breadcrumb("MCP", "apps", L.T("Delegation agent"));
-            Hint(L.T("Delegated tasks run in a coding agent. AI Meter uses your own agents where it can, and can also install Pi, an open-source coding agent, inside WSL or on Windows. Its copy uses only the keys you select below, never a subscription plan."));
+            Hint(L.T("Delegated tasks run in a coding agent: one already on this PC, or Pi, an open-source agent that AI Meter can install. That copy uses only the keys selected below."));
 
             var kind = Agents.Get(ManagedPi.RuntimeId);
             var windowsPlace = kind.PlaceFor(ManagedPi.Place);
@@ -54,14 +54,14 @@ namespace AIMeter
             var rows = new List<FrameworkElement>();
             if (offersWsl)
                 rows.Add(inWsl == null
-                    ? Row(null, L.F("Pi inside WSL ({0})", distro), L.T("Start WSL to install, update or remove Pi there. AI Meter does not start WSL."), null)
+                    ? Row(null, L.F("Pi inside WSL ({0})", distro), L.T("Start WSL to install, update or remove Pi there"), null)
                     : CopyRow(inWsl, L.F("Pi inside WSL ({0})", inWsl.Distro)));
             if (windows != null)
             {
                 rows.Add(CopyRow(windows, L.T("Pi on Windows")));
                 // Without Git Bash the copy on Windows still works, with PowerShell for its commands: say so, and where to get it.
                 if (windows.Installed && !(C.ManagedPiBusy && C.ManagedPiBusyWhere == "windows") && windows.BoundShells.Length == 0)
-                    rows.Add(Row(null, L.T("Git Bash not found"), L.T("Tasks that change files run their commands in PowerShell instead of bash. Install Git for Windows to give Pi bash; AI Meter detects it at its next start."),
+                    rows.Add(Row(null, L.T("Git Bash not found"), L.T("Without Git Bash, tasks that change files run their commands in PowerShell. AI Meter detects Git for Windows at its next start."),
                         Button(L.T("Get Git for Windows"), () => OpenPage(ManagedPi.GitForWindowsPage), false)));
             }
             if (C.ManagedPiError != null && C.ManagedPiErrorWhere == null) rows.Add(Row(null, C.ManagedPiError, null, null));
@@ -69,17 +69,17 @@ namespace AIMeter
             if (installed.Count == 0) return;
 
             Section(L.T("API keys"));
-            Hint(L.T("A selected key is copied to Pi's key file in plain text, as in any Pi installation; AI Meter's own store stays encrypted. Clearing the switch, or removing Pi, deletes the copy."));
+            Hint(L.T("A selected key is copied to Pi's key file in plain text. Turning the switch off, or removing Pi, deletes the copy."));
             Group(ManagedPiKeyRows(installed).ToArray());
 
             var preferences = new List<FrameworkElement>();
             if (installed.Count == 2)
-                preferences.Add(Row(null, L.T("Preferred copy from Windows"), L.T("Used first when both copies can run the model of a task started from Windows."),
+                preferences.Add(Row(null, L.T("Preferred copy from Windows"), L.T("Used first when both copies can run the model of a task started from Windows"),
                     Combo(new[] { Tuple.Create("wsl", L.T("Pi inside WSL")), Tuple.Create("windows", L.T("Pi on Windows")) },
                         Candidates.PreferredManagedPlace(S.ManagedPiPrefer), v => { S.ManagedPiPrefer = v; S.Save(); })));
             // The choice exists only where a Pi of the user's can be used for delegation at all, beside an installed copy.
             if (installed.Any(c => kind.PlaceFor(c.Where) != null))
-                preferences.Add(Row(null, L.T("Use alongside your own Pi"), L.T("When off, your own Pi is used wherever it can run the task."),
+                preferences.Add(Row(null, L.T("Use alongside your own Pi"), L.T("When off, your own Pi is used wherever it can run the task"),
                     Toggle(S.ManagedPiBesideOwn, v => { S.ManagedPiBesideOwn = v; S.Save(); })));
             if (preferences.Count == 0) return;
             Section(L.T("Preferences"));
@@ -136,7 +136,7 @@ namespace AIMeter
                     C.ManagedPiBusy ? null : Button(L.T("Remove"), () => RemoveManagedPi(where), false));
             string other = copy.OtherVersionInstalled;
             string state = other == null
-                ? L.F("Not installed. Pi {0} is downloaded from its GitHub project ({1} MB) and verified before it is unpacked.", ManagedPi.Version, megabytes)
+                ? L.F("Not installed. Pi {0} is downloaded from GitHub ({1} MB).", ManagedPi.Version, megabytes)
                 : L.F("Pi {0} is installed; this version of AI Meter requires Pi {1}. Download it to keep delegating ({2} MB).", other, ManagedPi.Version, megabytes);
             if (C.ManagedPiBusy) return Row(null, title, error ?? state, null);
             // An older release keeps its configuration, and with it the keys copied there: it can be removed too.
@@ -161,11 +161,11 @@ namespace AIMeter
                 .Concat(ticked).GroupBy(d => d.Id).Select(g => g.First())
                 .OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
             if (services.Count == 0)
-                return new[] { Row(null, L.T("No key available"), L.T("Turn on a service with free models, such as OpenRouter, and add its key in AI Meter. It is then listed here."), null) };
+                return new[] { Row(null, L.T("No key available"), L.T("Turn on a service with free models, such as OpenRouter, and add its key"), null) };
             return services.Select(d =>
             {
                 string id = d.Id;
-                return Row(null, d.Name, L.T("Delegated tasks can use this service's free models."),
+                return Row(null, d.Name, L.T("Delegated tasks can use this service's free models"),
                     Toggle(S.ManagedPiServices.Contains(id), v => C.SetManagedPiService(id, v)));
             });
         }
@@ -178,7 +178,7 @@ namespace AIMeter
 
         private void RemoveManagedPi(string where)
         {
-            if (MessageBox.Show(this, L.T("Remove Pi, its settings and the keys copied to it? Your own agents and the keys saved in AI Meter are not affected."), "AI Meter",
+            if (MessageBox.Show(this, L.T("Remove Pi, its settings and the keys copied to it?"), "AI Meter",
                     MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
             C.RemoveManagedPi(where);
         }

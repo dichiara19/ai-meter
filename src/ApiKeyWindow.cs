@@ -52,7 +52,7 @@ namespace AIMeter
             string description = extra != null && Json.Str(extra, "description") != null ? L.T(Json.Str(extra, "description")) : null;
             var info = Ui.Text(!secret ? description
                 : (description != null ? description + " " : "")
-                  + L.F("Paste an API key of your {0} account. AI Meter uses it only to read your usage; it is encrypted with Windows data protection and stays on this PC.", serviceName), 13, "Text2");
+                  + L.F("Paste an API key of your {0} account. It is encrypted with Windows data protection.", serviceName), 13, "Text2");
             info.TextWrapping = TextWrapping.Wrap;
             info.TextTrimming = TextTrimming.None;
             info.Margin = new Thickness(0, 8, 0, 16);
@@ -86,7 +86,7 @@ namespace AIMeter
             box.LostKeyboardFocus += (o, e) => frame.SetResourceReference(Border.BorderBrushProperty, "ControlStroke");
             root.Children.Add(frame);
             // A value with a "pattern" is saved as the part that matches it, such as the ID in a pasted address.
-            var wrong = Ui.Text(L.T("Not recognised: check what you pasted."), 12, "Text3");
+            var wrong = Ui.Text(L.T("Not recognised: check what you pasted"), 12, "Text3");
             wrong.Margin = new Thickness(2, 6, 0, 0);
             wrong.Visibility = Visibility.Collapsed;
             root.Children.Add(wrong);

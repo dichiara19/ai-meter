@@ -305,7 +305,7 @@ namespace AIMeter
             var h = Ui.Text(L.T("Connect GitHub Copilot"), 20, "Text", FontWeights.SemiBold);
             h.FontFamily = Theme.DisplayFont;
             root.Children.Add(h);
-            var info = Ui.Text(L.T("Enter this code on the GitHub page that opens. AI Meter will use the access only to read your Copilot quotas.") + " "
+            var info = Ui.Text(L.T("Enter this code on the GitHub page that opens.") + " "
                              + L.T("GitHub will show the request as \"Visual Studio Code\": it is the official Copilot app, through which quotas are read."), 13, "Text2");
             info.TextWrapping = TextWrapping.Wrap;
             info.TextTrimming = TextTrimming.None;
@@ -370,7 +370,7 @@ namespace AIMeter
                     return;
                 }
                 if (r == "slow_down") wait += 5;
-                else if (r != "pending") { status.Text = L.T(r == "access_denied" ? "Access denied on GitHub." : "The code has expired. Open this window again."); return; }
+                else if (r != "pending") { status.Text = L.T(r == "access_denied" ? "Access denied on GitHub" : "The code has expired. Open this window again."); return; }
             }
             if (!closed) status.Text = L.T("The code has expired. Open this window again.");
         }
