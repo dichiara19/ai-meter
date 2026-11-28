@@ -27,6 +27,7 @@ Local models are shown where they really are: in video memory, in system memory,
 - **xAI**: the prepaid credit balance of an xAI API team, with a Management API key and the team ID.
 - **Mistral Vibe**: the monthly Vibe Code allowance of a Mistral account, as the Vibe CLI shows it, with its reset date and, when one is set, the monthly API budget.
 - All three by [@Murzinio](https://github.com/Murzinio), checked against real accounts.
+- **Grok**: the weekly credits of a Grok subscription, as grok.com shows them, read with the Grok CLI sign-in. Also by [@Murzinio](https://github.com/Murzinio) (#104).
 - Z.ai and Mistral Vibe are shown with their own logos.
 
 ### Taskbar and desktop
@@ -36,6 +37,9 @@ Local models are shown where they really are: in video memory, in system memory,
 
 ### Lighter
 - **A refresh costs less than in 0.12.0.** The processes of the PC, their parents and the memory they hold now come from one system query: on a PC with 618 processes a refresh without network requests went from about 39 ms to about 28 ms. Memory inside WSL is read at most every 30 seconds, 60 on battery.
+
+### Thanks
+- [@Murzinio](https://github.com/Murzinio) wrote the Z.ai Coding Plan, xAI, Mistral Vibe and Grok services (#107, #117, #104), checked the first three against real accounts, and asked for the taskbar switch and the desktop widget fix (#111, #112).
 
 ## What changed in 0.12.0
 
@@ -77,9 +81,9 @@ Delegation no longer needs a coding agent of your own: AI Meter can set one up f
 
 ## What changed in 0.11.1
 
-- **Antigravity is found on Windows.** Current versions of Antigravity CLI keep their sign-in in Windows Credential Manager instead of a file, so AI Meter said "Not found on this PC" although the CLI was signed in (#94). AI Meter now reads the sign-in from there. It only reads it and never changes it.
+- **Antigravity is found on Windows.** Current versions of Antigravity CLI keep their sign-in in Windows Credential Manager instead of a file, so AI Meter said "Not found on this PC" although the CLI was signed in (#94, reported by [@Murzinio](https://github.com/Murzinio)). AI Meter now reads the sign-in from there. It only reads it and never changes it.
 - **Sign in…** for Antigravity opens the CLI in your user folder, so it no longer asks whether to trust a Windows system folder.
-- **Gemini quotas for Antigravity.** The 5-hour and weekly limits of the Gemini models now appear beside those of the Claude and GPT models. Thanks to Juris-S (#93).
+- **Gemini quotas for Antigravity.** The 5-hour and weekly limits of the Gemini models now appear beside those of the Claude and GPT models. Thanks to [@Juris-S](https://github.com/Juris-S) (#93).
 
 ## What changed in 0.11.0
 
