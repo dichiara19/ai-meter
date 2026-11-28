@@ -108,7 +108,8 @@ namespace AIMeter
                       <Trigger Property='IsSelected' Value='True'><Setter Property='Foreground' Value='{DynamicResource Text}'/>
                         <Setter TargetName='HeaderContent' Property='TextElement.FontWeight' Value='SemiBold'/>
                         <Setter TargetName='HeaderBorder' Property='BorderBrush' Value='{DynamicResource Accent}'/></Trigger>
-                      <Trigger Property='IsMouseOver' Value='True'><Setter Property='Background' Value='{DynamicResource SubtleHover}'/></Trigger>
+                      <!-- The header's own hover: a TabItem also counts the pointer over its page, its logical child. -->
+                      <Trigger SourceName='HeaderBorder' Property='IsMouseOver' Value='True'><Setter TargetName='HeaderBorder' Property='Background' Value='{DynamicResource SubtleHover}'/></Trigger>
                     </ControlTemplate.Triggers>
                   </ControlTemplate></Setter.Value></Setter>
                 </Style>");

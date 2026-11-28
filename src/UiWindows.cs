@@ -28,7 +28,32 @@ namespace AIMeter
                 CaptionHeight = 48, GlassFrameThickness = new Thickness(-1), ResizeBorderThickness = new Thickness(6),
                 UseAeroCaptionButtons = true, CornerRadius = new CornerRadius(0),
             });
-            window.SourceInitialized += (sender, args) => ApplyBackdrop(window, 2, false);
+            window.SourceInitialized += (sender, args) =>
+            {
+                var source = HwndSource.FromHwnd(new WindowInteropHelper(window).Handle);
+                // Added after WindowChrome's own hook, which it then precedes; the frame is recalculated at once.
+                source.AddHook(KeepSideFrames);
+                Native.SetWindowPos(source.Handle, IntPtr.Zero, 0, 0, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOMOVE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
+                ApplyBackdrop(window, 2, false);
+            };
+        }
+
+        /// <summary>
+        /// Keep the system's side and bottom frames and give only the caption to the client area. WindowChrome
+        /// makes the whole window client area, while DWM still places the caption buttons inside the frame it
+        /// expects, which leaves a gap between the close button and the window edge. Maximised, the top keeps
+        /// the frame's inset, as the sides do.
+        /// </summary>
+        private static IntPtr KeepSideFrames(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg != Native.WM_NCCALCSIZE || wParam == IntPtr.Zero) return IntPtr.Zero;
+            // lParam starts with the proposed window rectangle: left, top, right, bottom.
+            int left = System.Runtime.InteropServices.Marshal.ReadInt32(lParam, 0), top = System.Runtime.InteropServices.Marshal.ReadInt32(lParam, 4);
+            Native.DefWindowProc(hwnd, msg, wParam, lParam);
+            int frame = System.Runtime.InteropServices.Marshal.ReadInt32(lParam, 0) - left;
+            System.Runtime.InteropServices.Marshal.WriteInt32(lParam, 4, Native.IsZoomed(hwnd) ? top + frame : top);
+            handled = true;
+            return IntPtr.Zero;
         }
 
         /// <summary>

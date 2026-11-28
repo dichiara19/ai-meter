@@ -54,7 +54,36 @@ namespace AIMeter
         {
             scroll.PanningMode = PanningMode.VerticalOnly;
             scroll.ManipulationBoundaryFeedback += (o, e) => e.Handled = true;
+            scroll.PreviewMouseWheel += (o, e) =>
+            {
+                if (e.Handled || ScrollsInside(e.OriginalSource as DependencyObject, scroll)) return;
+                scroll.ScrollToVerticalOffset(scroll.VerticalOffset - WheelDistance(e.Delta));
+                e.Handled = true;
+            };
             return scroll;
+        }
+
+        /// <summary>Pixels per wheel notch, the step WPF itself uses for a whole notch.</summary>
+        private const double WheelNotchPixels = 48;
+
+        /// <summary>
+        /// Distance for a wheel message, in proportion to its delta. WPF scrolls a whole notch for every message
+        /// whatever its delta, so a precision touchpad, which sends many small ones, scrolls several times too far.
+        /// </summary>
+        internal static double WheelDistance(int delta)
+        {
+            return delta * WheelNotchPixels / Mouse.MouseWheelDeltaForOneLine;
+        }
+
+        /// <summary>Whether the wheel belongs to a scrollable list between the source and the outer viewer.</summary>
+        private static bool ScrollsInside(DependencyObject source, ScrollViewer outer)
+        {
+            for (var d = source; d != null && d != outer; d = d is Visual ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+            {
+                var inner = d as ScrollViewer;
+                if (inner != null && inner.ScrollableHeight > 0) return true;
+            }
+            return false;
         }
 
         /// <summary>

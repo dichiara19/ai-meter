@@ -19,6 +19,14 @@ namespace AIMeter
             test("Without a recent press, only a panel hidden in the last 300 ms counts as just closed", ClosedWithoutPress);
             test("Every scrolling area scrolls with a finger", ScrollAreasPan);
             test("A press and hold opens the tooltip of the nearest element that has one", HoldToolTip);
+            test("A wheel message scrolls in proportion to its delta, so a touchpad is not faster than a wheel", WheelProportional);
+        }
+
+        private static void WheelProportional()
+        {
+            Assert(Ui.WheelDistance(120) == 48, "A whole wheel notch does not scroll the usual 48 pixels.");
+            Assert(Ui.WheelDistance(-120) == -48, "A notch downwards does not mirror a notch upwards.");
+            Assert(System.Math.Abs(Ui.WheelDistance(-12) + 4.8) < 0.001, "A tenth of a notch, as a touchpad sends, scrolls more than a tenth.");
         }
 
         private static void PointerSupport()
