@@ -16,7 +16,37 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # A pull request that changes only documentation skips the build, the certification kit and the plugin tests:
+  # none of them reads those files. The skipped `build` job still answers the required check on `main`.
+  # Every other event, and any doubt, builds: if this job fails, `code` is empty and the build runs.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.files.outputs.code }}
+    steps:
+      - name: Look for changes outside the documentation
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          code=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            # A renamed file counts under both names, so moving code into docs/ still builds.
+            files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')
+            # Documentation: Markdown at the root and in .github, the issue templates, and everything under docs/.
+            # Markdown inside plugins/ is part of the plugin and is not in this list.
+            documentation='^([^/]+\.md|docs/.*|\.github/[^/]+\.md|\.github/ISSUE_TEMPLATE/.*)$'
+            if [ -n "$files" ] && ! grep -qvE "$documentation" <<< "$files"; then code=false; fi
+            echo "$files"
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: windows-latest
     permissions:
       contents: read
@@ -196,6 +226,8 @@ jobs:
 
   # The plugin also runs inside WSL, where agents are stopped with SIGINT rather than taskkill.
   plugin-linux:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
