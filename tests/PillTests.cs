@@ -90,7 +90,7 @@ namespace AIMeter
             var keys = new[]
             {
                 "Show in the taskbar",
-                "Turn it off to keep this service out of the pill and the overlay. It stays in the panel, the desktop widget and the pill's tooltip.",
+                "When off, the service stays in the panel, the desktop widget and the pill's tooltip",
                 "With many services the pill can reach the app icons. Each service's page under Services has a switch to keep it out of the pill.",
             };
             try

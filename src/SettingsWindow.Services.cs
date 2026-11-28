@@ -55,14 +55,14 @@ namespace AIMeter
             if (catalogues.Count > 0)
             {
                 Section(L.T("Model catalogues"));
-                Hint(L.T("These services list their models but do not let a key read your limits, so they are not shown on the taskbar or in the panel. The apps you connect under MCP use them to find free models and to delegate tasks."), "MCP", "apps");
+                Hint(L.T("These services list their models but have no readable limits, so they stay out of the taskbar and the panel. Connected apps use them to find free models and delegate tasks."), "MCP", "apps");
                 foreach (var s in catalogues) ServiceLink(s);
             }
             Hint(L.T("API keys can come from the programs that already use them, so you don't have to paste them again:"));
             Group(Row(Ui.Glyph("", 20, "Text"), L.T("Use API keys already on this PC"),
-                L.T("OpenRouter, DeepSeek, Kimi, Vercel and other keys saved by OpenCode, Pi or Crush, or exported in your shell profile, on Windows and in WSL while it is running. Each key is sent only to its own service."),
+                L.T("Keys for OpenRouter, DeepSeek, Kimi, Vercel and others, saved by OpenCode, Pi or Crush or exported in the shell profile, on Windows and in WSL"),
                 Toggle(S.FindKeys, v => { S.FindKeys = v; KeyFinder.Forget(); Changed(); C.RefreshNow(); Rebuild(); })));
-            Hint(L.T("More services can be added with a small definition file, without updating AI Meter."));
+            Hint(L.T("More services can be added with a small definition file, without updating AI Meter"));
             Group(Row(Ui.Glyph("", 20, "Text"), L.T("Add a service"),
                 L.T("Put definition files in this folder and restart AI Meter. The format is described in the project documentation."),
                 Pair(Button(L.T("Format"), () => Process.Start("https://github.com/dichiara19/ai-meter/blob/main/docs/PROVIDERS.md"), false),
@@ -84,7 +84,7 @@ namespace AIMeter
                 var def = Definitions.Get(s.Id);
                 var found = def != null && !ApiKeys.Has(def.Id) ? KeyFinder.Find(def) : null;
                 if (found != null) return L.F("Key found in {0}", found.Source);
-                if (def != null && def.UsesKey && !ApiKeys.Has(def.Id) && !def.Detected()) return L.T("Add an API key to read your usage.");
+                if (def != null && def.UsesKey && !ApiKeys.Has(def.Id) && !def.Detected()) return L.T("Add an API key to read your usage");
                 return s.Id == "local" ? L.T("Off") : Found(Detected(s.Id)).Trim();
             }
             var p = LastState(s.Id);
@@ -117,7 +117,7 @@ namespace AIMeter
             Breadcrumb(L.T("Services"), "services", s.Name);
             var logo = s.Id == "local" ? Ui.Glyph(Ui.LocalGlyph, 30, "Text") : Ui.Logo(s.Id, 40);
             Group(Row(logo, s.Name, Description(s.Id), Toggle(s.On, v => { s.Set(v); Changed(); Rebuild(); })));
-            if (!s.On) { Hint(L.T("Turn the service on to see its options.")); return; }
+            if (!s.On) { Hint(L.T("Turn the service on to see its options")); return; }
             var rows = Options(s.Id);
             if (rows.Count > 0)
             {
@@ -137,9 +137,9 @@ namespace AIMeter
             if (usage.SpendNote != null || credits)
                 vis.Add(Row(null, L.T("Spend today, this week and this month"), null, RowToggle(s.Id, "*spend")));
             if (usage.TodayModels != null || credits)
-                vis.Add(Row(null, L.T("Models used today"), L.T("From OpenCode, Pi, Kilo and Hermes, with the cost they computed."), RowToggle(s.Id, "*models")));
+                vis.Add(Row(null, L.T("Models used today"), L.T("From OpenCode, Pi, Kilo and Hermes, with the cost they computed"), RowToggle(s.Id, "*models")));
             if (prov.Catalogue != null || (def != null && Json.Obj(def.Raw, "freeModels") != null))
-                vis.Add(Row(null, L.T("Free models"), L.T("From the service's public model list, with the date each one stops being free when announced."), RowToggle(s.Id, "*free")));
+                vis.Add(Row(null, L.T("Free models"), L.T("From the service's public model list, with the date each one stops being free when announced"), RowToggle(s.Id, "*free")));
             if (vis.Count == 0) return;
             Section(L.T("In the panel"));
             Hint(L.T("What this service's card shows in the panel and in the desktop widget. The pill shows the limit chosen in Limit in the taskbar."));
@@ -163,15 +163,15 @@ namespace AIMeter
                 case "claude":
                     return S.ClaudeEnabled ? ClaudeStatus(claude) + ". " + L.T("Claude Code, Cowork and the desktop app.") : Found(ClaudeProvider.Detected()) + L.T("Claude Code, Cowork and the desktop app.");
                 case "openai":
-                    return Found(CodexProvider.Detected()) + L.T("ChatGPT plan limits in real time, requested from the installed Codex program with its own login: AI Meter never touches the tokens.");
+                    return Found(CodexProvider.Detected()) + L.T("ChatGPT plan limits in real time, requested from the installed Codex program");
                 case "copilot":
                     return Found(CopilotProvider.Detected()) + L.T("Premium requests and monthly quotas of your GitHub account.");
                 case "antigravity":
-                    return Found(AntigravityProvider.Detected()) + L.T("5-hour and weekly quotas of your Google AI plan in Antigravity, per model group. Read with the Antigravity CLI sign-in (also in WSL). The Gemini app does not expose its limits.");
+                    return Found(AntigravityProvider.Detected()) + L.T("5-hour and weekly quotas of the Google AI plan in Antigravity, per model group, read with the Antigravity CLI sign-in");
                 case "grok":
                     return Found(GrokProvider.Detected()) + L.T("Weekly credits of your Grok subscription, as grok.com shows them, read with the Grok CLI sign-in.");
                 case "local":
-                    return L.T("Models loaded by Ollama, LM Studio, llama.cpp, llama-swap and vLLM, on Windows and in WSL: video memory, context and requests in progress. Only servers on this PC are contacted.");
+                    return L.T("Models loaded by Ollama, LM Studio, llama.cpp, llama-swap and vLLM, on Windows and in WSL: video memory, context and requests in progress");
             }
             var d = Definitions.Get(id);
             if (d == null) return null;
@@ -187,40 +187,40 @@ namespace AIMeter
             {
                 case "claude":
                     rows.Add(Row(null, L.T("Real-time limits"),
-                        L.T("Reads your account usage with your Claude Code login (WSL or Windows). The token stays on this PC and is refreshed by the CLI."),
+                        L.T("Reads the account usage with the Claude Code sign-in, on Windows or in WSL"),
                         Pair(Button(L.T("Sign in…"), () => C.LoginClaude(), false), Toggle(S.ClaudeLiveUsage, v => { S.ClaudeLiveUsage = v; Changed(); C.RefreshNow(); }))));
                     bool admin = ApiKeys.Has(ClaudeProvider.AdminKeyId);
                     rows.Add(Row(null, L.T("Plan API credits"),
-                        admin ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.")
+                        admin ? L.T("Saved")
                               : L.T("Max, Ultra and Team plans include monthly credits for the Claude API in a linked Console organisation. Add an Admin key of that organisation to see how much of them you have used."),
                         admin ? Button(L.T("Remove"), () => { ApiKeys.Remove(ClaudeProvider.AdminKeyId); C.RefreshNow(); Build(); }, false)
                               : Button(L.T("Add key…"), () => C.EnterClaudeAdminKey(), false)));
                     if (admin) rows.Add(ApiCreditRow());
-                    rows.Add(Row(null, L.T("Claude Code sessions"), L.T("Desktop, CLI (also in WSL) and VS Code, with title, model and status."), Toggle(S.ClaudeShowCode, v => { S.ClaudeShowCode = v; Changed(); })));
-                    rows.Add(Row(null, L.T("Cowork tasks"), L.T("Cowork tasks running in the last 30 minutes."), Toggle(S.ClaudeShowCowork, v => { S.ClaudeShowCowork = v; Changed(); })));
-                    rows.Add(Row(null, L.T("Claude app open"), L.T("Individual chats leave no trace on the PC: you only see whether the app is open."), Toggle(S.ClaudeShowChat, v => { S.ClaudeShowChat = v; Changed(); })));
+                    rows.Add(Row(null, L.T("Claude Code sessions"), L.T("Desktop, CLI (also in WSL) and VS Code, with title, model and status"), Toggle(S.ClaudeShowCode, v => { S.ClaudeShowCode = v; Changed(); })));
+                    rows.Add(Row(null, L.T("Cowork tasks"), L.T("Cowork tasks running in the last 30 minutes"), Toggle(S.ClaudeShowCowork, v => { S.ClaudeShowCowork = v; Changed(); })));
+                    rows.Add(Row(null, L.T("Claude app open"), L.T("Shows only whether the app is open"), Toggle(S.ClaudeShowChat, v => { S.ClaudeShowChat = v; Changed(); })));
                     break;
                 case "openai":
-                    rows.Add(Row(null, L.T("ChatGPT app open"), L.T("ChatGPT does not expose chat limits: you only see whether the app is open."), Toggle(S.OpenAIShowChat, v => { S.OpenAIShowChat = v; Changed(); })));
+                    rows.Add(Row(null, L.T("ChatGPT app open"), L.T("ChatGPT does not expose chat limits: you only see whether the app is open"), Toggle(S.OpenAIShowChat, v => { S.OpenAIShowChat = v; Changed(); })));
                     break;
                 case "copilot":
                     bool gh = GitHubAuth.HasToken;
                     rows.Add(Row(null, L.T("GitHub account"),
-                        gh ? L.T("Connected. The token is encrypted with Windows data protection and stays on this PC.")
-                           : L.T("Connect your account to read your Copilot quotas."),
+                        gh ? L.T("Connected")
+                           : L.T("Connect your account to read your Copilot quotas"),
                         gh ? Button(L.T("Disconnect"), () => { C.SignOutGitHub(); Build(); }, false) : Button(L.T("Connect GitHub…"), () => C.LoginGitHub(), true)));
                     break;
                 case "antigravity":
                     rows.Add(Row(null, L.T("Antigravity CLI sign-in"),
-                        L.T("AI Meter uses the sign-in of Antigravity CLI and lets the CLI renew it: the token stays where the CLI keeps it."),
+                        L.T("Uses the Antigravity CLI sign-in, which the CLI renews"),
                         Button(L.T("Sign in…"), () => C.LoginAntigravity(), false)));
                     break;
                 case "grok":
                     rows.Add(Row(null, L.T("Grok CLI sign-in"),
-                        L.T("AI Meter uses the sign-in of the Grok CLI and lets the CLI renew it: the token stays where the CLI keeps it. When the card asks for it, sign in again in the Grok CLI."), null));
+                        L.T("Uses the Grok CLI sign-in, which the CLI renews. When the card asks for it, sign in again in the Grok CLI."), null));
                     break;
                 case "local":
-                    rows.Add(Row(null, L.T("Coding agent sessions"), L.T("OpenCode, Pi and other terminal agents: open sessions and the model each one uses, read from their local files."),
+                    rows.Add(Row(null, L.T("Coding agent sessions"), L.T("OpenCode, Pi and other terminal agents: open sessions and the model each one uses, read from their local files"),
                         Toggle(S.LocalAgents, v => { S.LocalAgents = v; Changed(); })));
                     break;
                 default:
@@ -233,7 +233,7 @@ namespace AIMeter
             if (def2 == null || !def2.CatalogueOnly)
             {
                 rows.Add(Row(null, L.T("Show in the taskbar"),
-                    L.T("Turn it off to keep this service out of the pill and the overlay. It stays in the panel, the desktop widget and the pill's tooltip."),
+                    L.T("When off, the service stays in the panel, the desktop widget and the pill's tooltip"),
                     Toggle(!S.HiddenFromPill(id), shown => ShowInPill(id, shown))));
             }
             if (id != "local") AddLimitRow(rows, id);
@@ -253,9 +253,9 @@ namespace AIMeter
         {
             if (d == null || !d.UsesKey) return;
             var found = ApiKeys.Has(d.Id) ? null : KeyFinder.Find(d);
-            string text = ApiKeys.Has(d.Id) ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.")
-                        : found != null ? L.F("Using the key found in {0}. AI Meter reads it where it is and sends it only to {1}.", found.Source, d.Name)
-                        : L.T("Add an API key to read your usage.");
+            string text = ApiKeys.Has(d.Id) ? L.T("Saved")
+                        : found != null ? L.F("Using the key found in {0}", found.Source)
+                        : L.T("Add an API key to read your usage");
             rows.Add(Row(null, L.T("API key"), text,
                 ApiKeys.Has(d.Id) ? Button(L.T("Remove"), () => { C.RemoveApiKey(d); Build(); }, false)
                                   : Button(found != null ? L.T("Use another key…") : L.T("Add key…"), () => C.EnterApiKey(d), found == null)));
@@ -278,7 +278,7 @@ namespace AIMeter
                     lock (DefinedProvider.NeedsExtraKey) needed = DefinedProvider.NeedsExtraKey.Contains(d.Id + "." + slot);
                     if (!saved && !needed) continue;
                     rows.Add(Row(null, L.T(Json.Str(spec, "label") ?? slot),
-                        saved ? L.T("Saved. It is encrypted with Windows data protection and stays on this PC.") : L.T(Json.Str(spec, "description") ?? ""),
+                        saved ? L.T("Saved") : L.T(Json.Str(spec, "description") ?? ""),
                         saved ? Button(L.T("Remove"), () => { ApiKeys.Remove(d.Id + "." + slot); C.RefreshNow(); Build(); }, false)
                               : Button(L.T("Add key…"), () => C.EnterApiKey(d, slot), true)));
                 }
@@ -320,7 +320,7 @@ namespace AIMeter
                 Tuple.Create("day", L.T("per day")), Tuple.Create("week", L.T("per week")), Tuple.Create("month", L.T("per month")),
             }, period, v => { chosen = v; save(); });
             return Row(null, L.T("Spending budget"),
-                L.T("An amount per day, week or month: the pill and the panel show how much of it is used, with a notification at 80% and 95%. Leave it empty for no budget.") + " "
+                L.T("An amount per day, week or month, with a notification at 80% and 95%. Leave empty for no budget.") + " "
                 + L.T("Estimated spending is shown without remaining credit, forecasts or threshold alerts."),
                 Pair(frame, per));
         }
@@ -368,7 +368,7 @@ namespace AIMeter
             for (int d = 1; d <= 31; d++) days.Add(Tuple.Create(d.ToString(CultureInfo.InvariantCulture), L.F("renews on day {0}", d)));
             var renewal = Combo(days.ToArray(), day, v => { day = v; save(); });
             return Row(null, L.T("Monthly API credits"),
-                L.T("The amount in US dollars and the day of the month it renews, as shown on the Billing page of the Console. Anthropic reports costs rather than the remaining credit, so AI Meter compares this cycle's API costs with the amount."),
+                L.T("The amount in US dollars and the day of the month it renews, as shown on the Billing page of the Console"),
                 Pair(frame, renewal));
         }
 
@@ -404,7 +404,7 @@ namespace AIMeter
             };
             options.AddRange(windows.Select(w => Tuple.Create(w.Key, Ui.LabelOf(w))));
             if (!string.IsNullOrEmpty(cur) && !options.Any(o => o.Item1 == cur)) options.Add(Tuple.Create(cur, L.T("Not available right now")));
-            rows.Add(Row(null, L.T("Limit in the taskbar"), L.T("Which limit the pill, its tooltip and the overlay show for this service."),
+            rows.Add(Row(null, L.T("Limit in the taskbar"), L.T("Which limit the pill, its tooltip and the overlay show for this service"),
                 Combo(options.ToArray(), cur ?? "", v => { if (v == "") S.PillLimits.Remove(id); else S.PillLimits[id] = v; Changed(); })));
         }
 

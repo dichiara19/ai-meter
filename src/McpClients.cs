@@ -67,8 +67,8 @@ namespace AIMeter
             return list;
         }
 
-        internal const string ClaudeDesktopCreateFirst = "In Claude Desktop, open Settings → Developer → Edit Config.";
-        internal const string VsCodeCreateFirst = "In Visual Studio Code, run MCP: Open User Configuration from the Command Palette and save the file.";
+        internal const string ClaudeDesktopCreateFirst = "In Claude Desktop, open Settings → Developer → Edit Config";
+        internal const string VsCodeCreateFirst = "In Visual Studio Code, run MCP: Open User Configuration from the Command Palette and save the file";
         internal const string CreateFirstMessage = "{0} has no configuration file yet, and AI Meter from the Microsoft Store can change only files that already exist. {1} Then connect it again.";
 
         /// <summary>Clients configured in the user's home folder, the same on Windows and in Linux.</summary>
@@ -237,8 +237,8 @@ namespace AIMeter
         // table header starts or ends AI Meter's section; a file it cannot follow is refused, and every edited text is
         // scanned again before it is written.
 
-        internal const string UnreadableToml = "Codex's config.toml contains text that AI Meter cannot follow safely, such as an unclosed string or array, or AI Meter's entry written in another form. Edit the file by hand with the configuration below.";
-        internal const string UncheckedToml = "AI Meter's edit of Codex's config.toml did not pass its own check, so the file was left as it was. Edit it by hand with the configuration below.";
+        internal const string UnreadableToml = "Couldn't edit Codex's config.toml safely. Edit the file by hand with the configuration below.";
+        internal const string UncheckedToml = "Codex's config.toml was left unchanged. Edit it by hand with the configuration below.";
 
         // [mcp_servers.ai-meter] and its sub-tables, such as [mcp_servers.ai-meter.env]. Only a fallback for showing the
         // state of a file ScanToml cannot follow: unlike the scanner, it is fooled by such a line inside a string.

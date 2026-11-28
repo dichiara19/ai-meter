@@ -290,7 +290,7 @@ namespace AIMeter
             var shown = open ? fm.Take(FreeModelsShown).ToList() : fm.Where(m => m.Expires.HasValue).Take(3).ToList();
             if (open)
             {
-                var hint = Text(L.T("Click a model to copy its ID for Pi, OpenCode or your scripts."), 11, "Text3");
+                var hint = Text(L.T("Click a model to copy its ID for Pi, OpenCode or your scripts"), 11, "Text3");
                 hint.TextWrapping = TextWrapping.Wrap;
                 hint.TextTrimming = TextTrimming.None;
                 hint.Margin = new Thickness(indent, 0, 0, 2);
@@ -498,7 +498,7 @@ namespace AIMeter
             }
             if (!p.Running && p.Sessions.Count == 0)
             {
-                var none = Text(L.T("Ollama, LM Studio, llama.cpp and other local servers appear here while they run, on Windows or in WSL."), 12, "Text3");
+                var none = Text(L.T("Ollama, LM Studio, llama.cpp and other local servers appear here while they run, on Windows or in WSL"), 12, "Text3");
                 none.TextWrapping = TextWrapping.Wrap;
                 none.Margin = new Thickness(0, 6, 0, 0);
                 stack.Children.Add(none);

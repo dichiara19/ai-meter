@@ -37,7 +37,7 @@ namespace AIMeter
             var h = Ui.Text(Title, 20, "Text", FontWeights.SemiBold);
             h.FontFamily = Theme.DisplayFont;
             root.Children.Add(h);
-            var info = Ui.Text(L.T("AI Meter reads the sessions and limits that your AI apps already save on this PC. Nothing is sent to AI Meter's authors. Choose what it may do; you can change each choice later in Settings."), 13, "Text2");
+            var info = Ui.Text(L.T("AI Meter reads the sessions and limits that AI apps save on this PC. Each choice can be changed later in Settings."), 13, "Text2");
             info.TextWrapping = TextWrapping.Wrap;
             info.TextTrimming = TextTrimming.None;
             info.Margin = new Thickness(0, 8, 0, 16);
@@ -54,15 +54,15 @@ namespace AIMeter
             var rows = new System.Collections.Generic.List<FrameworkElement>
             {
                 SettingsWindow.Row(Ui.Glyph("", 20, "Text"), L.T("Show in the taskbar"),
-                    L.T("Places a small indicator inside the Windows taskbar. If you turn this off, AI Meter shows a widget on the desktop instead."), taskbar),
+                    L.T("When off, AI Meter shows a widget on the desktop instead"), taskbar),
                 SettingsWindow.Row(Ui.Glyph("", 20, "Text"), L.T("Start with Windows"),
-                    L.T("AI Meter starts at sign-in, silently, once the desktop is ready."), startup),
+                    L.T("AI Meter starts at sign-in, once the desktop is ready"), startup),
             };
             if (settings.ClaudeEnabled)
                 rows.Add(SettingsWindow.Row(Ui.Logo("claude", 20), L.T("Real-time limits"),
-                    L.T("Reads your account usage with your Claude Code login (WSL or Windows). The token stays on this PC and is refreshed by the CLI."), claude));
+                    L.T("Reads the account usage with the Claude Code sign-in, on Windows or in WSL"), claude));
             rows.Add(SettingsWindow.Row(Ui.Glyph("", 20, "Text"), L.T("Use API keys already on this PC"),
-                L.T("OpenRouter, DeepSeek, Kimi, Vercel and other keys saved by OpenCode, Pi or Crush, or exported in your shell profile, on Windows and in WSL while it is running. Each key is sent only to its own service."), keys));
+                L.T("Keys for OpenRouter, DeepSeek, Kimi, Vercel and others, saved by OpenCode, Pi or Crush or exported in the shell profile, on Windows and in WSL"), keys));
             root.Children.Add(SettingsWindow.Card(rows.ToArray()));
 
             var buttons = new DockPanel { Margin = new Thickness(0, 18, 0, 0), LastChildFill = false };

@@ -53,7 +53,7 @@ namespace AIMeter
             var body = new DockPanel { Margin = new Thickness(32, 0, 32, 0) };
             var heading = new StackPanel();
             var title = Ui.Text(Title, 28, "Text", FontWeights.SemiBold); title.FontFamily = Theme.DisplayFont; title.Margin = new Thickness(0, 8, 0, 4);
-            heading.Children.Add(title); heading.Children.Add(Note("Understand your usage, spot changes and reflect on the value you get."));
+            heading.Children.Add(title); heading.Children.Add(Note("Understand your usage, spot changes and reflect on the value you get"));
             foreach (int days in new[] { 7, 30, 90, 0 }) period.Items.Add(new ComboBoxItem { Content = days == 0 ? L.T("All history") : L.F("Last {0} days", days), Tag = days });
             period.SelectedIndex = 1; period.SetResourceReference(StyleProperty, "Combo"); provider.SetResourceReference(StyleProperty, "Combo");
             provider.Items.Add(new ComboBoxItem { Content = L.T("All services"), Tag = "" }); provider.SelectedIndex = 0;
@@ -61,7 +61,7 @@ namespace AIMeter
             actions.Children.Add(Filter("Period", period)); actions.Children.Add(Filter("Services", provider));
             var refresh = Button("Refresh now", Reload); refresh.VerticalAlignment = VerticalAlignment.Bottom; actions.Children.Add(refresh);
             var export = Button("Export history…", Export); export.VerticalAlignment = VerticalAlignment.Bottom; actions.Children.Add(export);
-            export.ToolTip = L.T("Export all retained readings and feedback, including data outside the current filters.");
+            export.ToolTip = L.T("Export all retained readings and feedback, including data outside the current filters");
             heading.Children.Add(actions); DockPanel.SetDock(heading, Dock.Top); body.Children.Add(heading);
             status.Margin = new Thickness(0, 10, 0, 12); DockPanel.SetDock(status, Dock.Bottom); body.Children.Add(status);
             AddTab("Overview", overview); AddTab("Sessions", sessions); AddTab("Quota cycles", quotas); AddTab("Daily activity", activity);
@@ -187,10 +187,10 @@ namespace AIMeter
             if (report.Events == 0 && report.Observations == 0)
             {
                 overview.Children.Add(report.HasAnyHistory
-                    ? Empty("Nothing recorded for these filters", "Try a different period or service to explore your saved history.", ClearFilters, "Show all history")
+                    ? Empty("Nothing recorded for these filters", "Try a different period or service to explore your saved history", ClearFilters, "Show all history")
                     : Empty("Your history starts here", "Use a connected service. Quota readings and supported session metrics will appear as they become available.", controller.OpenSettings, "Open service settings"));
-                overview.Children.Add(Card("What you will find here", "As your history grows, this page will show activity, models, quota trends and the value you get from your sessions.",
-                    Note("No past usage is invented. Missing data is never treated as zero.")));
+                overview.Children.Add(Card("What you will find here", "As your history grows, this page will show activity, models, quota trends and the value you get from your sessions",
+                    Note("Missing data is shown as unavailable, not as zero")));
                 return;
             }
             var counters = new WrapPanel { Margin = new Thickness(0, 0, -12, 0) };
@@ -202,7 +202,7 @@ namespace AIMeter
             if (report.Days.Count > 0) overview.Children.Add(ActivityCard(false));
             else if (report.Trend.Count > 0) overview.Children.Add(QuotaCard());
             else if (report.Amounts.Count > 0) overview.Children.Add(AmountsCard());
-            else overview.Children.Add(Empty("Session measurements are not available yet", "Quota readings can be available before a supported tool records session metrics.", null, null));
+            else overview.Children.Add(Empty("Session measurements are not available yet", "Quota readings can be available before a supported tool records session metrics", null, null));
 
             if (report.Models.Count > 0) overview.Children.Add(ModelsCard());
             if (report.Trend.Count == 0 || report.Trend.All(row => Text(row[6]).Contains("unidentified-account")))
@@ -325,7 +325,7 @@ namespace AIMeter
 
         private Border FeedbackCard()
         {
-            if (report.Rated == 0) return Empty("No sessions rated yet", "Feedback is optional. Rate whether the useful result was worth the quota or money consumed; ignoring a request leaves the session unrated.",
+            if (report.Rated == 0) return Empty("No sessions rated yet", "Rate whether the useful result was worth the quota or money consumed",
                 report.SessionCount == 0 ? (Action)null : () => { tabs.SelectedIndex = 1; }, "View sessions");
             var distribution = new WrapPanel { Margin = new Thickness(0, 10, 0, 6) };
             foreach (var value in new[] { Tuple.Create("Yes", report.Positive, "Success"), Tuple.Create("Partly", report.Neutral, "Text2"), Tuple.Create("No", report.Negative, "Critical") })
@@ -339,11 +339,11 @@ namespace AIMeter
         private Border CoverageCard()
         {
             return Card("About this history", L.F("Collected since {0} · {1} MB on this PC", report.Started.ToString("g", L.Culture), (report.Bytes / 1048576.0).ToString("0.0", L.Culture)),
-                HistoryVisuals.Details("Collection coverage and data limits", Note("Quota is measured for the account. Logged tokens and computed API costs belong to responses; they do not measure subscription charges."),
+                HistoryVisuals.Details("Collection coverage and data limits", Note("Quota is measured per account. Tokens and computed API costs refer to responses, not to subscription charges."),
                     Note("Collection pauses while Windows is locked or asleep. Unsupported tools and provider-internal activity may have no local token records."),
                     Note(L.F("{0} collection gaps or source limitations recorded", report.Gaps)),
                     report.Coverage.Count == 0 ? (UIElement)new Border() : Table(new[] { "From", "To", "Reason" }, report.Coverage.Select(row => new[] { HistoryStore.Time(row[0]).ToString("g", L.Culture), HistoryStore.Time(row[1]).ToString("g", L.Culture), L.T(Text(row[2])) }))),
-                HistoryVisuals.Details("Manage saved history", Note("Sessions are identified locally without saving prompts or titles. Feedback is optional and can be changed or cleared."), Button("Delete history…", Delete)));
+                HistoryVisuals.Details("Manage saved history", Note("Feedback is optional and can be changed or cleared"), Button("Delete history…", Delete)));
         }
 
         private void RenderSessions()
@@ -404,7 +404,7 @@ namespace AIMeter
                     HistoryVisuals.Details("About these measurements", Note("Account quota is not attributed to this session. Token and cost totals include only observed responses in the selected period."), Note("Unreported counters and costs are excluded from totals. A dash means unavailable."))));
             };
             list.SelectionChanged += (sender, args) => show(); HistoryVisuals.Focusable(list, L.T("Sessions"));
-            var master = Card("Recent sessions", "Select a session to review its measurements and feedback.", list);
+            var master = Card("Recent sessions", "Select a session to review its measurements and feedback", list);
             var layout = new Grid(); layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(310) }); layout.ColumnDefinitions.Add(new ColumnDefinition());
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.Children.Add(master); layout.Children.Add(detail);
@@ -478,7 +478,7 @@ namespace AIMeter
 
         private Border AmountsCard()
         {
-            return Card("Spending and balances", "Amounts retain the unit and data quality reported by their source.",
+            return Card("Spending and balances", "Amounts retain the unit and data quality reported by their source",
                 Table(new[] { "Services", "Account", "Limit", "Amount", "Unit", "Quality" }, report.Amounts.Select(row => new[] {
                     HistoryVisuals.ProviderName(Text(row[0])), AccountLabel(row[9], Text(row[10]).Contains("unidentified-account")), MetricLabel(Text(row[1])), Amount(row[3] ?? row[5]), Text(row[4] ?? row[7]), L.T(Text(row[8])) })));
         }
@@ -499,7 +499,7 @@ namespace AIMeter
             };
             selector.SelectionChanged += (sender, args) => draw(); selector.SelectedIndex = Math.Min(selectedActivity, metrics.Length - 1);
             return Card("Activity over time", "Daily measurements from supported tools. Only recorded days are shown.", selector, plot,
-                details ? HistoryVisuals.Details("Show daily measurements", DaysTable(), Note("Daily totals use your local time zone and include only logged responses in the selected period.")) : (UIElement)Button("View daily activity", () => { tabs.SelectedIndex = 3; }));
+                details ? HistoryVisuals.Details("Show daily measurements", DaysTable(), Note("Daily totals use your local time zone and include only logged responses in the selected period")) : (UIElement)Button("View daily activity", () => { tabs.SelectedIndex = 3; }));
         }
         private void RenderActivity()
         {

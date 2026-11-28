@@ -308,7 +308,7 @@ namespace AIMeter
                 if (release.ArchiveKind != Release.ArchiveKind) throw new ArgumentException("A " + release.ArchiveKind + " archive cannot be installed " + (InsideWsl ? "inside WSL." : "on Windows."));
                 // AI Meter never starts WSL, nor touches the file share of a distribution that is not running, which
                 // would start it.
-                if (!IsReachable) throw new InstallException(L.T("WSL is not running. Start it to install Pi there; AI Meter does not start it."));
+                if (!IsReachable) throw new InstallException(L.T("WSL is not running. Start it to install Pi there."));
 
                 // Names no earlier attempt used, so nothing left behind or put there by another program is ever unpacked
                 // or promoted: the archive file is created new and the staging folder must not exist yet. The archive is
@@ -339,7 +339,7 @@ namespace AIMeter
                         if (InsideWsl) UnpackInWsl(file, unpacked, cancelled);
                         else Unpack(file, unpacked, cancelled);
                     }
-                    if (!File.Exists(Path.Combine(unpacked, release.ProgramName))) throw new InstallException(L.T("The downloaded archive does not contain Pi's program. Nothing was installed."));
+                    if (!File.Exists(Path.Combine(unpacked, release.ProgramName))) throw new InstallException(L.T("The downloaded archive does not contain Pi's program"));
 
                     // The complete folder takes its place in one step, so a copy is never seen half unpacked. Inside WSL
                     // the step is a rename through the file share, within one folder.
@@ -357,7 +357,7 @@ namespace AIMeter
                 catch (WebException ex) { throw new InstallException(L.T("The download from GitHub failed. Check the connection and try again."), ex); }
                 catch (IOException ex) { throw new InstallException(ex.Message, ex); }
                 catch (UnauthorizedAccessException ex) { throw new InstallException(ex.Message, ex); }
-                catch (InvalidDataException ex) { throw new InstallException(L.T("The downloaded archive could not be read. Nothing was installed."), ex); }
+                catch (InvalidDataException ex) { throw new InstallException(L.T("Couldn't read the downloaded archive"), ex); }
                 finally
                 {
                     TryDeleteFile(archive);
@@ -375,7 +375,7 @@ namespace AIMeter
                 Directory.CreateDirectory(ConfigFolder);
                 string linux = AgentPath(ConfigFolder);
                 if (linux == null || RunWsl(new[] { "-d", Distro, "-e", "chmod", "700", linux }, null) != 0)
-                    throw new InstallException(L.T("Pi's settings folder inside WSL could not be made private. Nothing was installed."));
+                    throw new InstallException(L.T("Couldn't make Pi's settings folder inside WSL private"));
             }
 
             /// <summary>
@@ -393,7 +393,7 @@ namespace AIMeter
                 if (cancelled != null && cancelled()) throw new OperationCanceledException();
                 archive.Position = 0;
                 if (RunWsl(new[] { "-d", Distro, "-e", "tar", "-xz", "-C", target, "--strip-components=1", "--no-same-owner" }, archive) != 0)
-                    throw new InstallException(L.T("Pi could not be unpacked inside WSL. Nothing was installed."));
+                    throw new InstallException(L.T("Couldn't unpack Pi inside WSL"));
             }
 
             /// <summary>
@@ -409,7 +409,7 @@ namespace AIMeter
             /// </summary>
             public void Remove(Settings settings)
             {
-                if (!IsReachable) throw new InstallException(L.T("WSL is not running. Start it to remove Pi from there; AI Meter does not start it."));
+                if (!IsReachable) throw new InstallException(L.T("WSL is not running. Start it to remove Pi from there."));
                 try
                 {
                     // Under the lock Sync writes with: a sync already under way ends first, and one that comes after
@@ -436,7 +436,7 @@ namespace AIMeter
                     }
                     // The copy and its keys are gone, but the old choices are still on disk: say so. A later installation
                     // starts with nothing ticked in any case (Controller.InstallManagedPi).
-                    if (!choicesSaved) throw new InstallException(L.T("This choice could not be saved, so it will not last past a restart. Check AI Meter's settings file, then change it again."));
+                    if (!choicesSaved) throw new InstallException(L.T("Couldn't save this choice. Check AI Meter's settings file, then change it again."));
                 }
                 catch (IOException ex) { throw new InstallException(L.T("Pi could not be removed: one of its files is in use. Wait for delegated tasks to end, then try again."), ex); }
                 catch (UnauthorizedAccessException ex) { throw new InstallException(L.T("Pi could not be removed: one of its files is in use. Wait for delegated tasks to end, then try again."), ex); }
@@ -709,7 +709,7 @@ namespace AIMeter
                 {
                     if (cancelled != null && cancelled()) throw new OperationCanceledException();
                     total += read;
-                    if (total > release.ArchiveBytes) throw new InstallException(L.T("The downloaded file is not the expected Pi release. It was deleted and nothing was installed."));
+                    if (total > release.ArchiveBytes) throw new InstallException(L.T("The downloaded file is not the expected Pi release and was deleted"));
                     sha.TransformBlock(block, 0, read, null, 0);
                     file.Write(block, 0, read);
                     if (progress != null) progress(total);
@@ -719,7 +719,7 @@ namespace AIMeter
             }
             file.Flush();
             if (!string.Equals(digest, release.Sha256, StringComparison.OrdinalIgnoreCase))
-                throw new InstallException(L.T("The downloaded file is not the expected Pi release. It was deleted and nothing was installed."));
+                throw new InstallException(L.T("The downloaded file is not the expected Pi release and was deleted"));
         }
 
         /// <summary>
