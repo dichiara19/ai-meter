@@ -1,3 +1,10 @@
+## What changed in 0.13.1
+
+- **Plainer texts, in all six languages.** Descriptions in Settings, on the welcome screen, in the history and in the notifications now say what a setting does in one short line, as the settings of Windows do. What leaves the PC is described in the privacy policy, which **Settings → About** opens with its own *Privacy policy* button.
+- **Touchpad scrolling at the right speed.** With a precision touchpad, Settings and the history scrolled several times too far. They now move with the fingers, as they do with a mouse wheel.
+- **The close button reaches the window edge.** In Settings and in the history, its red highlight stopped a few pixels short of the corner.
+- **History tabs.** A tab's title was highlighted while the pointer was anywhere on its page. It now is only while the pointer is on the title.
+
 ## What changed in 0.13.0
 
 Local models are shown where they really are: in video memory, in system memory, in swap or still on disk, on Windows and inside WSL, for any engine.
