@@ -218,6 +218,7 @@ namespace AIMeter
             // foreground, this asynchronous event can arrive after the tap has opened the panel: that is not outside.
             bool pillPress = hwnd == Native.FindTaskbar() && DateTime.Now - pillPressedAt < PressEffects;
             if (flyout.IsVisible && flyout.TaskbarMode && !pillPress && !Native.IsOwnWindow(hwnd)) flyout.Hide();
+            if (desktop != null) desktop.ForegroundChanged(hwnd);
             CheckFullScreen();
         }
 

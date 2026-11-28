@@ -77,6 +77,7 @@ namespace AIMeter
             LogoTests.Register(Test);
             TouchTests.Register(Test);
             FullScreenTests.Register(Test);
+            DesktopWidgetTests.Register(Test);
             CloudflareTests.Register(Test);
             FreeTierTests.Register(Test);
             HermesTests.Register(Test);
