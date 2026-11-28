@@ -84,6 +84,7 @@ namespace AIMeter
             HardeningTests.Register(Test);
             GrokTests.Register(Test);
             ManagedPiTests.Register(Test);
+            PillTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 
@@ -97,6 +98,7 @@ namespace AIMeter
             s.PillLimits = new Dictionary<string, string>();
             s.NotifyResets = new Dictionary<string, bool>();
             s.HiddenRows = new Dictionary<string, bool>();
+            s.PillHidden = new Dictionary<string, bool>();
             s.Services = new Dictionary<string, bool>();
             s.ExpandedServices = new Dictionary<string, bool>();
             s.NotifyLow = true;

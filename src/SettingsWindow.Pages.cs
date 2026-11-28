@@ -43,6 +43,7 @@ namespace AIMeter
                     Tuple.Create("auto", L.F("Automatic ({0})", rec)), Tuple.Create("left", L.T("Left corner")),
                     Tuple.Create("right", L.T("Next to the notification area")),
                 }, S.TaskbarSide, v => { S.TaskbarSide = v; Changed(); })));
+            Hint(L.T("With many services the pill can reach the app icons. Each service's page under Services has a switch to keep it out of the pill."), L.T("Services"), "services");
             Hint(L.T("Taskbar and overlay are alternatives: turning one on turns the other off."));
             Group(
                 Row(Ui.Glyph("", 20, "Text"), L.T("Compact overlay"), L.T("A tiny pill, always on top. Hover over it to see the details."),

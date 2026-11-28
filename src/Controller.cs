@@ -222,7 +222,7 @@ namespace AIMeter
                 limitKeys = keys;
                 if (settingsWindow != null && settingsWindow.IsVisible) settingsWindow.Build();
             }
-            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed + string.Join(",", Settings.PillLimits.Select(kv => kv.Key + kv.Value)) + string.Join(",", Settings.HiddenRows.Where(kv => kv.Value).Select(kv => kv.Key));
+            string sig = s.Signature() + Settings.ExpandedClaude + Settings.ExpandedOpenAI + Settings.ExpandedCopilot + Settings.ExpandedLocal + string.Join(",", Settings.ExpandedServices.Where(kv => kv.Value).Select(kv => kv.Key)) + Theme.Dark + Settings.OverlayMetric + Settings.OverlayCollapsed + string.Join(",", Settings.PillLimits.Select(kv => kv.Key + kv.Value)) + string.Join(",", Settings.HiddenRows.Where(kv => kv.Value).Select(kv => kv.Key)) + "#" + string.Join(",", Settings.PillHidden.Where(kv => kv.Value).Select(kv => kv.Key));
             UpdateTrayText(s);
             if (sig == lastSignature) return;   // Skip rendering when nothing has changed.
             lastSignature = sig;

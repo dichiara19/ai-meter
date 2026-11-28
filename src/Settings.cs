@@ -110,6 +110,19 @@ namespace AIMeter
         /// <summary>Per-service pill limit key or "auto"; a missing entry uses Default.</summary>
         public System.Collections.Generic.Dictionary<string, string> PillLimits { get; set; }
 
+        /// <summary>
+        /// Services the user took out of the taskbar pill and the overlay, by service id ("local" for local models).
+        /// They are still read and stay in the panel, the desktop widget, tooltips and notifications. A missing
+        /// entry means shown, so settings saved before this choice existed keep every service in the pill.
+        /// </summary>
+        public System.Collections.Generic.Dictionary<string, bool> PillHidden { get; set; }
+
+        internal bool HiddenFromPill(string providerId)
+        {
+            bool hidden;
+            return PillHidden != null && PillHidden.TryGetValue(providerId, out hidden) && hidden;
+        }
+
         /// <summary>Current preferences for UI components that do not receive them directly.</summary>
         internal static Settings Current;
 
@@ -152,6 +165,7 @@ namespace AIMeter
             ManagedPiServices = new System.Collections.Generic.List<string>();
             ManagedPiServicesAwaitingKey = new System.Collections.Generic.List<string>();
             HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
+            PillHidden = new System.Collections.Generic.Dictionary<string, bool>();
             TipsUnused = true; TipsShort = false; TipsWait = true; FindKeys = true;
             HistoryEnabled = true;
             UpdateCheck = true;
@@ -279,6 +293,7 @@ namespace AIMeter
             if (s.ManagedPiServicesAwaitingKey == null) s.ManagedPiServicesAwaitingKey = new System.Collections.Generic.List<string>();
             if (s.Budgets == null) s.Budgets = new System.Collections.Generic.Dictionary<string, string>();
             if (s.HiddenRows == null) s.HiddenRows = new System.Collections.Generic.Dictionary<string, bool>();
+            if (s.PillHidden == null) s.PillHidden = new System.Collections.Generic.Dictionary<string, bool>();
             return s;
         }
 
