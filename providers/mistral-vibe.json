@@ -2,6 +2,7 @@
   "id": "mistral-vibe",
   "name": "Mistral Vibe",
   "monogram": "M",
+  "logo": { "image": "mistral-vibe.png" },
   "description": "Monthly Vibe Code usage of your Mistral account, as the Vibe CLI shows it.",
   "color": { "light": "#FA500F", "dark": "#FF8205" },
   "detect": { "commands": ["vibe"], "paths": ["~/.vibe"], "env": ["MISTRAL_API_KEY"] },

@@ -12,12 +12,26 @@ using System.Windows.Threading;
 
 namespace AIMeter
 {
-    /// <summary>Desktop widget: always stays below other windows, as part of the wallpaper.</summary>
+    /// <summary>
+    /// Desktop widget: always stays below other windows, as part of the wallpaper. It keeps itself just above the
+    /// window that holds the desktop icons, not at the bottom of the z-order: "Show desktop" (Win + D) raises that
+    /// window above every other and sends nothing to the windows it covers, so a widget at the bottom would vanish
+    /// with them. Every change of its own position goes to that place (StayOnDesktop), and FollowDesktop moves it
+    /// when the desktop itself is raised or lowered. That nearly always changes the foreground window, which the
+    /// controller reports (ForegroundChanged). It does not when the desktop is in the foreground already, as after
+    /// a click on it: Win + D then raises or lowers it with no event that was found to tell (EVENT_OBJECT_REORDER
+    /// on the desktop root did not come when File Explorer raised the desktop on Windows build 26300). Only then,
+    /// while the desktop is the foreground window, the widget looks every 250 ms; see ForegroundChanged for the
+    /// cost. Nothing runs with an app in the foreground, or with the PC locked, when no window of this desktop is.
+    /// The widget is a normal window and must stay one: an always-on-top window would show over full-screen apps.
+    /// </summary>
     internal sealed class DesktopWidget : Window
     {
         private readonly Controller C;
         private readonly StackPanel body = new StackPanel();
         private readonly TextBlock status;
+        private readonly DispatcherTimer desktopWatch = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
+        private IntPtr handle;
 
         public DesktopWidget(Controller c)
         {
@@ -54,20 +68,72 @@ namespace AIMeter
             Content = root;
             Ui.ToolTipsOnHold(this);
 
-            SourceInitialized += (o, e) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle).AddHook(StayAtBottom);
-            Loaded += (o, e) => Place();
+            SourceInitialized += (o, e) =>
+            {
+                handle = new WindowInteropHelper(this).Handle;
+                HwndSource.FromHwnd(handle).AddHook(StayOnDesktop);
+            };
+            Loaded += (o, e) => { Place(); ForegroundChanged(Native.GetForegroundWindow()); };
+            desktopWatch.Tick += (o, e) => ForegroundChanged(Native.GetForegroundWindow());
+            Closed += (o, e) => desktopWatch.Stop();
         }
 
-        private IntPtr StayAtBottom(IntPtr hwnd, int msg, IntPtr w, IntPtr l, ref bool handled)
+        private IntPtr StayOnDesktop(IntPtr hwnd, int msg, IntPtr w, IntPtr l, ref bool handled)
         {
             if (msg == Native.WM_WINDOWPOSCHANGING)
             {
                 var pos = (Native.WINDOWPOS)Marshal.PtrToStructure(l, typeof(Native.WINDOWPOS));
-                pos.hwndInsertAfter = Native.HWND_BOTTOM;
-                pos.flags &= ~Native.SWP_NOZORDER;
+                KeepOnDesktop(hwnd, Native.FindDesktopIconsHost(), ref pos);
                 Marshal.StructureToPtr(pos, l, false);
             }
             return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// Rewrites a change of the widget's position so that it lands just above the window holding the desktop
+        /// icons, whatever was asked (a click would bring it to the top), or stays where it is when already there.
+        /// Without that window (File Explorer is not running) the bottom of the z-order is the nearest thing.
+        /// A widget that Windows made always on top (see Native.SlotJustAbove) is made a normal window again
+        /// instead, and goes to its place at the next change.
+        /// </summary>
+        internal static void KeepOnDesktop(IntPtr widget, IntPtr iconsHost, ref Native.WINDOWPOS pos)
+        {
+            IntPtr insertAfter = Native.HWND_BOTTOM;
+            if (Native.IsTopmost(widget)) insertAfter = Native.HWND_NOTOPMOST;
+            else if (iconsHost != IntPtr.Zero && !Native.SlotJustAbove(widget, iconsHost, out insertAfter)) { pos.flags |= Native.SWP_NOZORDER; return; }
+            pos.hwndInsertAfter = insertAfter;
+            pos.flags &= ~Native.SWP_NOZORDER;
+        }
+
+        /// <summary>
+        /// Called with the new foreground window, and at every look while the desktop is that window: puts the
+        /// widget back in its place and keeps looking only for as long as the desktop stays in the foreground.
+        /// A look is a few calls to user32: under a microsecond measured on a desktop with some 500 windows, so the
+        /// cost is that of four timer wake-ups a second, and only while the desktop is in the foreground.
+        /// </summary>
+        public void ForegroundChanged(IntPtr foreground)
+        {
+            if (handle == IntPtr.Zero) return;
+            IntPtr iconsHost = Native.FindDesktopIconsHost();
+            FollowDesktop(iconsHost);
+            desktopWatch.IsEnabled = IsVisible && foreground != IntPtr.Zero && (foreground == iconsHost || foreground == Native.GetShellWindow());
+        }
+
+        /// <summary>
+        /// Puts the widget back just above the desktop when the desktop was raised over it or lowered away from it.
+        /// It looks again after each move: one made while the z-order was changing can leave the widget always on
+        /// top, and it is then made a normal window and placed once more.
+        /// </summary>
+        private void FollowDesktop(IntPtr iconsHost)
+        {
+            if (iconsHost == IntPtr.Zero && !Native.IsTopmost(handle)) return;   // Without the desktop it is at the bottom already.
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                var pos = new Native.WINDOWPOS { flags = Native.SWP_NOZORDER };
+                KeepOnDesktop(handle, iconsHost, ref pos);
+                if ((pos.flags & Native.SWP_NOZORDER) != 0) return;
+                Native.SetWindowPos(handle, pos.hwndInsertAfter, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+            }
         }
 
         public void Place()
@@ -155,7 +221,7 @@ namespace AIMeter
 
         private FrameworkElement Collapsed(Snapshot s)
         {
-            var five = s.Shown.Where(p => p.Models == null).Select(p => Tuple.Create(p, Ui.Primary(p))).ToList();
+            var five = Ui.PillServices(s).Select(p => Tuple.Create(p, Ui.Primary(p))).ToList();
             var icon = Ui.RingIcon(five, 24);
             // A real button: click, keyboard and accessibility tools all expand it again in the same way.
             var b = new Button { Content = icon, Padding = new Thickness(6), Cursor = Cursors.Hand };

@@ -229,8 +229,23 @@ namespace AIMeter
             }
             var def2 = Definitions.Get(id);
             if (def2 != null && Json.Obj(def2.Raw, "spend") != null) rows.Add(BudgetRow(def2));
+            // A catalogue-only service never reaches the pill, so it has nothing to choose here.
+            if (def2 == null || !def2.CatalogueOnly)
+            {
+                rows.Add(Row(null, L.T("Show in the taskbar"),
+                    L.T("Turn it off to keep this service out of the pill and the overlay. It stays in the panel, the desktop widget and the pill's tooltip."),
+                    Toggle(!S.HiddenFromPill(id), shown => ShowInPill(id, shown))));
+            }
             if (id != "local") AddLimitRow(rows, id);
             return rows;
+        }
+
+        /// <summary>Keeps a service in the taskbar pill and the overlay, or takes it out; a service with no entry is shown.</summary>
+        private void ShowInPill(string id, bool shown)
+        {
+            if (shown) S.PillHidden.Remove(id);
+            else S.PillHidden[id] = true;
+            Changed();
         }
 
         /// <summary>API-key rows for a key-based service: the main key, then extra keys that are saved or were requested.</summary>

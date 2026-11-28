@@ -302,6 +302,7 @@ namespace AIMeter
         public const int GWL_STYLE = -16;
         public const int WS_SYSMENU = 0x80000, WS_MINIMIZEBOX = 0x20000, WS_MAXIMIZEBOX = 0x10000;
         public const int WS_EX_TOOLWINDOW = 0x80;
+        public const int WS_EX_TOPMOST = 0x8;
         public const int WS_EX_APPWINDOW = 0x40000;
         public const int WS_EX_NOACTIVATE = 0x08000000;
         public static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
@@ -391,6 +392,52 @@ namespace AIMeter
             IntPtr above = GetWindow(other, GW_HWNDPREV);
             SetWindowPos(window, above != IntPtr.Zero ? above : HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             return true;
+        }
+
+        [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr h);
+
+        /// <summary>
+        /// The top-level window that holds the desktop icons: Progman, or the WorkerW that Windows moves them into
+        /// (with a slideshow wallpaper, for one). "Show desktop" (Win + D) raises this window above every other, so
+        /// what belongs to the desktop stays just above it rather than at the bottom of the z-order. Falls back to
+        /// Progman without its icons; zero when File Explorer is not running.
+        /// </summary>
+        public static IntPtr FindDesktopIconsHost()
+        {
+            IntPtr shell = GetShellWindow();
+            if (shell != IntPtr.Zero && FindWindowExW(shell, IntPtr.Zero, "SHELLDLL_DefView", null) != IntPtr.Zero) return shell;
+            for (IntPtr w = FindWindowExW(IntPtr.Zero, IntPtr.Zero, "WorkerW", null); w != IntPtr.Zero; w = FindWindowExW(IntPtr.Zero, w, "WorkerW", null))
+                if (FindWindowExW(w, IntPtr.Zero, "SHELLDLL_DefView", null) != IntPtr.Zero) return w;
+            return shell;
+        }
+
+        /// <summary>Whether Windows keeps the window above every normal one ("always on top").</summary>
+        public static bool IsTopmost(IntPtr hwnd) { return (GetWindowLong(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0; }
+
+        /// <summary>
+        /// Where a normal window goes in the z-order to sit just above another normal one, wherever that one is now:
+        /// gives the window to insert it after and returns true, or returns false when it is already there. Hidden
+        /// windows may stand between the two, as nothing of them is seen: the hidden owner that WPF gives the widget
+        /// and Windows keeps beneath it, or a thread's input method window, which Windows moves about on its own.
+        /// The answer is the nearest visible window above the other, unless that one is always on top: the other is
+        /// then the highest normal window, and the answer is the lowest always-on-top window, hidden or not. That is
+        /// the only safe one: a normal window inserted after an always-on-top window stays normal only when no
+        /// other always-on-top window is beneath it, and becomes always on top itself otherwise, over full-screen
+        /// apps too. HWND_TOP would not do: from a program that is not in the foreground it stops beneath the
+        /// foreground window. Should the z-order change between this answer and the move, the window can still be
+        /// promoted, so the caller looks again after moving it.
+        /// </summary>
+        internal static bool SlotJustAbove(IntPtr window, IntPtr other, out IntPtr insertAfter)
+        {
+            IntPtr above = GetWindow(other, GW_HWNDPREV), lowestOnTop = IntPtr.Zero;
+            while (above != IntPtr.Zero && above != window && !IsWindowVisible(above))
+            {
+                if (lowestOnTop == IntPtr.Zero && IsTopmost(above)) lowestOnTop = above;
+                above = GetWindow(above, GW_HWNDPREV);
+            }
+            bool onTop = above == IntPtr.Zero || IsTopmost(above);
+            insertAfter = onTop && lowestOnTop != IntPtr.Zero ? lowestOnTop : above;
+            return above != window;
         }
 
         // Application desktop toolbars ("appbars"): a registered window is told when a full-screen app opens or closes.

@@ -77,12 +77,14 @@ namespace AIMeter
             LogoTests.Register(Test);
             TouchTests.Register(Test);
             FullScreenTests.Register(Test);
+            DesktopWidgetTests.Register(Test);
             CloudflareTests.Register(Test);
             FreeTierTests.Register(Test);
             HermesTests.Register(Test);
             HardeningTests.Register(Test);
             GrokTests.Register(Test);
             ManagedPiTests.Register(Test);
+            PillTests.Register(Test);
             Console.WriteLine("PASS: " + passed + " regression tests; isolated files and registry keys, loopback HTTP only.");
         }
 
@@ -96,6 +98,7 @@ namespace AIMeter
             s.PillLimits = new Dictionary<string, string>();
             s.NotifyResets = new Dictionary<string, bool>();
             s.HiddenRows = new Dictionary<string, bool>();
+            s.PillHidden = new Dictionary<string, bool>();
             s.Services = new Dictionary<string, bool>();
             s.ExpandedServices = new Dictionary<string, bool>();
             s.NotifyLow = true;
@@ -366,7 +369,7 @@ namespace AIMeter
                     }
                     catch (SocketException) { }
                     catch (IOException) { }
-                    catch (ObjectDisposedException) { }
+                    catch (InvalidOperationException) { }   // Stopped between two requests ("not listening"), or disposed.
                 });
                 thread.IsBackground = true;
                 thread.Start();
