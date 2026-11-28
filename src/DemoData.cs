@@ -59,14 +59,29 @@ namespace AIMeter
             openrouter.Sessions.Add(new Session { Kind = "Pi", Title = "Translate the settings strings", Status = "busy", Model = "deepseek/deepseek-v4", Updated = now.AddSeconds(-30) });
             s.Providers.Add(openrouter);
 
-            var local = new ProviderState { Id = "local", Name = L.T("Local models"), Running = true, GpuTotal = 16L << 30, GpuUsed = (long)(11.4 * (1 << 30)), Models = new List<LocalModel>() };
+            // A mixture-of-experts model served in WSL, partly on the card, partly in system memory and partly still on
+            // disk, beside an image server on Windows: every part of the local models card has something to show.
+            long gb = 1L << 30;
+            var local = new ProviderState
+            {
+                Id = "local", Name = L.T("Local models"), Running = true, Models = new List<LocalModel>(),
+                GpuTotal = 16 * gb, GpuUsed = (long)(11.4 * gb), RamTotal = 64 * gb, RamUsed = (long)(27.4 * gb),
+                WslTotal = 32 * gb, WslUsed = (long)(10.2 * gb), WslHeld = (long)(10.6 * gb), WslTouched = (long)(10.6 * gb),
+            };
             var qwen = new LocalModel
             {
-                Name = "qwen3-coder:30b", Server = "Ollama", Where = "Windows", Detail = "30.5B · Q4_K_M",
-                Vram = (long)(10.9 * (1 << 30)), Ram = (long)(7.7 * (1 << 30)), Context = 32768, ContextUsed = 21400, Busy = 1, Slots = 1,
+                Name = "qwen3-coder-30b-a3b", Server = "llama.cpp", Where = "WSL",
+                Vram = (long)(10.9 * gb), VramOrigin = MemoryOrigin.Measured, Ram = (long)(6.1 * gb), RamMapped = (long)(5.2 * gb), RamOrigin = MemoryOrigin.Measured,
+                FileSize = (long)(18.6 * gb), Context = 32768, ContextUsed = 21400, Busy = 1, Slots = 1,
+                Segments = new ModelSegments { TokensPerSecond = 41.5, Experts = 128, ExpertsUsed = 8, KvCapacity = 32768, KvBytes = 3 * gb },
             };
-            qwen.Sessions.Add(new Session { Kind = "OpenCode", Title = "Add WSL port probe", Status = "busy", Model = "qwen3-coder:30b", Updated = now.AddSeconds(-10), Note = L.F("{0} tokens in context", "21K") });
-            local.Models.Add(qwen);
+            local.Models.Add(new LocalModel
+            {
+                Name = "ComfyUI", Server = "ComfyUI", Where = "Windows", Detail = "0.42.1",
+                Vram = gb / 2, VramOrigin = MemoryOrigin.Reported, Ram = (long)(2.3 * gb), RamOrigin = MemoryOrigin.Measured,
+            });
+            qwen.Sessions.Add(new Session { Kind = "OpenCode", Title = "Add WSL port probe", Status = "busy", Model = "qwen3-coder-30b-a3b", Updated = now.AddSeconds(-10), Note = L.F("{0} tokens in context", "21K") });
+            local.Models.Insert(0, qwen);
             local.Sessions.Add(new Session { Kind = "Pi", Title = "Write release notes", Status = "idle", Model = "claude-sonnet-5-5", Updated = now.AddMinutes(-6), Note = L.F("{0} tokens in context", "12K") });
             s.Providers.Add(local);
             return s;
