@@ -20,6 +20,12 @@ Local models are shown where they really are: in video memory, in system memory,
 - **xAI**: the prepaid credit balance of an xAI API team, with a Management API key and the team ID.
 - **Mistral Vibe**: the monthly Vibe Code allowance of a Mistral account, as the Vibe CLI shows it, with its reset date and, when one is set, the monthly API budget.
 - All three by [@Murzinio](https://github.com/Murzinio), checked against real accounts.
+- Z.ai and Mistral Vibe are shown with their own logos.
+
+### Taskbar and desktop
+- **Choose which services the taskbar shows.** With many services on, the pill grew too wide. Each service's page in Settings now has a **Show in the taskbar** switch: a service switched off there leaves the pill and stays in the summary, the panel and the widget.
+- **The desktop widget survives Win + D.** *Show desktop* hid the widget together with the windows. It now sits just above the desktop icons: still beneath every app, and visible when the desktop is raised.
+- Both asked for by [@Murzinio](https://github.com/Murzinio).
 
 ### Lighter
 - **A refresh costs less than in 0.12.0.** The processes of the PC, their parents and the memory they hold now come from one system query: on a PC with 618 processes a refresh without network requests went from about 39 ms to about 28 ms. Memory inside WSL is read at most every 30 seconds, 60 on battery.
