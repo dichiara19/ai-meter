@@ -293,6 +293,9 @@ namespace AIMeter
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] public static extern int GetWindowLong(IntPtr h, int idx);
         [DllImport("user32.dll", EntryPoint = "SetWindowLongW")] public static extern int SetWindowLong(IntPtr h, int idx, int val);
+        public const int WM_NCCALCSIZE = 0x0083;
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr DefWindowProc(IntPtr h, int msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern IntPtr GetShellWindow();
@@ -308,7 +311,7 @@ namespace AIMeter
         public static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
         public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
-        public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10;
+        public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20;
         public const int WM_WINDOWPOSCHANGING = 0x46;
 
         [StructLayout(LayoutKind.Sequential)]
